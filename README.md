@@ -87,6 +87,32 @@ export OMNI_KIT_ACCEPT_EULA=yes
 
 硬件门槛（NVIDIA 官方）：Ubuntu 22.04+、NVIDIA GPU + 驱动 ≥ 535（本机 RTX 5090 / 580），详见 [硬件 FAQ](https://docs.isaacsim.omniverse.nvidia.com/latest/installation/requirements.html)。**注意**：Replica mcmc 数据为非商业研究许可——公开仓库前须移除（见 .gitignore 注释）。
 
+### SAM 2.1 独立环境
+
+SAM 2.1 使用独立的 Conda 环境 `sam2`（Python 3.11、PyTorch 2.11.0、CUDA 12.8）；
+现有规划、ROS 2 和 Isaac Sim 功能继续使用原环境。`sam2` 激活时隔离继承的
+`PYTHONPATH` 和用户级 Python 包，退出时恢复原设置。Meta 上游源码位于 `sam21/`，Base+ 与 Large 权重位于
+`sam21/checkpoints/`；该目录整体由 `.gitignore` 排除。
+
+```bash
+# 在项目根目录执行；sam21 目录不存在时拉取
+git clone https://github.com/facebookresearch/sam2.git sam21
+conda env create -f environment.sam2.yml
+conda activate sam2
+
+# 编译 RTX 5090（sm_120）的 CUDA 后处理扩展，并安装图片/视频推理依赖
+bash scripts/install_sam2.sh
+
+# 两种模型的 GPU 图片分割、三帧视频跟踪和 CUDA 扩展检查
+python tools/sam2_smoke.py
+```
+
+权重为 `sam2.1_hiera_base_plus.pt` 和 `sam2.1_hiera_large.pt`，对应配置分别为
+`configs/sam2.1/sam2.1_hiera_b+.yaml` 和 `configs/sam2.1/sam2.1_hiera_l.yaml`。
+安装元数据中的包名/版本是 `SAM-2 1.0`，模型版本由这两份 **2.1** 权重和配置决定。
+重新下载时可从 [Meta 官方权重目录](https://github.com/facebookresearch/sam2#download-checkpoints)
+选择这两个文件；官方 `download_ckpts.sh` 会额外下载 Tiny 和 Small。
+
 ### 60 秒 Demo（离线 MockPlanner）
 
 ```bash

@@ -17,6 +17,9 @@ open-image-full.zip
 #    lives in cinema_traj/core/retime.py) ──
 trajectory-simulator-0.1.0-SNAPSHOT/
 
+# Meta SAM 2.1 upstream checkout, downloaded weights and local build artifacts
+/sam21/
+
 # ── Annotation outputs (regenerate by running the pipeline) ──
 **/obstacle_annotations_*.json
 **/filter_manifest.json
