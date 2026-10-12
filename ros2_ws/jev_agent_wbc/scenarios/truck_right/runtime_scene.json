@@ -1,0 +1,80 @@
+{
+  "name": "truck_right",
+  "initial_state": [
+    0.0,
+    0.0,
+    -0.9,
+    0.9,
+    -0.8,
+    1.5,
+    0.0,
+    -0.7,
+    0.0
+  ],
+  "base_z": 0.002,
+  "subject": {
+    "id": "blue_subject",
+    "position": [
+      1.6725717696561826,
+      -0.07826603714349338,
+      0.9114556639508522
+    ],
+    "orientation_xyzw": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "radius": 0.13,
+    "height": 0.36,
+    "source": "runtime_subject_initial_calibration_and_rendering"
+  },
+  "obstacles": [
+    {
+      "id": "crossing_ball",
+      "radius": 0.1,
+      "color": [
+        0.85,
+        0.2,
+        0.1
+      ],
+      "keyframes": [
+        {
+          "t": 0.0,
+          "position": [
+            0.24,
+            -0.75,
+            0.17
+          ],
+          "velocity": [
+            0.0,
+            0.15,
+            0.0
+          ]
+        },
+        {
+          "t": 8.0,
+          "position": [
+            0.24,
+            0.44999999999999996,
+            0.17
+          ],
+          "velocity": [
+            0.0,
+            0.15,
+            0.0
+          ]
+        }
+      ]
+    }
+  ],
+  "description": "truck_right: 8 s single movement with one lateral crossing obstacle",
+  "evaluation": {
+    "progress_correspondence": "original_elapsed_time",
+    "capture_fps": 8,
+    "width": 384,
+    "height": 288,
+    "vfov_deg": 55.0
+  },
+  "pre_roll_motion": "constant_initial_velocity"
+}

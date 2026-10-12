@@ -1,0 +1,80 @@
+{
+  "name": "pedestal_up",
+  "initial_state": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    -0.8,
+    1.5,
+    0.0,
+    -0.7,
+    0.0
+  ],
+  "base_z": 0.002,
+  "subject": {
+    "id": "blue_subject",
+    "position": [
+      1.7096539927656573,
+      -0.0015000000000000013,
+      0.9114556639508522
+    ],
+    "orientation_xyzw": [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ],
+    "radius": 0.13,
+    "height": 0.36,
+    "source": "runtime_subject_initial_calibration_and_rendering"
+  },
+  "obstacles": [
+    {
+      "id": "crossing_ball",
+      "radius": 0.1,
+      "color": [
+        0.85,
+        0.2,
+        0.1
+      ],
+      "keyframes": [
+        {
+          "t": 0.0,
+          "position": [
+            0.25965399276565737,
+            0.75,
+            0.9414556639508522
+          ],
+          "velocity": [
+            0.0,
+            -0.15,
+            0.0
+          ]
+        },
+        {
+          "t": 8.0,
+          "position": [
+            0.25965399276565737,
+            -0.44999999999999996,
+            0.9414556639508522
+          ],
+          "velocity": [
+            0.0,
+            -0.15,
+            0.0
+          ]
+        }
+      ]
+    }
+  ],
+  "description": "pedestal_up: 8 s single movement with one lateral crossing obstacle",
+  "evaluation": {
+    "progress_correspondence": "original_elapsed_time",
+    "capture_fps": 8,
+    "width": 384,
+    "height": 288,
+    "vfov_deg": 55.0
+  },
+  "pre_roll_motion": "constant_initial_velocity"
+}

@@ -1,0 +1,12 @@
+{
+  "cases": [
+    "orbit",
+    "movein",
+    "truck_left",
+    "truck_right",
+    "pedestal_up",
+    "pedestal_down"
+  ],
+  "duration_s": 8.0,
+  "multi_shot_transitions_tested": false
+}

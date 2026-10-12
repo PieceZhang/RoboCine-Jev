@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.colcon_build/
+.colcon_install/
+.colcon_log/
+*.egg-info/
+results/
+/scenarios/video/
