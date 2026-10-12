@@ -13,12 +13,13 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from jev_agent_wbc.actuation import advance_command
 from jev_agent_wbc.dynamic_collision import DynamicCollision
 from jev_agent_wbc.evaluation import save_json
 from jev_agent_wbc.reference import OriginalReference
 from jev_agent_wbc.scenarios import NAMES, RuntimeScene
-from jev_agent_wbc.whole_body_qp import Limits, WholeBodyQP
+from jev_agent_wbc.whole_body_qp import whole_body_kinematics
+from jev_agent_wbc.nominal import nominal_rollout
+from scipy.spatial.transform import Rotation
 
 
 def audit(directory):
@@ -27,35 +28,29 @@ def audit(directory):
         scene = RuntimeScene(directory/name/'runtime_scene.json')
         fixture = scene.document
         reference = OriginalReference(directory/name/'task.json', fixture['subject']['position'])
-        state = np.array(fixture['initial_state'], dtype=float)
-        q_command = state[3:].copy()
-        limits = Limits(command_ramp=True, position_margin=.03)
-        limits.velocity *= .95
-        limits.wheel_speed *= .95
-        limits.acceleration *= .4
-        limits.acceleration[1] = Limits().acceleration[1]*.15
-        limits.wheel_acceleration *= .4
-        controller = WholeBodyQP(limits)
-        rows, failure = [], ''
-        for t in np.arange(0., reference.duration+.001, .02):
+        times, states, failure = nominal_rollout(reference, fixture['initial_state'], fixture['base_z'])
+        distances, errors = [], []
+        for t, state in zip(times, states):
             truth = DynamicCollision(scene.truth_collision(t), t, uncertainty_rate=0.)
-            rows.append(dict(t=float(t), clearance_m=float(truth.clearance(state, fixture['base_z']).min())))
-            if t >= reference.duration:
-                break
-            previous = controller.previous.copy()
-            controller.time_s = t
-            try:
-                command, _ = controller.solve(state, *reference.sample(t), .02,
-                    base_z=fixture['base_z'], commanded_q=q_command)
-            except RuntimeError as error:
-                failure = str(error)
-                break
-            state = advance_command(state, previous, command, .02, True)
-            q_command += .01*(previous[2:]+command[2:])
-        results.append(dict(case=name, min_clearance_m=min(r['clearance_m'] for r in rows),
-            collision_samples=sum(r['clearance_m'] < 0 for r in rows),
-            margin_violation_samples=sum(r['clearance_m'] < .025 for r in rows),
-            elapsed_s=rows[-1]['t'], failure=failure))
+            distances.append(truth.clearance(state, fixture['base_z']).min(axis=0))
+            p, r, _ = whole_body_kinematics(state, fixture['base_z'])
+            target_p, target_r, _ = reference.sample(t)
+            errors.append([np.linalg.norm(p-target_p), Rotation.from_matrix(r@target_r.T).magnitude()])
+        distances, errors = np.array(distances), np.array(errors)
+        arm_clearance = distances[:, 1:7].min(axis=1)
+        results.append(dict(case=name, min_clearance_m=float(distances.min()),
+            collision_samples=int(np.sum(distances.min(axis=1) < 0)),
+            margin_violation_samples=int(np.sum(distances.min(axis=1) < .025)),
+            min_base_clearance_m=float(distances[:, 0].min()),
+            min_arm_clearance_m=float(arm_clearance.min()),
+            arm_collision_samples=int(np.sum(arm_clearance < 0)),
+            arm_collision_time_range_s=times[arm_clearance < 0][[0, -1]].tolist() if np.any(arm_clearance < 0) else [],
+            min_clearance_by_body_m=distances.min(axis=0).tolist(),
+            base_travel_m=float(np.linalg.norm(np.diff(states[:, :2], axis=0), axis=1).sum()),
+            arm_joint_excursion_rad=np.ptp(states[:, 3:], axis=0).tolist(),
+            max_position_error_m=float(errors[:, 0].max()),
+            max_orientation_error_rad=float(errors[:, 1].max()),
+            elapsed_s=float(times[-1]), failure=failure))
     return dict(role='offline ideal-kinematic counterfactual; not physical acceptance',
                 control='nominal WholeBodyQP; no obstacle input to control', results=results)
 

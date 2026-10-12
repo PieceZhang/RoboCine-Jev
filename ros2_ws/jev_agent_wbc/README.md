@@ -4,7 +4,7 @@
 
 这是针对当前 JVS 差速底盘与六轴机械臂的通用运镜原型。通用性指六维相机轨迹和运镜意图，不代表能直接控制任意机器人。当前评估都是单镜头；镜头内部有 establish/develop/resolve 三个阶段，尚未评估多镜头衔接。
 
-本轮结果及未通过项见源码目录下的 [EVALUATION.md](EVALUATION.md)。最终 12 组对照中 11 组执行到预算终点，10 组通过已测安全约束，两种模式各只有 Orbit 满足全部固定几何阶段判据。仍有底盘角加速度超限、一次执行中断和部分视觉退化，整体开发目标尚未完全达到。
+旧版小范围场景的历史结果及未通过项见源码目录下的 [EVALUATION.md](EVALUATION.md)。最终 12 组对照中 11 组执行到预算终点，10 组通过已测安全约束，两种模式各只有 Orbit 满足全部固定几何阶段判据。仍有底盘角加速度超限、一次执行中断和部分视觉退化，整体开发目标尚未完全达到。这些历史结果不适用于下述重新设计的大范围场景。
 
 ## 接口与职责
 
@@ -58,18 +58,40 @@
 
 ## 六组短场景
 
-全部为 8 秒、41 个参考关键帧；establish 0–1.2 s、develop 1.2–6.4 s、resolve 6.4–8 s。主体均为带黄色顶部的蓝色圆柱，具体世界位置由运行时提供。每组只有一个移动球体，半径 0.10 m，横向速度约 0.15 m/s，约第 5 秒穿过对应区域。
+全部为 8 秒、41 个参考关键帧；establish 0–1.2 s、develop 1.2–6.4 s、resolve 6.4–8 s。采用五次 smoothstep 起停，并持续瞄准蓝色圆柱主体。每组一个半径 0.10 m 的移动球体，以约 0.243 m/s 匀速斜向横穿。
 
-| 场景 | 原始运镜 | 简短意图 | 障碍设置 |
-|---|---|---|---|
-| orbit | 绕主体左移约 0.16 rad | 展示主体侧面，保持可辨识的主体构图 | 底盘前侧横穿 |
-| movein | 向主体推进 0.28 m | 增强主体强调感，保留接近趋势 | 较靠前的底盘行进区域横穿 |
-| truck_left | 向左平移 0.24 m | 展示右侧背景视差，保留左移方向 | 左向运镜的底盘前侧横穿 |
-| truck_right | 向右平移 0.24 m | 展示左侧背景视差，保留右移方向 | 对称方向横穿 |
-| pedestal_up | 升高 0.065 m | 揭示主体顶部，保留向上揭示 | 相机/机械臂高度横穿 |
-| pedestal_down | 降低 0.065 m | 揭示主体下部，保留向下揭示 | 略低于初始相机的区域横穿 |
+| 场景 | 原始运镜 | 障碍设置 |
+|---|---|---|
+| orbit | 绕主体左移 0.65 rad（37.2°，弧长约 1.01 m），同步升高 0.06 m | 在运动中的腕部高度横穿 |
+| movein | 向主体推进 0.90 m，同步升高 0.08 m | 在前移后的腕部位置横穿 |
+| truck_left | 向左平移 0.90 m，同步升高 0.06 m | 从左侧迎向运动中的机械臂 |
+| truck_right | 向右平移 0.90 m，同步升高 0.06 m | 从右侧迎向运动中的机械臂 |
+| pedestal_up | 升高 0.15 m，同时向前移动 0.65 m | 在上升、前移后的腕部位置横穿 |
+| pedestal_down | 降低 0.20 m，同时向前移动 0.65 m | 在下降、前移后的腕部位置横穿 |
 
-机器人使用有折叠余量的初态；左右横移分别预置对应底盘朝向。这些属于运行时配置，不属于任务的语义容差。`scenarios.py` 可重新生成目录；已有运行会保存独立任务与环境快照。
+纯竖直升降无法调动平面底盘，因此升降镜头明确采用“前移 + 升降”的复合运镜。初始机械臂折叠姿态为升高留出空间；下降场景从较高姿态起步，横移场景预置底盘朝向 ±1.1 rad，环绕预置 0.9 rad。所有参考起点均与真实 FK 一致。
+
+障碍物路径以第 4.8 秒的参考相机位姿反推 `link6` 连杆中心，在该处形成同一时刻的交叉；这避免仅穿过机器人的初始位置。路径固化为运行时 JSON，不向在线规划器提供未来真值。`scripts/audit_nominal.py` 使用无障碍输入的名义 WBC 回放，独立报告机械臂（link1–link6）、底盘净距、底盘行程、关节活动范围及跟踪误差；机械臂负净距表示场景确实需要避障，不表示避障控制已经通过验收。
+
+`scenarios.py` 可重新生成全部配置；已有运行会保存独立任务与环境快照：
+
+```bash
+PYTHONPATH=ros2_ws/jev_agent_wbc /usr/bin/python3 -c \
+  "from jev_agent_wbc.scenarios import generate; generate('ros2_ws/jev_agent_wbc/scenarios')"
+PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 /usr/bin/python3 \
+  ros2_ws/jev_agent_wbc/scripts/audit_nominal.py --output /tmp/jev_nominal_audit.json
+```
+
+`scenarios/video` 中的六组第三人称视频、合集及总览图对应当前配置。机器人按无避障名义 WBC 运动，青色为原始相机路径，橙色为障碍物路径，可直接观察运动中的机械臂相交过程。视频为 Isaac 渲染的运动学示意，不是 PhysX 避障执行结果。重新录制时先输出至新目录，核对后替换：
+
+```bash
+source /opt/ros/humble/setup.bash
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 OMNI_KIT_ACCEPT_EULA=YES \
+  /usr/bin/python3 ros2_ws/jev_agent_wbc/scripts/jvs_isaac_bootstrap.py \
+  --isaac-python /home/w84384651/miniconda3/envs/env_isaaclab/bin/python \
+  --runner ros2_ws/jev_agent_wbc/scripts/record_scenario_trajectories.py -- \
+  --case all --output /tmp/jev_scenario_videos
+```
 
 镜头开始前有 0.8 秒实际传感器预热，障碍物按首关键帧速度向过去线性延伸并持续运动，避免在 t=0 突然从静止跳到匀速。预热只提供已观测的历史，不向规划器暴露未来轨迹；它不计入镜头预算。困难预测最长前看 3.5 秒。
 

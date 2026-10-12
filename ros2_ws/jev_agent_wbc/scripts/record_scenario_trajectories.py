@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Record original camera and obstacle trajectories in Isaac Sim observer views.
 
-This replays task.json and runtime_scene.json directly. The robot is displayed
-at its initial URDF pose for context; this is not a controller execution.
+This replays task.json and runtime_scene.json directly. The robot follows an
+offline nominal WBC rollout without avoidance to expose arm/obstacle crossings.
+Rendering uses Isaac; robot motion is kinematic, not a PhysX safety evaluation.
 """
 from __future__ import annotations
 
@@ -53,8 +54,8 @@ def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def static_robot(stage, robot_path, urdf, fixture):
-    """Author each URDF link's initial FK; leave the simulation clock paused."""
+def animated_robot(stage, robot_path, urdf, fixture):
+    """Animate URDF FK from nominal states; leave the physics clock paused."""
     import numpy as np
     from scipy.spatial.transform import Rotation
     from pxr import Gf, UsdGeom, UsdPhysics
@@ -76,21 +77,24 @@ def static_robot(stage, robot_path, urdf, fixture):
     root, = links - child_links
     state = fixture['initial_state']
     angles = {f'joint{i}': state[i + 2] for i in range(1, 7)}
-    poses = {}
+    poses, operations = {}, {}
 
     def visit(name, p, r):
         prim = stage.GetPrimAtPath(scope.AppendChild(name))
         if not prim:
             raise RuntimeError(f'missing robot link {name}')
-        xform = UsdGeom.Xformable(prim)
-        xform.ClearXformOpOrder()
-        for key in tuple(prim.GetPropertyNames()):
-            if key.startswith('xformOp:'):
-                prim.RemoveProperty(key)
-        xform.SetResetXformStack(True)
-        xform.AddTranslateOp().Set(Gf.Vec3d(*map(float, p)))
+        if name not in operations:
+            xform = UsdGeom.Xformable(prim)
+            xform.ClearXformOpOrder()
+            for key in tuple(prim.GetPropertyNames()):
+                if key.startswith('xformOp:'):
+                    prim.RemoveProperty(key)
+            xform.SetResetXformStack(True)
+            operations[name] = (xform.AddTranslateOp(), xform.AddOrientOp())
+        translation, orientation = operations[name]
+        translation.Set(Gf.Vec3d(*map(float, p)))
         q = r.as_quat()
-        xform.AddOrientOp().Set(Gf.Quatf(float(q[3]), Gf.Vec3f(*map(float, q[:3]))))
+        orientation.Set(Gf.Quatf(float(q[3]), Gf.Vec3f(*map(float, q[:3]))))
         poses[name] = p
         for child, joint, xyz, rotation, axis, moving in children.get(name, []):
             cr = r * rotation
@@ -98,13 +102,18 @@ def static_robot(stage, robot_path, urdf, fixture):
                 cr *= Rotation.from_rotvec(axis * angles.get(joint, 0.))
             visit(child, p + r.apply(xyz), cr)
 
-    visit(root, np.array([state[0], state[1], fixture['base_z']]), Rotation.from_euler('z', state[2]))
+    def set_state(state):
+        angles.update({f'joint{i}': state[i + 2] for i in range(1, 7)})
+        visit(root, np.array([state[0], state[1], fixture['base_z']]), Rotation.from_euler('z', state[2]))
+        return poses['camera_link'].tolist()
+
+    camera = set_state(state)
     for prim in stage.Traverse():
         if prim.HasAPI(UsdPhysics.RigidBodyAPI):
             UsdPhysics.RigidBodyAPI(prim).CreateRigidBodyEnabledAttr(False)
         if prim.IsA(UsdPhysics.Joint):
             UsdPhysics.Joint(prim).CreateJointEnabledAttr(False)
-    return poses['camera_link'].tolist()
+    return camera, set_state
 
 
 def make_curve(stage, path, points, color, width):
@@ -155,7 +164,7 @@ def caption(rgb, detail, name, reference, runtime, t, args):
     draw.text((64, y - 3), '参考相机路径', font=small, fill=(55, 225, 244))
     draw.line((260, y + 11, 295, y + 11), fill=(255, 110, 58), width=4)
     draw.text((304, y - 3), '障碍物路径', font=small, fill=(255, 130, 80))
-    draw.text((510, y - 3), '蓝色：主体  |  机器人：初始姿态示意', font=small, fill=(200, 211, 228))
+    draw.text((510, y - 3), '蓝色：主体  |  机器人：无避障整机运动示意', font=small, fill=(200, 211, 228))
     dp = reference.sample(t)[0] - reference.sample(0.)[0]
     velocity = runtime.obstacles(t)[0]['velocity']
     draw.text((20, y + 29), f'相机位移 ΔXYZ = ({dp[0]:+.3f}, {dp[1]:+.3f}, {dp[2]:+.3f}) m', font=small, fill=(210, 226, 238))
@@ -172,6 +181,7 @@ def record_case(args, app, name, urdf):
     import jvs_isaac_sim as backend
     from jev_agent_wbc.reference import OriginalReference
     from jev_agent_wbc.scenarios import RuntimeScene
+    from jev_agent_wbc.nominal import nominal_rollout
 
     task_path = args.scenarios / name / 'task.json'
     scene_path = args.scenarios / name / 'runtime_scene.json'
@@ -179,11 +189,14 @@ def record_case(args, app, name, urdf):
     runtime = RuntimeScene(scene_path)
     fixture = runtime.document
     reference = OriginalReference(task_path, fixture['subject']['position'])
+    robot_times, robot_states, failure = nominal_rollout(reference, fixture['initial_state'], fixture['base_z'])
+    if failure:
+        raise RuntimeError(f'nominal trajectory failed: {failure}')
     stage = backend.prepare_stage(SimpleNamespace(stage='', add_ground_plane=True, obstacles=''), app)
     robot_path = backend.import_robot(urdf)
     app.update()
     backend.isolate_urdf_templates(stage, robot_path)
-    robot_camera = static_robot(stage, robot_path, urdf, fixture)
+    robot_camera, set_robot_state = animated_robot(stage, robot_path, urdf, fixture)
     if not np.allclose(robot_camera, reference.sample(0.)[0], atol=1e-5):
         raise RuntimeError('initial URDF camera does not match the reference start')
     dome = UsdLux.DomeLight.Define(stage, '/World/SoftFill')
@@ -235,14 +248,14 @@ def record_case(args, app, name, urdf):
     aim = make_curve(stage, '/World/AimAtSubject', [positions[0], subject['position']], (.26, .68, .70), .002)
     # A metric ground grid makes lateral motion and scene scale readable.
     for i, value in enumerate(np.arange(-1., 2.51, .25)):
-        make_curve(stage, f'/World/GridX{i}', [[value, -1, .003], [value, 1, .003]], (.46, .49, .52), .002)
-    for i, value in enumerate(np.arange(-1., 1.01, .25)):
+        make_curve(stage, f'/World/GridX{i}', [[value, -1.5, .003], [value, 2., .003]], (.46, .49, .52), .002)
+    for i, value in enumerate(np.arange(-1.5, 2.01, .25)):
         make_curve(stage, f'/World/GridY{i}', [[-.5, value, .003], [2.5, value, .003]], (.46, .49, .52), .002)
     render_height = args.height - 128
-    main_camera, main_pose = make_camera(stage, '/World/Observer', [2.7, -3.5, 2.25], [.70, 0., .53], args.width, render_height, 44.)
+    main_camera, main_pose = make_camera(stage, '/World/Observer', [3.1, -4.5, 2.8], [.8, .15, .65], args.width, render_height, 42.)
     iw, ih = 320, 200
     center = (positions.min(axis=0) + positions.max(axis=0)) / 2
-    detail_camera, detail_pose = make_camera(stage, '/World/ReferenceDetail', center + [.6, -1.35, .52], center, iw, ih, 65.)
+    detail_camera, detail_pose = make_camera(stage, '/World/ReferenceDetail', center + [1., -2., .9], center, iw, ih, 40.)
     products, annotators = [], []
     encoder = None
     frame_records = []
@@ -263,6 +276,8 @@ def record_case(args, app, name, urdf):
                 '-i', 'pipe:0', '-an', '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
                 '-pix_fmt', 'yuv420p', '-movflags', '+faststart', str(temporary)], stdin=subprocess.PIPE)
         for index, t in enumerate(render_times):
+            robot_state = np.array([np.interp(t, robot_times, robot_states[:, j]) for j in range(9)])
+            set_robot_state(robot_state)
             p, r, _ = reference.sample(t)
             q = Rotation.from_matrix(r).as_quat()
             translation.Set(Gf.Vec3d(*map(float, p)))
@@ -284,7 +299,7 @@ def record_case(args, app, name, urdf):
                 Image.fromarray(frame).save(args.output / f'{name}_third_person_{float(t):05.2f}.png')
             if encoder is not None:
                 encoder.stdin.write(frame.tobytes())
-            frame_records.append(dict(frame=index, trajectory_time_s=float(t), camera_position=p.tolist(),
+            frame_records.append(dict(frame=index, trajectory_time_s=float(t), robot_state=robot_state.tolist(), camera_position=p.tolist(),
                 camera_quaternion_xyzw=q.tolist(), obstacles=[dict(id=o['id'], center=o['center'].tolist(),
                 velocity=o['velocity'].tolist(), radius=o['radius']) for o in obstacles]))
             if index % args.fps == 0:
@@ -298,7 +313,8 @@ def record_case(args, app, name, urdf):
         if any(digest(p) != h for p, h in hashes.items()):
             raise RuntimeError('source scenario changed during recording')
         metadata = dict(case=name, renderer='Isaac Sim RTX RaytracedLighting', view='fixed third person with fixed third-person detail inset',
-            source='original camera reference and runtime obstacle trajectories', robot='static initial URDF pose; no controller execution',
+            source='original camera reference and runtime obstacle trajectories',
+            robot='offline nominal WholeBodyQP without avoidance; animated URDF FK; not PhysX execution',
             camera_interpolation='OriginalReference CubicSpline + RotationSpline',
             obstacle_interpolation='RuntimeScene CubicHermiteSpline',
             fps=args.fps, width=args.width, height=args.height, duration_s=reference.duration,
