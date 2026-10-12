@@ -1,0 +1,35 @@
+{
+  "format": "jvs_obstacles/v1",
+  "minimum_clearance_m": 0.025,
+  "trajectory": "shot_moveout.json",
+  "initial_q": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "obstacles": [
+    {
+      "name": "base_bollard",
+      "type": "sphere",
+      "center": [
+        -0.32,
+        0.17,
+        0.13
+      ],
+      "radius": 0.075
+    },
+    {
+      "name": "arm_obstacle",
+      "type": "sphere",
+      "center": [
+        -0.2,
+        -0.075,
+        0.72
+      ],
+      "radius": 0.055
+    }
+  ]
+}

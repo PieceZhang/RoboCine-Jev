@@ -1,0 +1,6 @@
+{
+  "source": "real USDA crossing / debug04 before dynamic barrier gain adjustment",
+  "obstacle_input": "measured, odom-aligned LiDAR surfels only",
+  "meaning": "A physically clear tangential passage must retain a feasible command under actuator acceleration bounds and continuous sweep clearance",
+  "source_directory": "ros2_ws/jvs_mock/results/dynamic_usda_debug04/shot_combo1"
+}

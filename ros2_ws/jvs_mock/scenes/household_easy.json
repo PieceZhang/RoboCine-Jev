@@ -1,0 +1,53 @@
+{
+  "format": "jvs_obstacles/v1",
+  "minimum_clearance_m": 0.025,
+  "trajectory": "shot_moveout.json",
+  "initial_q": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "obstacles": [
+    {
+      "name": "side_table_leg",
+      "type": "cylinder",
+      "center": [
+        -0.22,
+        0.38,
+        0.25
+      ],
+      "radius": 0.07,
+      "height": 0.5
+    },
+    {
+      "name": "storage_cube",
+      "type": "cube",
+      "center": [
+        -0.55,
+        -0.39,
+        0.09
+      ],
+      "size": 0.18
+    },
+    {
+      "name": "door_stop_pyramid",
+      "type": "triangular_pyramid",
+      "center": [
+        -0.82,
+        0.48,
+        0.15
+      ],
+      "size": [
+        0.18,
+        0.18,
+        0.3
+      ],
+      "yaw_deg": 20
+    }
+  ],
+  "difficulty": "easy",
+  "layout_note": "All primitives stand on z=0; the open sides preserve a feasible bypass route."
+}

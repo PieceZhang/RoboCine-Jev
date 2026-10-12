@@ -1,0 +1,6 @@
+scene_id: kujiale_0021_kid_combo
+subject: kid
+scene: indoors/livingroom
+
+moves:
+  - {运镜类型: 变焦推, 屏幕方向: 横屏, 运镜方向: 前, 初始拍摄角度: 水平, 运镜节奏: 中}

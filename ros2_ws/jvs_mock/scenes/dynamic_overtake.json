@@ -1,0 +1,91 @@
+{
+  "format": "jvs_dynamic_scene/v1",
+  "frame": "scene_y_up",
+  "clock": "physical_simulation_seconds_after_controller_start",
+  "scene": "cinema_traj_out/kujiale_0021_kid_combo/simview/simview.usda",
+  "description": "A cart crosses the nominal chassis route three times at matching physical times: outbound during Pan (3-9 s), inbound during MoveOut (16-23 s), and outbound during Orbit (28-35 s). Each pass causes a separate solid collision on the measured unobstructed baseline. The cart repositions outside the route between passes and parks clear after the last crossing.",
+  "obstacles": [
+    {
+      "name": "FuturePathCart",
+      "model": {
+        "type": "box",
+        "size": [
+          0.2,
+          0.18,
+          0.24
+        ],
+        "color": [
+          0.1,
+          0.55,
+          0.9
+        ]
+      },
+      "trajectory": [
+        {
+          "time_s": 0,
+          "position": [
+            3.98,
+            0.122,
+            1.15
+          ]
+        },
+        {
+          "time_s": 3,
+          "position": [
+            3.98,
+            0.122,
+            1.15
+          ]
+        },
+        {
+          "time_s": 9,
+          "position": [
+            3.98,
+            0.122,
+            2.3
+          ]
+        },
+        {
+          "time_s": 16,
+          "position": [
+            3.98,
+            0.122,
+            2.3
+          ]
+        },
+        {
+          "time_s": 23,
+          "position": [
+            3.9,
+            0.122,
+            0.85
+          ]
+        },
+        {
+          "time_s": 28,
+          "position": [
+            3.65,
+            0.122,
+            0.85
+          ]
+        },
+        {
+          "time_s": 35,
+          "position": [
+            3.65,
+            0.122,
+            2.15
+          ]
+        },
+        {
+          "time_s": 60,
+          "position": [
+            3.65,
+            0.122,
+            2.15
+          ]
+        }
+      ]
+    }
+  ]
+}

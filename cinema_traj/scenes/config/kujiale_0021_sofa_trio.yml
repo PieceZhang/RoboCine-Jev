@@ -1,0 +1,108 @@
+# kujiale_0021 sofa-trio demo scenario (pipeline-driven, design B).
+#
+# This file contains NO hand-authored camera coordinates — only:
+#   staging  — who/what sits in the scene (cast + props)
+#   intent   — semantic camera beats fed to the cinema_traj pipeline
+#              (run_traj build → optimize computes all coordinates)
+#   audit    — clearance bounds the optimised trajectory must satisfy
+#
+# Regenerate every artefact for this scenario:
+#   python tools/scenario_gen.py cinema_traj/scenes/config/kujiale_0021_sofa_trio.yml
+#
+# Scene: cinema_traj/scenes/kujiale_0021_sofa_trio.json (living room; sofa trio
+# subject_track deliberately removed — the people come from the cast below).
+# Cast = NVIDIA "Isaac People" pack (~/Downloads/Isaac_People.zip) flattened to
+# textured static USDAs by datasets/_internal/usd_people_zip_flatten.py;
+# waist at sofa cushion, heading 180 = facing TV/−Z.
+
+scene_id: kujiale_0021_sofa_trio
+plan_id: sofa_trio_3beat_pipeline
+target: sofa_0000                    # scene object the cast is staged around
+
+# --------------------------------------------------------------------------- #
+# Staging (scene content, not camera): cast seats + table props.
+cast_comment: >-
+  3 figures with WAIST AT the sofa cushion (chars from the user's NVIDIA
+  'Isaac People' pack — Downloads/Isaac_People.zip; flattened to textured
+  static USDAs by datasets/_internal/usd_people_zip_flatten.py; heading 180 =
+  facing the TV/−Z; waist≈0.55×stature at cushion y≈0.385; real atlas textures
+  sampled into per-face colours at load).
+cast:
+  - id: Dad                            # construction man, 1.78 m
+    usda: datasets/simview_assets/cast/people_zip/Dad.usda
+    seat: [3.95, -0.595, 3.72]
+    heading_deg: 180.0
+    height_m: 1.781
+  - id: Kid                            # medical, 1.68 m
+    usda: datasets/simview_assets/cast/people_zip/Kid.usda
+    seat: [4.725, -0.539, 3.72]
+    heading_deg: 180.0
+    height_m: 1.680
+  - id: Mom                            # business woman, 1.61 m
+    usda: datasets/simview_assets/cast/people_zip/Mom.usda
+    seat: [5.50, -0.499, 3.72]
+    heading_deg: 180.0
+    height_m: 1.607
+
+props_comment: >-
+  coffee-table garnish: two Isaac Props mugs (SM_Mug_* are Z-up with base
+  z=−0.0462/−0.0445 in-file; wrapper rotateX −90 drops them onto table_0002
+  top y≈0.405 exactly at these `at` heights).
+props:
+  - {id: MugA, up: Z, heading_deg: 15.0,
+     usd: datasets/simview_assets/props/Mugs/SM_Mug_A2.usd,
+     at: [4.95, 0.4512, 1.90]}
+  - {id: MugB, up: Z, heading_deg: 145.0,
+     usd: datasets/simview_assets/props/Mugs/SM_Mug_C1.usd,
+     at: [5.35, 0.4495, 2.12]}
+
+# --------------------------------------------------------------------------- #
+# Intent — semantic beats, exactly what a planner would emit. The pipeline
+# (plan → build → optimize) turns this into camera coordinates.
+# NOTE: any orbit around sofa_0000 is geometrically impossible with the cast
+# seated on it — Kid sits at the orbit centre, so every ring radius pierces a
+# person. Beat 1 is instead a pan across the trio from a high/far wide (the
+# classic family shot); the cast seats below are mirrored in the scene file as
+# person_* obstacle OBBs so the optimiser can never fly through them.
+prompt: >-
+  From the family, pull back out to the wide shot.
+# Anchor guidance: this room is tight (sofa back against west wall, chaise
+# east, coffee table north) — far/high anchors get squeezed into the dark NE
+# corner by the clearance cost. medium/close keeps the camera in the lit
+# corridor between TV and group. NOTE: the pipeline currently aims object
+# shots at the OBB centre (sofa bulk, y≈0.34) — framing sits low; that's a
+# planner-side concern we deliberately do NOT patch from this config.
+beats:
+  - anchor: {elevation: medium, distance: close}
+    traj: {type: pan_right, duration_s: 8.0}
+  - anchor: {elevation: medium, distance: medium}
+    transition: {type: arc, alpha_deg: 0.0, duration_s: 3.0}
+    traj: {type: crane, duration_s: 6.0}
+  - anchor: {elevation: medium, distance: medium}
+    transition: {type: arc, alpha_deg: 0.0, duration_s: 3.0}
+    traj: {type: zoom_in_out, duration_s: 6.0}
+
+# --------------------------------------------------------------------------- #
+# Optimizer profile (CPU-only stage; shorter plateau for demo turnaround).
+# Optimizer profile (CPU-only stage; keys land in cinema_traj.optimizer →
+# OptCfg). max_iters/plateau_iters restore the old myfast.yaml demo profile.
+optimizer:
+  max_iters: 400
+  plateau_iters: 30
+
+# --------------------------------------------------------------------------- #
+# Acceptance audit of the OPTIMISED trajectory (reports + hard assert).
+# OBBs from the scene file; persons = torso box, widened in the T-pose arm
+# band. min_clearance is the pass bar for every frame.
+audit:
+  obbs:
+    - {name: sofa_0000,       center: [4.7246, 0.3433, 3.7115], half: [1.5575, 0.3042, 0.7340]}
+    - {name: chaise_0001,     center: [6.740, 0.2507, 2.140],   half: [0.483, 0.3321, 0.8959]}
+    - {name: table_0002,      center: [5.1461, 0.2078, 2.0046], half: [0.5869, 0.1975, 0.5870]}
+    - {name: chandelier_0000, center: [5.2415, 2.4322, 1.703],  half: [0.9109, 0.6158, 0.9905]}
+    - {name: TV_wall,         center: [5.0, 1.5, -0.90],        half: [4.5, 1.5, 0.10]}
+  torso_half: 0.35
+  arm_half: 0.65
+  arm_band: [1.15, 1.65]
+  depth_half: 0.22
+  min_clearance: 0.10

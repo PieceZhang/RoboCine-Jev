@@ -1,0 +1,14 @@
+jvs_isaac_command_adapter:
+  ros__parameters:
+    use_sim_time: true
+    arm_command_topic: /arm_position_controller/commands
+    isaac_command_topic: /isaac_joint_commands
+    cmd_vel_topic: /cmd_vel
+    publish_rate_hz: 100.0
+    cmd_vel_timeout_s: 0.5
+    max_linear_velocity: 1.0
+    max_angular_velocity: 3.0
+    max_linear_acceleration: 1.0
+    max_angular_acceleration: 7.0
+    wheel_radius: 0.07
+    wheel_separation: 0.21

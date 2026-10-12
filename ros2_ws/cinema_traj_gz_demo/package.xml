@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>cinema_traj_gz_demo</name>
+  <version>0.1.0</version>
+  <description>Gazebo Fortress (gz-sim6) demo: retimed cinema_traj trajectory playing back on a drone entity in the synthetic demo room (kinematic set_pose playback).</description>
+  <maintainer email="you@example.com">Siyu Wang</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>geometry_msgs</depend>
+  <depend>ros_gz_interfaces</depend>
+  <exec_depend>cinema_traj_bridge</exec_depend>
+  <exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>ros_gz_bridge</exec_depend>
+  <exec_depend>ros2launch</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

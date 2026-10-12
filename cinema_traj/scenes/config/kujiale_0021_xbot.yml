@@ -1,0 +1,36 @@
+# kujiale_0021 Xbot subject scenario (pipeline-driven, design B).
+#
+# Moving subject: subject_01 walks the apartment (subject_track in the scene
+# file: 165 frames, walk 0–4.7 s → pause → walk 14.7–19.7 s). The simview
+# stage bakes the Xbot.glb humanoid (scripts/download_assets.py) in bind pose
+# onto the track. No cast/props — the subject IS the star, so no audit block:
+# the pipeline plans around the subject natively.
+#
+# Intent = the proven old plan cinema_traj_out/kujiale_0021_3shot/plan.json
+# (subject_3shot, hand-authored 2026-09-10, verified green then): crane follow
+# from behind → pull-out from the front → static Hitchcock zoom.
+#
+# Regenerate:  python tools/scenario_gen.py cinema_traj/scenes/config/kujiale_0021_xbot.yml
+
+scene_id: kujiale_0021_xbot
+plan_id: subject_3shot
+target: subject_01                    # the scene's moving subject
+
+prompt: >-
+  只拍主体: 后面跟随上移 → 前面后拉 → 固定希区柯克
+
+# 1-3-1 beats; azimuth_deg pins the anchor side (180 = behind the walk,
+# 0 = in front), exactly as the old plan.
+beats:
+  - anchor: {elevation: medium, distance: medium, azimuth_deg: 180}
+    traj: {type: crane, duration_s: 5.0}          # 后面跟随上移 (walk 0–5 s)
+  - anchor: {elevation: medium, distance: medium, azimuth_deg: 0}
+    transition: {type: arc, alpha_deg: 0.0, duration_s: 1.5}
+    traj: {type: move_out, duration_s: 3.5}       # 前面后拉 (pause 6.5–10 s)
+  - anchor: {elevation: medium, distance: close, azimuth_deg: 0}
+    transition: {type: arc, alpha_deg: 0.0, duration_s: 1.5}
+    traj: {type: zoom_in_out, duration_s: 4.5}    # 固定希区柯克 (11.5–16 s)
+
+optimizer:
+  max_iters: 400
+  plateau_iters: 30

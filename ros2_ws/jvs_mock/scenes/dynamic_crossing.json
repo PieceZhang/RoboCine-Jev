@@ -1,0 +1,65 @@
+{
+  "format": "jvs_dynamic_scene/v1",
+  "frame": "scene_y_up",
+  "clock": "physical_simulation_seconds_after_controller_start",
+  "scene": "cinema_traj_out/kujiale_0021_kid_combo/simview/simview.usda",
+  "description": "A slow horizontal crossbar enters the arm corridor near the end of the first Orbit and then withdraws. The same-time measured free arm would hit link3; whole-body avoidance adjusts arm posture without slowing the shot clock.",
+  "obstacles": [
+    {
+      "name": "ArmCrossbar",
+      "model": {
+        "type": "cylinder",
+        "axis": "x",
+        "radius": 0.025,
+        "height": 0.4,
+        "color": [
+          0.92,
+          0.21,
+          0.13
+        ]
+      },
+      "trajectory": [
+        {
+          "time_s": 0,
+          "position": [
+            4.1,
+            0.65,
+            1.4
+          ]
+        },
+        {
+          "time_s": 8.0,
+          "position": [
+            4.1,
+            0.65,
+            1.4
+          ]
+        },
+        {
+          "time_s": 11.5,
+          "position": [
+            4.1,
+            0.65,
+            1.17
+          ]
+        },
+        {
+          "time_s": 13.5,
+          "position": [
+            4.1,
+            0.65,
+            1.4
+          ]
+        },
+        {
+          "time_s": 60,
+          "position": [
+            4.1,
+            0.65,
+            1.4
+          ]
+        }
+      ]
+    }
+  ]
+}

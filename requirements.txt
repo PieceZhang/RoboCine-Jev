@@ -1,0 +1,21 @@
+# --- Core pipeline (all stages) ---
+numpy>=1.24
+Pillow>=10.0
+PyYAML>=6.0          # config loader
+requests>=2.31       # VLM (LM Studio) HTTP client
+
+# --- Depth annotation + calibration (stages: annotate_depth, mine, calibrate) ---
+torch>=2.1
+transformers>=4.40   # AutoImageProcessor, AutoModelForDepthEstimation (Depth-Anything-V2-Metric-*-hf)
+
+# --- Interactive viewers / GT tools (tools/) ---
+opencv-python>=4.8   # serve_depth_viewer colorized depth rendering
+
+# --- One-shot data acquisition (scripts/) — optional, install only if downloading ---
+# fiftyone>=0.24      # scripts/download_openimage.py
+# torchvision>=0.17   # scripts/download_Places365.py
+# huggingface_hub     # scripts/download_assets.py (interioragent H5 fetch)
+# gsplat==1.5.3        # tools/gsplat_render.py (needs cuda-toolkit+nvcc — see README install block)
+
+# --- System dependencies (NOT pip — must be on PATH) ---
+# ffmpeg, ffprobe     # required by vlm_intention/stages/mine.py (frame extraction)

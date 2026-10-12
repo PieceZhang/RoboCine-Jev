@@ -1,0 +1,89 @@
+[
+  {
+    "name": "orbit",
+    "trajectory": "shot_orbit.json",
+    "initial_q": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  {
+    "name": "pan",
+    "trajectory": "shot_pan.json",
+    "initial_q": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  {
+    "name": "pan_limit",
+    "trajectory": "shot_pan_limit.json",
+    "initial_q": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  {
+    "name": "moveout",
+    "trajectory": "shot_moveout.json",
+    "initial_q": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  {
+    "name": "moveout_forward",
+    "trajectory": "shot_moveout_forward.json",
+    "initial_q": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  {
+    "name": "combo1",
+    "trajectory": "shot_combo1.json",
+    "initial_q": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ]
+  },
+  {
+    "name": "combo2",
+    "trajectory": "shot_combo2.json",
+    "initial_q": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  },
+  {
+    "name": "combo3",
+    "trajectory": "shot_combo3.json",
+    "initial_q": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  },
+  {
+    "name": "combo4",
+    "trajectory": "shot_combo4.json",
+    "initial_q": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  }
+]

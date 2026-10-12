@@ -1,0 +1,110 @@
+{
+  "format": "jvs_obstacles/v1",
+  "minimum_clearance_m": 0.025,
+  "trajectory": "shot_moveout.json",
+  "initial_q": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "obstacles": [
+    {
+      "name": "tall_plant_pot",
+      "type": "cylinder",
+      "center": [
+        -0.2,
+        0.32,
+        0.27
+      ],
+      "radius": 0.06,
+      "height": 0.54
+    },
+    {
+      "name": "front_footstool",
+      "type": "cube",
+      "center": [
+        -0.5,
+        -0.34,
+        0.07
+      ],
+      "size": 0.14
+    },
+    {
+      "name": "front_door_stop",
+      "type": "triangular_pyramid",
+      "center": [
+        -0.9,
+        0.34,
+        0.12
+      ],
+      "size": [
+        0.14,
+        0.14,
+        0.24
+      ],
+      "yaw_deg": 25
+    },
+    {
+      "name": "lamp_base",
+      "type": "cylinder",
+      "center": [
+        -1.25,
+        -0.34,
+        0.27
+      ],
+      "radius": 0.065,
+      "height": 0.54
+    },
+    {
+      "name": "rear_storage_cube",
+      "type": "cube",
+      "center": [
+        -1.42,
+        0.35,
+        0.08
+      ],
+      "size": 0.16
+    },
+    {
+      "name": "rear_door_stop",
+      "type": "triangular_pyramid",
+      "center": [
+        -1.72,
+        -0.36,
+        0.13
+      ],
+      "size": [
+        0.15,
+        0.15,
+        0.26
+      ],
+      "yaw_deg": -20
+    },
+    {
+      "name": "left_table_leg",
+      "type": "cylinder",
+      "center": [
+        -0.48,
+        1.15,
+        0.31
+      ],
+      "radius": 0.075,
+      "height": 0.62
+    },
+    {
+      "name": "right_storage_cube",
+      "type": "cube",
+      "center": [
+        -0.8,
+        -1.15,
+        0.09
+      ],
+      "size": 0.18
+    }
+  ],
+  "difficulty": "hard",
+  "layout_note": "All primitives stand on z=0; the open sides preserve a feasible bypass route."
+}

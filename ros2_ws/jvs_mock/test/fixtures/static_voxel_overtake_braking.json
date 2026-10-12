@@ -1,0 +1,13 @@
+{
+  "description": "Measured overtake failure state and its binding chassis surfel; a one-cell earlier observation models a newly exposed LiDAR voxel.",
+  "source": "results/dynamic_interaction_20261008/baseline/overtake/failure_qp.json and failure_scene.npz",
+  "state": [0.0627366519710138, 0.5870491371702545, -1.8995905198257874, 1.2086, -0.0024, 0.4669, -0.2118, -0.3401, 0.6816],
+  "previous": [-0.08627052247297537, 0.0006922684421262466, -0.0487433540031657, -0.02221775905409141, 0.011088766777914573, -0.01052577242725287, 0.010923523033083077, 0.018101910167782398],
+  "commanded_q": [1.208129620154767, -0.0036872175760240895, 0.4647083741134648, -0.21225625654916588, -0.34003462244331484, 0.6816487906031942],
+  "dt": 0.017000000000003013,
+  "base_z": -0.0019906461238861084,
+  "observed_point": [0.34, 0.66, 0.06],
+  "earlier_point": [0.38, 0.66, 0.06],
+  "surfel_radius": 0.034641016151377546,
+  "minimum_clearance_m": 0.025
+}

@@ -1,0 +1,49 @@
+{
+  "description": "Normal unobstructed camera tracking examples; no stress cases",
+  "cases": [
+    {
+      "name": "orbit_ccw10",
+      "shot": "orbit",
+      "duration": 24.0,
+      "angle_deg": 10.0,
+      "radius_m": 0.6,
+      "trajectory": "wbc_orbit_ccw10.json"
+    },
+    {
+      "name": "orbit_cw15",
+      "shot": "orbit",
+      "duration": 28.0,
+      "angle_deg": -15.0,
+      "radius_m": 0.8,
+      "trajectory": "wbc_orbit_cw15.json"
+    },
+    {
+      "name": "pan_left20",
+      "shot": "pan",
+      "duration": 16.0,
+      "angle_deg": 20.0,
+      "trajectory": "wbc_pan_left20.json"
+    },
+    {
+      "name": "pan_right30",
+      "shot": "pan",
+      "duration": 20.0,
+      "angle_deg": -30.0,
+      "trajectory": "wbc_pan_right30.json"
+    },
+    {
+      "name": "moveout_040",
+      "shot": "moveout",
+      "duration": 16.0,
+      "distance_m": 0.4,
+      "trajectory": "wbc_moveout_040.json"
+    },
+    {
+      "name": "moveout_080",
+      "shot": "moveout",
+      "duration": 24.0,
+      "distance_m": 0.8,
+      "trajectory": "wbc_moveout_080.json"
+    }
+  ]
+}

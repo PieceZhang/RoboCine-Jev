@@ -1,0 +1,183 @@
+# ============================================================
+# VLMIntention pipeline — EXAMPLE config for a new machine.
+# Copy to config.yaml and edit paths to match your layout.
+# Paths may be absolute or relative to the repo root; ${paths.base}
+# interpolation is supported.
+# ============================================================
+
+paths:
+  # Corpus root — every annotation key is relative to this base.
+  # Use an absolute path or a repo-relative one (e.g. ./dataset/切片).
+  base: ./dataset/切片
+  open_images_root: ./dataset/fiftyone/open-images-v7/train/data
+  places365_root: ./dataset/Places365/data_256_standard
+  depth_maps_cache: ${paths.base}/depth_maps
+  pilot_frames_dir: ${paths.base}/抽帧_pilot
+  full_frames_dir: ${paths.base}/抽帧_full
+
+outputs:
+  vlm_annotations: obstacle_annotations_final.json
+  depth_annotations: obstacle_annotations_depth.json
+  depth_meta: obstacle_annotations_depth.meta.json
+  pilot_annotations: obstacle_annotations_pilot.json
+  mined_annotations: obstacle_annotations_mined.json
+  train_annotations: obstacle_annotations_train.json
+  calibration_disagreements: depth_calibration_disagreements.json
+  depth_histograms_cache: depth_region_histograms.pkl
+
+models:
+  depth:
+    indoor: depth-anything/Depth-Anything-V2-Metric-Indoor-Large-hf
+    outdoor: depth-anything/Depth-Anything-V2-Metric-Outdoor-Large-hf
+    outdoor_alias: indoor        # outdoor scenes also use Indoor (Outdoor over-estimates on AI frames)
+    device: cpu                  # cpu | auto | mps  (MPS deadlocks on this model under torch 2.1+)
+  vlm:
+    api_url: http://localhost:1234/v1/chat/completions
+    model_name: qwen/qwen3-vl-30b
+    temperature: 0.1
+    max_tokens: 200
+    thumbnail_max_px: 1024
+    request_timeout_s: 60
+
+thresholds:
+  dist_thresh: {前: 1.0, 左: 0.5, 右: 0.5, 上: 0.5, 下: 0.5}
+  horiz_dirs: [前, 左, 右]
+  vert_dirs: [上, 下]
+  frac_thresh: 0.05
+  vert_frac: 0.25
+  depth_min: 0.05
+  depth_max: 80.0
+  rank_thresh: 2.0
+  target_positive_rate: 0.35
+  config_version: 2
+
+sampling:
+  frame_times: [0.20, 0.35, 0.50, 0.65, 0.80]
+  frames_per_video: 5
+  save_every: 10
+  calibration_top_n: 20
+
+filter:
+  indoor_keywords: [室内, 居家, 酒店, 咖啡厅, 花店, 工作环境, 艺术馆, 图书馆,
+                    音乐厅, 舞蹈房, 健身房, 酒吧, 舞厅, 饭店, 商场, 广场,
+                    机场, 车站, 教室, 阶梯教室]
+  default_env: outdoor
+
+balance:
+  include_external_sources: false
+  sources:
+    - obstacle_annotations_depth.json
+    - obstacle_annotations_mined.json
+    - external: ${paths.open_images_root}/obstacle_annotations_depth.json
+
+viewer:
+  # CJK font for the depth-map region labels. macOS: /System/Library/Fonts/PingFang.ttc;
+  # Linux: /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc (install fonts-noto-cjk).
+  # Leave empty to fall back to PIL's default bitmap font.
+  cjk_font: ""
+  default_port_depth: 8766
+  default_port_validation: 8765
+  default_port_mined: 8767
+
+reorg:
+  pattern: '分场景切片\d+-\d+/'
+  replacement: '横屏/'
+  files:
+    - obstacle_annotations_depth.json
+    - obstacle_annotations_depth.meta.json
+    - obstacle_annotations_mined.json
+    - obstacle_annotations_final.json
+
+# ============================================================
+# cinema_traj — From 3D map, Motion Prompt, Subject Pose, to Trajectory
+# ============================================================
+cinema_traj:
+  scene: cinema_traj/demo/demo_apartment.json    # canonical scene JSON
+  prompt: 环绕沙发半圈，然后环绕餐桌四分之一圈，最后跟拍演员走到走廊。
+  outputs_dir: cinema_traj_out                   # relative → repo root
+  scenes_dir: cinema_traj/scenes
+  platform: drone                                # drone | jarvis（落地机器人
+                                                 # 可达性+可跟踪性层，见 README）
+
+  planner:                                       # LM Studio (falls back to models.vlm)
+    api_url: http://localhost:1234/v1/chat/completions
+    model_name: qwen/qwen3-vl-30b
+    temperature: 0.1
+    max_tokens: 4096
+    request_timeout_s: 180
+    retries: 3
+
+  optimizer:                                     # paper §D.5 hyperparameters
+    device: cpu          # MPS deadlocks documented in this repo; opt in manually
+    lr: 1.0
+    max_iters: 1000
+    plateau_iters: 30
+    grad_clip: 1.0
+    lambda_sdf: 5.0
+    d_safe: 0.2
+    lambda_occl: 3.0
+    ray_steps: 32
+    near_skip: 0.1
+    delta_occ: 0.05
+    softplus_beta: 20.0
+    lambda_smooth: 0.5
+    lambda_reg: 0.1
+    lambda_bnd: 5.0
+    lambda_sdf_max: 1000.0
+    subject_r_min: 0.5
+    lambda_clearance: 0.3
+    soft_min_k: null
+    bypass_if_clean: true       # θ₀ 已无碰撞且无遮挡 → 整段跳过（SVSDF 中端 bypass）
+    occl_plateau_iters: 50      # 无碰撞但遮挡计数连续 N 次不改善 → 停（0 = 关闭）
+
+  robot:                          # 具身体征：轮式底盘 + 6 轴臂 + 平板相机
+    base:
+      radius: 0.30                # 底盘足印外接圆半径 m（按实测修改）
+      height: 0.40                # 底盘高度 m
+    mast:
+      height: 0.55                # 桅柱高度 m（顶端 = 臂基座安装面）
+      half_xy: 0.10               # 桅柱半宽 m
+    arm:
+      max_reach: 0.65             # 腕中心相对臂基座的最大球状可达距离 m
+      min_reach: 0.15             # 内奇异半径 m
+      base_offset: [0.0, 0.95, 0.0]  # 臂基座（桅柱顶）相对底盘中心 [x,y,z] m
+    camera:
+      height_range: null          # 相机光心可达高度带 [min,max] m；null = 由
+                                  # base/mast/arm 几何自动推得（请按实测标定覆写）
+      look_any_direction: true    # 一期假设：球腕，任意 look 方向可达
+
+  export:
+    control_dt: 0.1
+    max_speed: 2.0
+    max_accel: 2.0
+
+  retime:                                         # 执行层能力约束（默认 DJI Mini 3
+    auto: true                                    # 演示档，非厂商极限；export 超速时
+    max_horizontal_speed: 1.0                     # 自动重定时，也可 --stage retime 手动）
+    max_ascent_speed: 0.5
+    max_descent_speed: 0.5
+    max_horizontal_acceleration: 0.5
+    max_vertical_acceleration: 0.3
+    max_yaw_rate_deg: 20.0
+    min_gimbal_pitch_deg: -90.0
+    max_gimbal_pitch_deg: 60.0
+    max_gimbal_pitch_rate_deg: 20.0
+    command_period: 0.05                          # 20 Hz ZOH 指令流
+
+  jarvis:                                         # platform: jarvis 时的能力上限
+    max_base_linear_vel: 0.30                     # m/s — tracking_node 实际 0.4 的
+                                                  # 75%：按 0.8 规划会让 WBC 全程
+                                                  # 饱和（底座猛冲甩头）
+    max_base_angular_vel: 0.80                    # rad/s — tracker 1.5 的 53%
+    max_base_linear_acc: 0.50                     # m/s²（jarvis_controllers.yaml）
+    max_base_angular_acc: 2.50                    # rad/s² — 7.0 是猛转的来源
+    max_joint_vel: [1.0, 1.0, 1.0, 1.2, 1.2, 1.5] # rad/s，URDF 逐关节（比追踪端
+                                                  # 均匀 3.0 更紧 → 可证安全）
+    command_period: 0.05
+    cinematic_z_lo: 0.55                          # 相机高度带（FK/IK 实测的
+    cinematic_z_hi: 0.93                          # 高度×俯仰联合可行域）
+    base_clearance_margin: 0.20                   # 底盘落点 SDF 净空 m（前万向轮至 0.18 m）
+    allow_unreachable: false                      # true = 导出时个别不可达采样点
+                                                  # 保持上一构型（相机流不变，摘要
+                                                  # 计数）；默认 false = 报错退出
+    # arm_extension: [0.30, 0.40, 0.50, 0.25, 0.55, 0.20, 0.60, 0.45, 0.35]  # 底盘-相机臂展网格

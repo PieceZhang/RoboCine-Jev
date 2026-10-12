@@ -1,0 +1,74 @@
+{
+  "format": "jvs_obstacles/v1",
+  "minimum_clearance_m": 0.025,
+  "trajectory": "shot_moveout.json",
+  "initial_q": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "obstacles": [
+    {
+      "name": "plant_pot",
+      "type": "cylinder",
+      "center": [
+        -0.24,
+        0.32,
+        0.21
+      ],
+      "radius": 0.075,
+      "height": 0.42
+    },
+    {
+      "name": "footstool",
+      "type": "cube",
+      "center": [
+        -0.55,
+        -0.38,
+        0.09
+      ],
+      "size": 0.18
+    },
+    {
+      "name": "door_stop",
+      "type": "triangular_pyramid",
+      "center": [
+        -0.9,
+        0.42,
+        0.13
+      ],
+      "size": [
+        0.16,
+        0.16,
+        0.26
+      ],
+      "yaw_deg": -15
+    },
+    {
+      "name": "floor_lamp_base",
+      "type": "cylinder",
+      "center": [
+        -0.78,
+        -1.0,
+        0.28
+      ],
+      "radius": 0.08,
+      "height": 0.56
+    },
+    {
+      "name": "side_storage",
+      "type": "cube",
+      "center": [
+        -0.96,
+        1.15,
+        0.1
+      ],
+      "size": 0.2
+    }
+  ],
+  "difficulty": "medium",
+  "layout_note": "All primitives stand on z=0; the open sides preserve a feasible bypass route."
+}

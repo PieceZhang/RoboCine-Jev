@@ -1,0 +1,138 @@
+<?xml version="1.0" ?>
+<!-- demo_room.world — Gazebo Fortress (gz-sim6) world for ROS 2 Humble.
+
+The synthetic room from scripts/make_demo_room_pcd.py, in gz-sim axes
+(z-up): x = cinema_traj +X (north), y = cinema_traj +Z (east), z = +Y (up).
+Room 6x6x2.7 m, open top for visibility, the three demo boxes, a static
+"camera_drone" entity (teleported by path_player via /world/demo_room/set_pose),
+and the core gz-sim systems. Ground plane and sun are inlined — no Fuel /
+model:// dependency, works fully offline. -->
+<sdf version="1.7">
+  <world name="demo_room">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 12 0 0 0</pose>
+      <diffuse>0.85 0.85 0.85 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+    <light type="point" name="room_fill">
+      <pose>0 0 2.5 0 0 0</pose>
+      <diffuse>0.35 0.35 0.38 1</diffuse>
+      <attenuation><range>12</range></attenuation>
+    </light>
+
+    <!-- ground plane (inlined, no model:// include) -->
+    <model name="ground_plane"><static>true</static>
+      <link name="link">
+        <collision name="col">
+          <geometry><plane><normal>0 0 1</normal><size>20 20</size></plane></geometry>
+        </collision>
+        <visual name="vis">
+          <geometry><plane><normal>0 0 1</normal><size>20 20</size></plane></geometry>
+          <material><ambient>0.45 0.5 0.45 1</ambient><diffuse>0.45 0.5 0.45 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- walls: x = ±3, y = ±3, height 2.7, thickness 0.1 -->
+    <model name="wall_pos_x"><static>true</static><pose>3.05 0 1.35 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>0.1 6.2 2.7</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>0.1 6.2 2.7</size></box></geometry>
+          <material><ambient>0.8 0.8 0.8 1</ambient><diffuse>0.8 0.8 0.8 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="wall_neg_x"><static>true</static><pose>-3.05 0 1.35 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>0.1 6.2 2.7</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>0.1 6.2 2.7</size></box></geometry>
+          <material><ambient>0.8 0.8 0.8 1</ambient><diffuse>0.8 0.8 0.8 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="wall_pos_y"><static>true</static><pose>0 3.05 1.35 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>6.2 0.1 2.7</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>6.2 0.1 2.7</size></box></geometry>
+          <material><ambient>0.75 0.75 0.78 1</ambient><diffuse>0.75 0.75 0.78 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="wall_neg_y"><static>true</static><pose>0 -3.05 1.35 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>6.2 0.1 2.7</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>6.2 0.1 2.7</size></box></geometry>
+          <material><ambient>0.75 0.75 0.78 1</ambient><diffuse>0.75 0.75 0.78 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- furniture: sofa-ish / table-ish / target box (same centers as the PCD) -->
+    <model name="sofa"><static>true</static><pose>-1.2 -1.2 0.4 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>1.8 0.9 0.8</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>1.8 0.9 0.8</size></box></geometry>
+          <material><ambient>0.15 0.35 0.6 1</ambient><diffuse>0.15 0.35 0.6 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="table"><static>true</static><pose>1.5 1.5 0.375 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>1.2 1.2 0.75</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>1.2 1.2 0.75</size></box></geometry>
+          <material><ambient>0.5 0.35 0.2 1</ambient><diffuse>0.5 0.35 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="target_box"><static>true</static><pose>0 0 0.5 0 0 0</pose>
+      <link name="link">
+        <collision name="col"><geometry><box><size>0.6 0.6 1.0</size></box></geometry></collision>
+        <visual name="vis"><geometry><box><size>0.6 0.6 1.0</size></box></geometry>
+          <material><ambient>0.9 0.75 0.1 1</ambient><diffuse>0.9 0.75 0.1 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- camera drone: static entity teleported by path_player (no physics) -->
+    <model name="camera_drone"><static>true</static><pose>0 -2.5 1.5 0 0 0</pose>
+      <link name="body">
+        <visual name="chassis">
+          <geometry><box><size>0.30 0.30 0.08</size></box></geometry>
+          <material><ambient>1.0 0.45 0.05 1</ambient><diffuse>1.0 0.45 0.05 1</diffuse></material>
+        </visual>
+        <visual name="rotor_0"><pose>0.11 0.11 0.07 0 0 0</pose>
+          <geometry><cylinder><radius>0.08</radius><length>0.02</length></cylinder></geometry>
+          <material><ambient>0.2 0.2 0.2 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <visual name="rotor_1"><pose>-0.11 0.11 0.07 0 0 0</pose>
+          <geometry><cylinder><radius>0.08</radius><length>0.02</length></cylinder></geometry>
+          <material><ambient>0.2 0.2 0.2 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <visual name="rotor_2"><pose>0.11 -0.11 0.07 0 0 0</pose>
+          <geometry><cylinder><radius>0.08</radius><length>0.02</length></cylinder></geometry>
+          <material><ambient>0.2 0.2 0.2 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <visual name="rotor_3"><pose>-0.11 -0.11 0.07 0 0 0</pose>
+          <geometry><cylinder><radius>0.08</radius><length>0.02</length></cylinder></geometry>
+          <material><ambient>0.2 0.2 0.2 1</ambient><diffuse>0.2 0.2 0.2 1</diffuse></material>
+        </visual>
+        <visual name="camera"><pose>0.14 0 0 0 0 0</pose>
+          <geometry><box><size>0.08 0.08 0.06</size></box></geometry>
+          <material><ambient>0.05 0.05 0.05 1</ambient><diffuse>0.05 0.05 0.05 1</diffuse></material>
+        </visual>
+        <collision name="col"><geometry><box><size>0.30 0.30 0.08</size></box></geometry></collision>
+      </link>
+    </model>
+  </world>
+</sdf>

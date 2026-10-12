@@ -1,0 +1,73 @@
+#usda 1.0
+(
+    defaultPrim = "World"
+    metersPerUnit = 1
+    upAxis = "Y"
+)
+
+def Xform "World"
+{
+    def DomeLight "Sky"
+    {
+        float inputs:intensity = 900
+    }
+    def Cube "Floor" (prepend apiSchemas = ["PhysicsCollisionAPI"])
+    {
+        double size = 1
+        color3f[] primvars:displayColor = [(0.23, 0.28, 0.34)]
+        double3 xformOp:translate = (4.5, -0.04, 1.5)
+        float3 xformOp:scale = (7, 0.08, 8)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+    }
+    def Cube "LeftWall" (prepend apiSchemas = ["PhysicsCollisionAPI"])
+    {
+        double size = 1
+        color3f[] primvars:displayColor = [(0.90, 0.92, 0.95)]
+        double3 xformOp:translate = (1.1, 0.8, 1.5)
+        float3 xformOp:scale = (0.12, 1.6, 8)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+    }
+    def Cube "RightWall" (prepend apiSchemas = ["PhysicsCollisionAPI"])
+    {
+        double size = 1
+        color3f[] primvars:displayColor = [(0.90, 0.92, 0.95)]
+        double3 xformOp:translate = (7.9, 0.8, 1.5)
+        float3 xformOp:scale = (0.12, 1.6, 8)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+    }
+    def Cube "FarWall" (prepend apiSchemas = ["PhysicsCollisionAPI"])
+    {
+        double size = 1
+        color3f[] primvars:displayColor = [(0.84, 0.89, 0.93)]
+        double3 xformOp:translate = (4.5, 0.8, 5.4)
+        float3 xformOp:scale = (7, 1.6, 0.12)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+    }
+    def Cube "NearWall" (prepend apiSchemas = ["PhysicsCollisionAPI"])
+    {
+        double size = 1
+        color3f[] primvars:displayColor = [(0.84, 0.89, 0.93)]
+        double3 xformOp:translate = (4.5, 0.8, -2.4)
+        float3 xformOp:scale = (7, 1.6, 0.12)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+    }
+    def Xform "KidReference"
+    {
+        def Cylinder "Body" (prepend apiSchemas = ["PhysicsCollisionAPI"])
+        {
+            double radius = 0.12
+            double height = 0.43
+            uniform token axis = "Y"
+            color3f[] primvars:displayColor = [(0.28, 0.39, 0.85)]
+            double3 xformOp:translate = (4.725, 0.28, 3.72)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+        def Sphere "Head" (prepend apiSchemas = ["PhysicsCollisionAPI"])
+        {
+            double radius = 0.15
+            color3f[] primvars:displayColor = [(0.95, 0.72, 0.51)]
+            double3 xformOp:translate = (4.725, 0.6706, 3.72)
+            uniform token[] xformOpOrder = ["xformOp:translate"]
+        }
+    }
+}

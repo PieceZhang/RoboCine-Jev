@@ -1,0 +1,94 @@
+# kujiale_0021 kid dolly-out scenario (single beat).
+#
+# A one-move demo: level (0° gimbal) close-up on the SEATED Kid cast figure,
+# then move_out — the camera dollies straight back along the Kid's facing
+# axis (she faces the TV/−Z), ending in a wider frontal shot.
+#
+# Scene: cinema_traj/scenes/kujiale_0021_kid_dolly.json — sofa_trio copy with
+# a static one-frame subject_track "kid" pinned to the cast Kid's seat
+# ([4.725, -0.539, 3.72] as virtual feet, heading -pi/2 = facing -Z/TV).
+# The chest key point (feet + 0.72*1.68 ≈ y 0.67, face height for a seated
+# figure on the cushion) is the dolly look-at; the level anchor contract
+# (start_angle_deg: 0) starts the camera at that same height — a seated
+# figure cannot use the feet-based elevation bands (they'd put the camera at
+# floor level). person_Kid stays in the scene as an obstacle OBB, and the
+# pull-back line (toward +Z... the TV side) clears table_0002 (top y≈0.41)
+# under the chandelier (bottom y≈1.82).
+#
+# Render note: the cast Kid figure IS the subject — the default Xbot.glb
+# subject stand-in must NOT be baked (it would stand inside the seated Kid).
+# Generate cast.json first, then build with --subject-glb none (small patch
+# in tools/simview_isaac.py: '' / 'none' disables the stand-in; else-branch
+# now emits an invisible capsule instead of a grey one).
+#
+# Regenerate:
+#   python tools/scenario_gen.py cinema_traj/scenes/config/kujiale_0021_kid_dolly.yml
+#   python tools/simview_isaac.py build --traj cinema_traj_out/kujiale_0021_kid_dolly/traj_final.json \
+#       --scene cinema_traj/scenes/kujiale_0021_kid_dolly.json \
+#       --cast cinema_traj_out/kujiale_0021_kid_dolly/cast.json --subject-glb none
+#   python tools/simview_isaac.py gui cinema_traj_out/kujiale_0021_kid_dolly/simview/simview.usda
+
+scene_id: kujiale_0021_kid_dolly
+plan_id: kid_dolly_out
+target: kid                            # the subject_track in the scene copy
+
+prompt: >-
+  只拍Kid: 正面水平特写后拉 dolly out
+
+# Same staging as sofa_trio: the trio stays on the sofa (Kid is the star; the
+# cast Kid.usda figure is what the camera actually sees — no Xbot stand-in).
+cast:
+  - id: Dad                            # construction man, 1.78 m
+    usda: datasets/simview_assets/cast/people_zip/Dad.usda
+    seat: [3.95, -0.595, 3.72]
+    heading_deg: 180.0
+    height_m: 1.781
+  - id: Kid                            # medical, 1.68 m — THE subject
+    usda: datasets/simview_assets/cast/people_zip/Kid.usda
+    seat: [4.725, -0.539, 3.72]
+    heading_deg: 180.0
+    height_m: 1.680
+  - id: Mom                            # business woman, 1.61 m
+    usda: datasets/simview_assets/cast/people_zip/Mom.usda
+    seat: [5.50, -0.499, 3.72]
+    heading_deg: 180.0
+    height_m: 1.607
+
+props:
+  - {id: MugA, up: Z, heading_deg: 15.0,
+     usd: datasets/simview_assets/props/Mugs/SM_Mug_A2.usd,
+     at: [4.95, 0.4512, 1.90]}
+  - {id: MugB, up: Z, heading_deg: 145.0,
+     usd: datasets/simview_assets/props/Mugs/SM_Mug_C1.usd,
+     at: [5.35, 0.4495, 2.12]}
+
+beats:
+  # jarvis-compatible dolly corridor: distance: far lets the anchor land
+  # south of coffee table table_0002 (z ∈ [1.42, 2.59]) — the far candidate
+  # (d=2.91 → camera z=0.81) is the only one clear of the table footprint,
+  # and the move_out pull-back then drives the base through the clear
+  # corridor between the table and the TV wall (z ∈ [-0.8, 1.4]). Closer
+  # presets put the camera over the table with the base park inside it →
+  # every sample "底盘落点+臂 IK 无解" under platform: jarvis.
+  - anchor: {elevation: medium, distance: far, start_angle_deg: 0, azimuth_deg: 0}
+    traj: {type: move_out, duration_s: 6.0}
+
+optimizer:
+  max_iters: 400
+  plateau_iters: 30
+
+# --------------------------------------------------------------------------- #
+# Same acceptance audit as sofa_trio (shared room), plus the Kid capsule is
+# enforced by the pipeline itself via subject_track.
+audit:
+  obbs:
+    - {name: sofa_0000,       center: [4.7246, 0.3433, 3.7115], half: [1.5575, 0.3042, 0.7340]}
+    - {name: chaise_0001,     center: [6.740, 0.2507, 2.140],   half: [0.483, 0.3321, 0.8959]}
+    - {name: table_0002,      center: [5.1461, 0.2078, 2.0046], half: [0.5869, 0.1975, 0.5870]}
+    - {name: chandelier_0000, center: [5.2415, 2.4322, 1.703],  half: [0.9109, 0.6158, 0.9905]}
+    - {name: TV_wall,         center: [5.0, 1.5, -0.90],        half: [4.5, 1.5, 0.10]}
+  torso_half: 0.35
+  arm_half: 0.65
+  arm_band: [1.15, 1.65]
+  depth_half: 0.22
+  min_clearance: 0.10

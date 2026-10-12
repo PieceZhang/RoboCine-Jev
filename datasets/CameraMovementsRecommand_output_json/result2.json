@@ -1,0 +1,20 @@
+{
+  "func": "callbackRecommend",
+  "params": [
+    {
+      "_note_en": "MOCK 2: orbit WHILE the subject walks (track_orbit), level, medium",
+      "video": "mock-03-横屏-女生-办公居家-环绕跟随-3.mp4",
+      "tags": {
+        "场景类别": "室内/居家环境",
+        "被拍摄主体": "单人/中青年女性",
+        "场景特征": "狭小封闭空间",
+        "运镜类型": "环绕跟随",
+        "屏幕方向": "横屏",
+        "初始拍摄角度": "水平",
+        "运镜方向": "前",
+        "运镜节奏": "中",
+        "运镜难度": "4星"
+      }
+    }
+  ]
+}

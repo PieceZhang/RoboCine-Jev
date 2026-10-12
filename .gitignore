@@ -1,0 +1,92 @@
+# ── Data & generated artifacts (NOT source — too large / machine-specific) ──
+dataset/
+datasets/*
+# 上游运镜推荐输出是 pipeline 输入/测试夹具，跟随仓库（其余 datasets 仍忽略）
+!datasets/CameraMovementsRecommand_output_json/
+# frl_apartment_0 源点云（96MB，README 全链路 ① 的输入；逐级放行仅此一个文件，
+# 其余 Replica 场景仍忽略。Replica 许可为非商业研究用途——仓库转公开前须移除）
+!datasets/replica_mcmc_3dgs/
+datasets/replica_mcmc_3dgs/*
+!datasets/replica_mcmc_3dgs/frl_apartment_0/
+datasets/replica_mcmc_3dgs/frl_apartment_0/*
+!datasets/replica_mcmc_3dgs/frl_apartment_0/ply/
+*.zip
+open-image-full.zip
+
+# ── Third-party Kotlin sources kept locally for reference (motion-math port
+#    lives in cinema_traj/core/retime.py) ──
+trajectory-simulator-0.1.0-SNAPSHOT/
+
+# ── Annotation outputs (regenerate by running the pipeline) ──
+**/obstacle_annotations_*.json
+**/filter_manifest.json
+**/depth_region_histograms.pkl
+**/depth_calibration_disagreements.json
+**/depth_maps/
+**/抽帧_pilot/
+**/抽帧_full/
+annotator_out/
+
+# ── cinema_traj artifacts (plan/trajectory/exports regenerate via run_traj.py) ──
+cinema_traj_out/
+cinema_traj/demo/demo_room.pcd
+cinema_traj/scenes/*.presubject-*
+
+# ── Python: bytecode, environments, packaging and test/tool caches ──
+__pycache__/
+*.py[cod]
+*$py.class
+
+.venv/
+venv/
+env/
+
+*.egg-info/
+.eggs/
+build/
+dist/
+
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+
+# ── ROS 2 / colcon generated workspace state ──
+/ros2_ws/build/
+/ros2_ws/install/
+/ros2_ws/log/
+/ros2_ws/.colcon/
+/ros2_ws/.jvs_validation_bin/
+
+# ── Machine-specific config and secrets (ship example files instead) ──
+config.yaml
+.env
+.env.*
+!.env.example
+
+# ── Editor / OS noise ──
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+.claude/
+
+# ── Backups / temp ──
+*.bak-*
+*.log
+*.swp
+*.swo
+*.tmp
+*~
+log/
+# ── vlog_agent artifacts (index/frames/edits regenerate via run_vlog.py) ──
+vlog_agent_out/
+
+/ros2_ws/jvs_mock/results
+
+# colcon install-tree at repo root (stray from a ws-rooted colcon build)
+/install/

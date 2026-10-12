@@ -1,0 +1,41 @@
+{
+  "description": "Measured unobstructed baseline excerpts, original recorded rows. Short windows prove a lower bound on separate solid-collision encounters, not full-run avoidance success.",
+  "cases": {
+    "crossing": {
+      "trajectory": "shot_combo1.json",
+      "initial_base_pose": {
+        "frame": "scene_y_up",
+        "x": 5.0,
+        "z": 1.0,
+        "yaw": 0.0,
+        "height": 0.002
+      },
+      "trajectory_sha256": "adea04777ede3df62f3b801fc0c9010b51c3383807f4ff9b3d4c3b82fff62589",
+      "source_baseline": "results/dynamic_collision_required_20261008/baseline_frozen/crossing",
+      "source_telemetry_sha256": "d80349c68b22193f9f8aa9d194f25756a11c9ae7b0b22a38a11d811239abcfea",
+      "sample_windows_center_s": [
+        12.1
+      ],
+      "window_half_width_s": 0.2
+    },
+    "overtake": {
+      "trajectory": "shot_combo3.json",
+      "initial_base_pose": {
+        "frame": "scene_y_up",
+        "x": 3.5,
+        "z": 2.0,
+        "yaw": 0.62,
+        "height": 0.002
+      },
+      "trajectory_sha256": "c4e756c1cad93c1fce14b215ad4ba4e4bb79ed43b064ab153ae6fc8986d96770",
+      "source_baseline": "results/dynamic_collision_required_20261008/baseline_frozen/overtake",
+      "source_telemetry_sha256": "8bec6330d1b58d93a2d3e1f00e6645f7accb6e63ade354fb56f60db048774d14",
+      "sample_windows_center_s": [
+        6.4,
+        20.0,
+        31.5
+      ],
+      "window_half_width_s": 0.2
+    }
+  }
+}

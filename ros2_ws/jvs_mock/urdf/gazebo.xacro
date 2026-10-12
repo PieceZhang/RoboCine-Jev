@@ -1,0 +1,85 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:macro name="jvs_gazebo" params="controllers_file">
+    <gazebo reference="left_wheel_link">
+      <mu1>1.0</mu1><mu2>1.0</mu2>
+    </gazebo>
+    <gazebo reference="right_wheel_link">
+      <mu1>1.0</mu1><mu2>1.0</mu2>
+    </gazebo>
+
+    <!-- Gazebo Fortress publishes both /lidar (LaserScan) and
+         /lidar/points (PointCloudPacked). Only the point cloud is bridged. -->
+    <xacro:if value="${'$(arg lidar_mode)' == 'both'}">
+    <gazebo reference="lidar_link">
+      <sensor name="lidar_sensor" type="gpu_lidar">
+        <pose>0 0 0 0 0 0</pose>
+        <topic>/lidar</topic>
+        <gz_frame_id>lidar_link</gz_frame_id>
+        <update_rate>15</update_rate>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>360</samples>
+              <resolution>1.0</resolution>
+              <min_angle>-3.1415927</min_angle>
+              <max_angle>3.1415927</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>64</samples>
+              <resolution>1.0</resolution>
+              <min_angle>-0.7853981634</min_angle>
+              <max_angle>0.7853981634</max_angle>
+            </vertical>
+          </scan>
+          <range>
+            <min>0.12</min>
+            <max>50.0</max>
+            <resolution>0.01</resolution>
+          </range>
+        </lidar>
+        <always_on>true</always_on>
+        <visualize>true</visualize>
+      </sensor>
+    </gazebo>
+    </xacro:if>
+
+    <!-- Original front LiDAR scan settings and pitched URDF mount. -->
+    <gazebo reference="front_lidar_link">
+      <sensor name="front_lidar_sensor" type="gpu_lidar">
+        <pose>0 0 0 0 0 0</pose>
+        <topic>/lidar/front</topic>
+        <gz_frame_id>front_lidar_link</gz_frame_id>
+        <update_rate>15</update_rate>
+        <lidar>
+          <scan>
+            <horizontal>
+              <samples>360</samples><resolution>1.0</resolution>
+              <min_angle>-3.1415927</min_angle><max_angle>3.1415927</max_angle>
+            </horizontal>
+            <vertical>
+              <samples>96</samples><resolution>1.0</resolution>
+              <min_angle>0</min_angle><max_angle>1.0471975512</max_angle>
+            </vertical>
+          </scan>
+          <range><min>0.12</min><max>50.0</max><resolution>0.01</resolution></range>
+        </lidar>
+        <always_on>true</always_on><visualize>true</visualize>
+      </sensor>
+    </gazebo>
+
+    <!-- The simulator plugin owns controller_manager and exposes URDF interfaces. -->
+    <gazebo>
+      <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+        <robot_param>robot_description</robot_param>
+        <robot_param_node>robot_state_publisher</robot_param_node>
+        <parameters>${controllers_file}</parameters>
+        <controller_manager_name>controller_manager</controller_manager_name>
+        <ros>
+          <!-- Humble's unstamped Twist input is private by default; expose /cmd_vel. -->
+          <remapping>/base_controller/cmd_vel_unstamped:=/cmd_vel</remapping>
+        </ros>
+      </plugin>
+    </gazebo>
+  </xacro:macro>
+</robot>

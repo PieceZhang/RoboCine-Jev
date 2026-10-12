@@ -1,0 +1,14 @@
+whole_body_controller:
+  ros__parameters:
+    controller_mode: stage2
+    preview_horizon_steps: 8
+    preview_dt_s: 0.4
+    preview_replan_s: 0.2
+    shot_blend_s: 2.0
+    arm_prepare_s: 3.0
+    adaptive_shot_timing: true
+    subject_lock: true
+    tracking_weight: 10.0
+    position_rms_tolerance: 0.05
+    position_max_tolerance: 0.05
+    orientation_rms_tolerance: 0.1
