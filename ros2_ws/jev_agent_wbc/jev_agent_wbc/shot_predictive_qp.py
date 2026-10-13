@@ -80,6 +80,9 @@ def refine_execution_qp(hessian, gradient, matrix, lower, upper, initial):
 
 
 class ShotPredictiveQP(WholeBodyQP):
+    def coordination_objective(self, hessian, gradient, j, task, desired):
+        return hessian, gradient
+
     def preview_control(self, *args):
         pass
 
@@ -540,6 +543,7 @@ class ShotPredictiveQP(WholeBodyQP):
         turn_scale += hold*(min(.2, turn_scale)-turn_scale)
         turn_reference = turn_scale*np.tanh(2.*self.heading_error(heading, state)/turn_scale)
         gradient[1] -= heading_weight*turn_reference
+        hessian, gradient = self.coordination_objective(hessian, gradient, j, task, desired)
         if preparing:
             # Move off the straight reset singularity before advancing the
             # camera path. The folded seed has the same initial camera pose.

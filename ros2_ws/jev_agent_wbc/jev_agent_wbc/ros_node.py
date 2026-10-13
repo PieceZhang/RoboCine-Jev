@@ -63,6 +63,7 @@ class CinematicNode(Node):
         self.subject = self.state = self.q_command = self.engine = None
         self.base_z, self.base_rotation = 0., np.eye(3)
         self.joints = self.odom = None
+        self.joint_velocity = self.base_velocity = None
         self.joint_wall = self.odom_wall = time.monotonic()
         self.start_s = self.previous_s = None
         self.completed, self.fault = False, ''
@@ -89,6 +90,8 @@ class CinematicNode(Node):
             return
         stamp = message.header.stamp.sec+message.header.stamp.nanosec*1e-9
         self.joints = q
+        velocity = np.array([message.velocity[names[n]] for n in ARM_JOINT_NAMES]) if len(message.velocity) == len(message.name) else None
+        self.joint_velocity = velocity if velocity is not None and np.isfinite(velocity).all() else None
         self.joint_wall = time.monotonic()
         self.lidar.joints.append((stamp, q.copy()))
 
@@ -99,6 +102,8 @@ class CinematicNode(Node):
             return
         self.odom = (np.array(values[:3]), Rotation.from_quat(values[3:]).as_matrix())
         self.odom_wall = time.monotonic()
+        velocity = np.array([message.twist.twist.linear.x, message.twist.twist.angular.z])
+        self.base_velocity = velocity if np.isfinite(velocity).all() else None
 
     def on_subject(self, message):
         if message.header.frame_id not in ('odom', 'world', ''):
@@ -177,7 +182,7 @@ class CinematicNode(Node):
             snapshot['observation_stamp'] -= self.start_s
             self.engine = CinematicEngine(reference, snapshot, self.output, mode=self.mode, api_url=self.api_url,
                                           preview=self.allocation_preview, budget=self.agent_budget,
-                                          intrinsics=self.intrinsics)
+                                          intrinsics=self.intrinsics, coordination_async=True)
             start = String()
             start.data = json.dumps(dict(epoch_s=now))
             self.scene_start.publish(start)
@@ -202,7 +207,8 @@ class CinematicNode(Node):
                 u, info = self.engine.wbc.solve(state, p, r, np.zeros(6), dt,
                     base_z=bp[2], base_rotation=br, commanded_q=self.q_command, trajectory_time=t, brake=True)
             else:
-                u, info = self.engine.step(state, snapshot, t, dt, bp[2], br, self.q_command)
+                u, info = self.engine.step(state, snapshot, t, dt, bp[2], br, self.q_command,
+                    measured_control=None if self.base_velocity is None or self.joint_velocity is None else np.r_[self.base_velocity, self.joint_velocity])
             self.publish(u, dt)
             info.update(t=t, fault=self.fault)
             self.telemetry.write(json.dumps(native(info), allow_nan=False)+'\n')

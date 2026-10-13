@@ -22,6 +22,63 @@ def joint_margin(state):
 
 
 class ExecutionWBC(DynamicPredictiveQP):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from .coordination import CoordinationPreview
+        self.coordination = CoordinationPreview()
+        self.coordination_reference = None
+        self.measured_control = None
+
+    def set_trajectory(self, trajectory):
+        super().set_trajectory(trajectory)
+        self.coordination.set_trajectory(trajectory)
+        if self.coordination.enabled:
+            # The fast QP must retain the original deadline even while the
+            # asynchronous allocator is late or unavailable.
+            self.limits = replace(self.limits, deadline_s=trajectory.duration)
+
+    def solve(self, state, target_p, target_r, feedforward, dt, **kwargs):
+        t = kwargs.get('trajectory_time', 0.)
+        old_command = self.previous.copy()
+        self.coordination_reference = None
+        if not kwargs.get('brake', False) and not kwargs.get('preparing', False):
+            self.coordination_reference = self.coordination.update(
+                np.asarray(state), self.previous,
+                np.asarray(state)[3:] if kwargs.get('commanded_q') is None else np.asarray(kwargs['commanded_q']),
+                t, dt, kwargs.get('base_z', 0.), self.limits, kwargs.get('base_rotation'),
+                measured_control=self.measured_control)
+        command, info = super().solve(state, target_p, target_r, feedforward, dt, **kwargs)
+        info.update(self.coordination.info)
+        info['coordination_active'] = self.coordination_reference is not None
+        if self.coordination_reference is not None:
+            info['coordination_reference'] = self.coordination_reference.tolist()
+        if self.coordination.enabled:
+            p, r, jacobian = whole_body_kinematics(state, kwargs.get('base_z', 0.), kwargs.get('base_rotation'))
+            error = np.r_[np.asarray(target_p)-p, Rotation.from_matrix(target_r@r.T).as_rotvec()]
+            requested, _ = self.camera_task(error, feedforward, self.hold_weight(t))
+            info['camera_velocity_residual'] = (jacobian@command-requested).tolist()
+            info['previous_actuator_command'] = old_command.tolist()
+            velocity = old_command if self.measured_control is None else self.measured_control
+            stop = velocity[2:]**2/(2*self.limits.acceleration[2:])
+            reserve = np.where(velocity[2:] >= 0., JOINT_UPPER-np.asarray(state)[3:], np.asarray(state)[3:]-JOINT_LOWER)-stop
+            info['joint_braking_reserve_rad'] = reserve.tolist()
+            info['base_yaw_stopping_angle_rad'] = float(velocity[1]**2/(2*self.limits.acceleration[1]))
+            info['braking_velocity_source'] = 'measured' if self.measured_control is not None else 'previous_command'
+        return command, info
+
+    def coordination_objective(self, hessian, gradient, j, task, desired):
+        if not self.coordination.enabled:
+            return hessian, gradient
+        # Future camera motion replaces conflicting instantaneous heading and
+        # comfort goals. The current camera task and every safety row remain.
+        weight = np.array([20000., 20000., 20., 20., 20., 20., 20., 20.])
+        return (j.T@(task[:, None]*j)+np.diag(weight)+.15*np.eye(8),
+                -j.T@(task*desired)-weight*(self.coordination_reference if self.coordination_reference is not None else np.zeros(8))-.15*self.previous)
+
+    def close(self):
+        if hasattr(self.coordination, 'close'):
+            self.coordination.close()
+
     def replan_due(self, trajectory_time):
         return False
 

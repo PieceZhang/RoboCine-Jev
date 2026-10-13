@@ -24,7 +24,7 @@ from .safety import solve_with_certificate
 class CinematicEngine:
     def __init__(self, original, scene, output, *, mode='jev', api_url=None, model='perplexity', limits=None,
                  decision_cooldown_s=None, preview=False, budget=None, intrinsics=None,
-                 decider=None, planning_obstacle_avoidance=None):
+                 decider=None, planning_obstacle_avoidance=None, coordination_async=False):
         if mode not in ('jev', 'strict', 'rule'):
             raise ValueError('mode must be jev, rule or strict')
         self.original = self.active = original
@@ -52,6 +52,10 @@ class CinematicEngine:
                       AsyncDynamicPredictiveQP if preview else ExecutionWBC)
         self.wbc = controller(self.limits, scene=scene, horizon_steps=4, horizon_dt=.3, replan_s=.4)
         self.wbc.set_trajectory(original)
+        if coordination_async and isinstance(self.wbc, ExecutionWBC):
+            from .coordination import AsyncCoordinationPreview
+            self.wbc.coordination = AsyncCoordinationPreview()
+            self.wbc.coordination.set_trajectory(original)
         self.last_report_s = self.last_attempt_s = self.last_install_s = -float('inf')
         self.report, self.context, self.pipeline_parent = None, None, None
         self.pending_candidates = {}
@@ -276,8 +280,9 @@ class CinematicEngine:
                 self.wbc.previous.copy(), t, base_z, self.planning_limits,
                 commanded_q=None if commanded_q is None else np.asarray(commanded_q).copy())
             self.last_report_s = t
-    def step(self, state, scene, t, dt, base_z=0., base_rotation=None, commanded_q=None):
+    def step(self, state, scene, t, dt, base_z=0., base_rotation=None, commanded_q=None, measured_control=None):
         started = time.monotonic()
+        self.wbc.measured_control = None if measured_control is None else np.asarray(measured_control, float).copy()
         self.update(state, scene, t, base_z, commanded_q)
         target, rotation, feedforward = self.active.sample(t)
         brake = t >= self.original.duration or t-float(scene['observation_stamp']) > .6

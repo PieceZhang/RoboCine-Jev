@@ -48,6 +48,8 @@ def arguments():
     parser.add_argument('--audit-prediction', action='store_true', help='save bounded observation snapshots for offline predictor diagnostics')
     parser.add_argument('--no-preview', action='store_true', help='ablate inherited allocation MPC, retaining safety and bounded task planner')
     parser.add_argument('--allocation-preview', action='store_true', help='enable inherited shot-specific base-allocation MPC for ablation')
+    parser.add_argument('--async-coordination', action='store_true',
+                        help='run the cross-phase allocation in its live nonblocking worker instead of lockstep')
     parser.add_argument('--acceleration-reserve', type=float, default=.4,
                         help='operating acceleration / physical acceleration; evaluation limits stay fixed')
     parser.add_argument('--yaw-acceleration-reserve', type=float, default=.1,
@@ -277,6 +279,7 @@ def run_case(args, app, name, mode, output):
         save_json(output/'initial_observed_scene.json', observed)
         engine = CinematicEngine(reference, observed, output, mode=mode, api_url=args.api_url, model=args.model, limits=limits,
                                  preview=args.allocation_preview and not args.no_preview,
+                                 coordination_async=args.async_coordination,
                                  budget=SearchBudget(decision_period_s=args.agent_period,
                                      activation_lead_s=args.activation_lead, max_rollouts=args.candidate_budget,
                                      max_horizon_s=args.prediction_horizon, prediction_step_s=args.prediction_step),
@@ -324,7 +327,7 @@ def run_case(args, app, name, mode, output):
                     base_z=float(bp[2]), base_rotation=br.copy(),
                     active_is_original=engine.active is reference))
             try:
-                command, info = engine.step(state, observed, t, dt, base_z=bp[2], base_rotation=br, commanded_q=q_command)
+                command, info = engine.step(state, observed, t, dt, base_z=bp[2], base_rotation=br, commanded_q=q_command, measured_control=measured)
             except Exception:
                 from dataclasses import asdict
                 save_json(output/'failure_snapshot.json', dict(t=t, dt=dt, state=state,
@@ -392,6 +395,7 @@ def run_case(args, app, name, mode, output):
         summary.update(backend='isaac_physx', physics_hz=args.physics_hz, wall_s=time.monotonic()-begin,
             mode=mode, case=name, observation_source='dual_physx_sparse_lidar_raycast', contacts=contact_count,
             contact_notifications=len(contacts),
+            coordination_async=args.async_coordination,
             operating_acceleration_fraction=args.acceleration_reserve,
             operating_yaw_acceleration_fraction=(args.yaw_acceleration_reserve
                 if args.yaw_acceleration_reserve is not None else args.acceleration_reserve),
