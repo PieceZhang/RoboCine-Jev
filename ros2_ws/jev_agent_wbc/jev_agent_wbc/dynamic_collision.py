@@ -7,7 +7,7 @@ from .kc_svsdf import SweptCollision, advance, primitive_sdf
 
 
 class DynamicCollision(SweptCollision):
-    def __init__(self, scene, physical_time=None, uncertainty_rate=.035):
+    def __init__(self, scene, physical_time=None, uncertainty_rate=None):
         super().__init__(scene)
         self.observed_centers = self.centers.copy()
         self.observed_radii = self.radii.copy()
@@ -18,7 +18,8 @@ class DynamicCollision(SweptCollision):
                 or self.ages.shape != self.radii.shape or not np.isfinite(self.velocities).all()
                 or not np.isfinite(self.ages).all() or np.any(self.ages < 0)):
             raise ValueError('invalid dynamic surface attributes')
-        self.uncertainty_rate = float(uncertainty_rate)
+        self.uncertainty_rate = float(scene.get('motion_uncertainty_rate_m_s', .035)
+                                      if uncertainty_rate is None else uncertainty_rate)
         if not np.isfinite(self.uncertainty_rate) or self.uncertainty_rate < 0:
             raise ValueError('invalid motion uncertainty rate')
         self.radius_rates = np.where(self.track_ids > 0, self.uncertainty_rate, 0.)
@@ -35,7 +36,14 @@ class DynamicCollision(SweptCollision):
         self.tree = cKDTree(self.centers)
 
     def at_time(self, offset):
-        return DynamicCollision(self.scene, self.physical_time + offset, self.uncertainty_rate)
+        # Geometry and the original timestamped observation are immutable.
+        # Reuse them across prediction samples; only projected arrays/tree/time
+        # belong to the new snapshot. Rebuilding all URDF primitives per probe
+        # dominated the configuration predictor's runtime.
+        from copy import copy
+        projected=copy(self)
+        projected.set_time(self.physical_time+offset)
+        return projected
 
     def static_collision(self):
         mask = self.track_ids == 0

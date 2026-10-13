@@ -32,9 +32,10 @@ class CinematicNode(Node):
         super().__init__('cinematic_wbc')
         defaults = dict(task_file='', output_directory='/tmp/jev_cinematic_ros',
             api_url='http://127.0.0.1:8000/v1/systemone', mode='jev', control_rate_hz=50., allocation_preview=False,
-            subject_pose_topic='/cinematic/subject_pose', state_timeout_s=.2,
+            subject_pose_topic='/cinematic/subject_pose', state_timeout_s=.2, state_stamp_skew_s=.05,
             subject_visual_topic='/cinematic/subject_visual', camera_info_topic='/camera/camera_info',
             camera_frame='camera_link',
+            velocity_response_time_s=[0.,0.,0.,0.,0.,0.,0.,0.],
             agent_period_s=.5, candidate_activation_lead_s=4.,
             lidar_topics=['/lidar/points', '/lidar/front/points'], lidar_voxel_size=.04,
             lidar_map_radius=4.5, lidar_minimum_height=.03, lidar_maximum_height=1.6,
@@ -53,8 +54,11 @@ class CinematicNode(Node):
         if not .005 <= self.period <= .05:
             raise ValueError('control rate must be in [20, 200] Hz')
         self.timeout = float(value('state_timeout_s'))
+        self.state_stamp_skew=float(value('state_stamp_skew_s'))
         self.api_url, self.mode = value('api_url'), value('mode')
         self.allocation_preview = value('allocation_preview')
+        from .whole_body_qp import Limits
+        self.runtime_limits=Limits(response_time=np.asarray(value('velocity_response_time_s'),float))
         self.agent_budget = SearchBudget(decision_period_s=float(value('agent_period_s')),
             activation_lead_s=float(value('candidate_activation_lead_s')))
         self.visual_record = self.subject_record = self.intrinsics = None
@@ -64,6 +68,7 @@ class CinematicNode(Node):
         self.base_z, self.base_rotation = 0., np.eye(3)
         self.joints = self.odom = None
         self.joint_velocity = self.base_velocity = None
+        self.joint_stamp = self.odom_stamp = None
         self.joint_wall = self.odom_wall = time.monotonic()
         self.start_s = self.previous_s = None
         self.completed, self.fault = False, ''
@@ -90,6 +95,7 @@ class CinematicNode(Node):
             return
         stamp = message.header.stamp.sec+message.header.stamp.nanosec*1e-9
         self.joints = q
+        self.joint_stamp=stamp
         velocity = np.array([message.velocity[names[n]] for n in ARM_JOINT_NAMES]) if len(message.velocity) == len(message.name) else None
         self.joint_velocity = velocity if velocity is not None and np.isfinite(velocity).all() else None
         self.joint_wall = time.monotonic()
@@ -101,8 +107,13 @@ class CinematicNode(Node):
         if not np.isfinite(values).all() or np.linalg.norm(values[3:]) < 1e-8:
             return
         self.odom = (np.array(values[:3]), Rotation.from_quat(values[3:]).as_matrix())
+        self.odom_stamp=message.header.stamp.sec+message.header.stamp.nanosec*1e-9
+        linear,angular=message.twist.twist.linear,message.twist.twist.angular
+        rotation=self.odom[1]
+        full_twist=np.r_[rotation@np.array([linear.x,linear.y,linear.z]),rotation@np.array([angular.x,angular.y,angular.z])]
+        self.base_twist=full_twist if np.isfinite(full_twist).all() else None
         self.odom_wall = time.monotonic()
-        velocity = np.array([message.twist.twist.linear.x, message.twist.twist.angular.z])
+        velocity = np.array([message.twist.twist.linear.x, full_twist[5]])
         self.base_velocity = velocity if np.isfinite(velocity).all() else None
 
     def on_subject(self, message):
@@ -170,6 +181,16 @@ class CinematicNode(Node):
         now = self.get_clock().now().nanoseconds*1e-9
         if self.joints is None or self.odom is None or self.subject is None:
             return
+        feedback_valid=(self.joint_velocity is not None and self.base_velocity is not None
+            and getattr(self,'base_twist',None) is not None
+            and abs(self.joint_stamp-self.odom_stamp)<=self.state_stamp_skew
+            and max(abs(now-self.joint_stamp),abs(now-self.odom_stamp))<=self.timeout
+            and max(time.monotonic()-self.joint_wall,time.monotonic()-self.odom_wall)<=self.timeout)
+        if not feedback_valid:
+            if self.engine is not None:
+                self.fault='no certified control: measured velocities missing, stale or timestamp-skewed'
+                self.get_logger().error(self.fault,throttle_duration_sec=1.)
+            return
         bp, br = self.odom
         state = np.r_[bp[:2], np.arctan2(br[1, 0], br[0, 0]), self.joints]
         if self.engine is None:
@@ -181,7 +202,7 @@ class CinematicNode(Node):
             snapshot = self.lidar.map.snapshot()
             snapshot['observation_stamp'] -= self.start_s
             self.engine = CinematicEngine(reference, snapshot, self.output, mode=self.mode, api_url=self.api_url,
-                                          preview=self.allocation_preview, budget=self.agent_budget,
+                                          preview=self.allocation_preview, budget=self.agent_budget,limits=self.runtime_limits,
                                           intrinsics=self.intrinsics, coordination_async=True)
             start = String()
             start.data = json.dumps(dict(epoch_s=now))
@@ -199,6 +220,8 @@ class CinematicNode(Node):
         snapshot = self.lidar.map.snapshot()
         snapshot['observation_stamp'] -= self.start_s
         self.update_evidence()
+        self.engine.wbc.measured_control=np.r_[self.base_velocity,self.joint_velocity]
+        self.engine.wbc.measured_base_twist=self.base_twist.copy()
         try:
             if self.fault or self.completed or self.lidar.stale(now):
                 self.engine.wbc.update_collision_map(snapshot)
@@ -208,7 +231,8 @@ class CinematicNode(Node):
                     base_z=bp[2], base_rotation=br, commanded_q=self.q_command, trajectory_time=t, brake=True)
             else:
                 u, info = self.engine.step(state, snapshot, t, dt, bp[2], br, self.q_command,
-                    measured_control=None if self.base_velocity is None or self.joint_velocity is None else np.r_[self.base_velocity, self.joint_velocity])
+                    measured_control=np.r_[self.base_velocity,self.joint_velocity],
+                    measured_base_twist=self.base_twist)
             self.publish(u, dt)
             info.update(t=t, fault=self.fault)
             self.telemetry.write(json.dumps(native(info), allow_nan=False)+'\n')

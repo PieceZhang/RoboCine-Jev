@@ -202,6 +202,11 @@ class DeformedReference:
         return old*(1.-fraction)+float('subject_aim' in self.envelope.protected)*fraction
 
     def sample(self, t):
+        if t <= self.activation_s:
+            # The unactivated prefix is exactly the received parent, including
+            # its feedforward. Re-differentiating identical poses introduces a
+            # small but accumulative predictor/execution prefix discrepancy.
+            return (self.previous or self.original).sample(t)
         s = float(np.clip(t, 0., self.duration))
         p, r = self.pose(s)
         h = 1e-4

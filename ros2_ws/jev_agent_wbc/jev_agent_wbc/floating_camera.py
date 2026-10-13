@@ -64,7 +64,9 @@ def predicted_clearances(positions, times, scene, radius):
     centers = np.asarray(scene['centers'])[None] + (
         np.asarray(times)[:, None, None]-scene['observation_stamp'])*np.asarray(scene['velocities'])[None]
     return (np.linalg.norm(np.asarray(positions)[:, None]-centers, axis=2)
-            -np.asarray(scene['radii'])[None]-radius).min(axis=1)
+            -np.asarray(scene['radii'])[None]
+            -np.maximum(0.,np.asarray(times)-scene['observation_stamp'])[:,None]
+             *np.asarray(scene.get('radius_rates',np.zeros(len(scene['radii']))))[None]-radius).min(axis=1)
 
 
 def evaluate_path(path, scene, t, end, radius, step=.02, visual=False):
@@ -76,11 +78,13 @@ def evaluate_path(path, scene, t, end, radius, step=.02, visual=False):
     # to samples. This prevents a fast crossing between two sample endpoints.
     swept = float(clearance.min())
     if scene.get('valid') and len(times) > 1:
-        for center, velocity, obstacle_radius in zip(scene['centers'],scene['velocities'],scene['radii']):
+        for center, velocity, obstacle_radius, rate in zip(scene['centers'],scene['velocities'],scene['radii'],
+                scene.get('radius_rates',np.zeros(len(scene['radii'])))):
             relative = positions - (np.asarray(center)+(times-scene['observation_stamp'])[:,None]*velocity)
             delta = np.diff(relative, axis=0)
             u = np.clip(-np.sum(relative[:-1]*delta,axis=1)/np.maximum(np.sum(delta*delta,axis=1),1e-20),0,1)
-            swept = min(swept,float(np.min(np.linalg.norm(relative[:-1]+u[:,None]*delta,axis=1)-obstacle_radius-radius)))
+            swept = min(swept,float(np.min(np.linalg.norm(relative[:-1]+u[:,None]*delta,axis=1)-obstacle_radius-radius
+                -rate*np.maximum(0.,times[1:]-scene['observation_stamp']))))
     original = getattr(path,'original',path)
     nominal = np.array([original.sample(float(at))[0] for at in times])
     value = Validation(swept >= .025, 'ideal_camera_sampled_sweep', min_clearance_m=swept,

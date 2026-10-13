@@ -277,7 +277,9 @@ def build_candidates(original, active, strategy, scene, state, previous, t, base
         detail = full.to_dict()
         detail.pop('camera_trace', None)
         evaluations.append(dict(id=path_hash(path), full=detail))
-        if full.feasible:
+        task_preserved = (full.last_task_degradation_s is None or
+                          full.last_task_degradation_s < activation-1e-9)
+        if full.feasible and task_preserved:
             consequences = visual_consequences(original, full.camera_trace, evidence, intrinsics)
             candidate = Candidate(path, full, consequences, t, strategy)
             # Continuing an already active exact plan does not have a future activation.
@@ -338,11 +340,14 @@ def verify_candidate(candidate, approval, original, scene, state, previous, t, b
         check_terminal=candidate.path.envelope.end_s == original.duration,
         commanded_q=commanded_q, record_trace=True, fine_until_s=t+budget.max_install_age_s)
     checks['physical_valid'] = 'pass' if full.feasible else 'fail'
+    task_preserved = (full.last_task_degradation_s is None or
+                      full.last_task_degradation_s < max(t, candidate.path.activation_s)-1e-9)
+    checks['wbc_task_preserved'] = 'pass' if task_preserved else 'fail'
     consequences = visual_consequences(original, full.camera_trace, evidence, intrinsics)
     visual = contract_comparison(candidate.consequences, consequences, budget)
     checks['predicted_visual_valid'] = ('fail' if 'fail' in visual.values() else
                                      'unknown' if 'unknown' in visual.values() else 'pass')
-    error = '' if full.feasible and checks['predicted_visual_valid'] != 'fail' else 'latest_prediction_rejected'
+    error = '' if full.feasible and task_preserved and checks['predicted_visual_valid'] != 'fail' else 'latest_prediction_rejected'
     lost = any(value is not None and consequences['summary'].get(key) is None
                for key, value in candidate.consequences['summary'].items())
     lost |= (candidate.consequences['subject_source'] != 'runtime_initial_calibration' and
@@ -372,15 +377,29 @@ def installation_guard(result, active, scene, state, t, budget):
     if not trace:
         return 'missing_execution_prediction'
     times = np.array([row['t'] for row in trace])
-    predicted = np.array([row['state'] for row in trace])
-    expected = np.array([np.interp(t, times, predicted[:, j]) for j in range(9)])
-    error = np.asarray(state)-expected
-    error[2] = (error[2]+np.pi)%(2*np.pi)-np.pi
-    result['installation_diagnostics'] = dict(verification_age_s=t-result['snapshot_time_s'],
-        base_position_residual_m=float(np.linalg.norm(error[:2])),
-        max_angular_state_residual_rad=float(np.max(np.abs(error[2:]))), state_residual=error.tolist())
-    if np.linalg.norm(error[:2]) > .04 or np.max(np.abs(error[2:])) > .08:
-        return 'robot_left_verified_state_neighborhood'
+    if result.get('prediction_model') == 'floating_camera':
+        p,r,_ = whole_body_kinematics(state,result['base_z'])
+        positions = np.array([row['position'] for row in trace])
+        expected = np.array([np.interp(t,times,positions[:,j]) for j in range(3)])
+        from scipy.spatial.transform import Slerp
+        predicted_rotation = Slerp(times,Rotation.from_quat([row['quaternion_xyzw'] for row in trace]))(np.clip(t,times[0],times[-1]))
+        position_error = float(np.linalg.norm(p-expected))
+        angle_error = float((Rotation.from_matrix(r)*predicted_rotation.inv()).magnitude())
+        result['installation_diagnostics'] = dict(verification_age_s=t-result['snapshot_time_s'],
+            camera_position_residual_m=position_error,camera_orientation_residual_rad=angle_error,
+            whole_body_prediction='not_performed')
+        if position_error > .04 or angle_error > .08:
+            return 'camera_left_verified_state_neighborhood'
+    else:
+        predicted = np.array([row['state'] for row in trace])
+        expected = np.array([np.interp(t, times, predicted[:, j]) for j in range(9)])
+        error = np.asarray(state)-expected
+        error[2] = (error[2]+np.pi)%(2*np.pi)-np.pi
+        result['installation_diagnostics'] = dict(verification_age_s=t-result['snapshot_time_s'],
+            base_position_residual_m=float(np.linalg.norm(error[:2])),
+            max_angular_state_residual_rad=float(np.max(np.abs(error[2:]))), state_residual=error.tolist())
+        if np.linalg.norm(error[:2]) > .04 or np.max(np.abs(error[2:])) > .08:
+            return 'robot_left_verified_state_neighborhood'
     old = result['scene']
     # Compare observed occupancies after constant-velocity extrapolation. Fresh
     # additions invalidate the proposal even if the moving-track ID was reused.

@@ -67,9 +67,12 @@ class Plant(Node):
         odom.header.stamp, odom.header.frame_id, odom.child_frame_id = stamp, 'odom', 'base_link'
         odom.pose.pose.position.x, odom.pose.pose.position.y, odom.pose.pose.position.z = *self.state[:2], self.base_z
         odom.pose.pose.orientation.x, odom.pose.pose.orientation.y, odom.pose.pose.orientation.z, odom.pose.pose.orientation.w = q
+        odom.twist.twist.linear.x=float(self.command[0])
+        odom.twist.twist.angular.z=float(self.command[1])
         self.odom.publish(odom)
         joints = JointState()
         joints.header.stamp, joints.name, joints.position = stamp, list(ARM_JOINT_NAMES), self.state[3:].tolist()
+        joints.velocity=self.command[2:].tolist()
         self.js.publish(joints)
         subject = PoseStamped()
         subject.header.stamp, subject.header.frame_id = stamp, 'odom'

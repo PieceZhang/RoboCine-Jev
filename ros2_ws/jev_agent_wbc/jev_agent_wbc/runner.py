@@ -20,7 +20,7 @@ from .whole_body_qp import whole_body_kinematics, Limits
 from .provenance import source_manifest
 
 
-def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, budget=None, model='perplexity', disable_wbc_avoidance=False, target_replay=None, planning_wbc_avoidance=False):
+def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, budget=None, model='perplexity', disable_wbc_avoidance=False, target_replay=None, planning_wbc_avoidance=False, planner_model="wbc"):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     scene = RuntimeScene(Path(case)/'runtime_scene.json')
@@ -38,7 +38,7 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
     # This enables geometric projection, not synthetic SAM/visibility evidence.
     fy = .5/np.tan(np.deg2rad(27.5))
     engine = CinematicEngine(original, observed, output, mode=mode, api_url=api_url, model=model,
-        planning_obstacle_avoidance=True if planning_wbc_avoidance else None,
+        planner_model=planner_model, planning_obstacle_avoidance=True if planning_wbc_avoidance else None,
         preview=preview, budget=budget, limits=Limits(obstacle_avoidance=not disable_wbc_avoidance), intrinsics=[fy*288/384, fy, .5, .5])
     schedule, replayed = [], []
     if target_replay is not None:
@@ -128,6 +128,7 @@ def main():
     parser.add_argument('--target-replay-root', type=Path, help='replay exact case_jev installed targets, using mode=strict; no new Jev calls')
     parser.add_argument('--disable-wbc-avoidance', action='store_true', help='CPU only: tracking QP with collision observer; no avoidance/brake/escape')
     parser.add_argument('--planning-wbc-avoidance', action='store_true', help='enable avoidance in Agent diagnosis, candidate rollouts and revalidation independently of execution')
+    parser.add_argument('--planner-model', choices=['wbc','floating_camera'], default='wbc', help='prediction model only; actual robot always uses WBC')
     parser.add_argument('--model', default='perplexity', help='explicit backend model ID')
     parser.add_argument('--api-url', default='http://127.0.0.1:8000/v1/systemone')
     parser.add_argument('--pace', type=float, default=1., help='maximum sim/wall ratio; 0 unpaced for strict tests')
@@ -160,7 +161,7 @@ def main():
             result = run_case(args.scenarios/name, args.output/f'{name}_{mode}', mode, args.api_url, args.pace,
                               args.allocation_preview and not args.no_preview, budget, args.model, args.disable_wbc_avoidance,
                               None if args.target_replay_root is None else args.target_replay_root/f"{name}_jev",
-                              planning_wbc_avoidance=args.planning_wbc_avoidance)
+                              planning_wbc_avoidance=args.planning_wbc_avoidance, planner_model=args.planner_model)
             results.append(dict(case=name, **result))
             save_json(args.output/'runs.json', results)
     return 0 if all(r['completed'] for r in results) else 2

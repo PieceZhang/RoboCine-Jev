@@ -15,7 +15,6 @@ from .planning import joint_margin, ExecutionWBC, TrackingOnlyWBC
 from .candidates import (SearchBudget, Approval, diagnose_bounded, build_candidates,
                          verify_candidate, installation_guard, path_hash, support_violation)
 from .perception import SubjectEvidence
-from .dynamic_predictive_qp import AsyncDynamicPredictiveQP
 from .shot_preview_worker import initialize_worker
 from .whole_body_qp import Limits, whole_body_kinematics
 from .safety import solve_with_certificate
@@ -24,9 +23,13 @@ from .safety import solve_with_certificate
 class CinematicEngine:
     def __init__(self, original, scene, output, *, mode='jev', api_url=None, model='perplexity', limits=None,
                  decision_cooldown_s=None, preview=False, budget=None, intrinsics=None,
-                 decider=None, planning_obstacle_avoidance=None, coordination_async=False):
+                 decider=None, planning_obstacle_avoidance=None, planner_model="wbc", coordination_async=False):
         if mode not in ('jev', 'strict', 'rule'):
             raise ValueError('mode must be jev, rule or strict')
+        if planner_model not in ("wbc", "floating_camera"):
+            raise ValueError("unknown planner model")
+        self.planner_model = planner_model
+        self.actual_feedback = None
         self.original = self.active = original
         self.mode, self.limits = mode, limits or Limits()
         # Planning may model avoidance independently of the execution controller.
@@ -48,19 +51,22 @@ class CinematicEngine:
         self.jev = AsyncJev(decider)
         self.pool = ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context('spawn'), initializer=initialize_worker)
         self.math_future, self.math_kind = None, ''
-        controller = (TrackingOnlyWBC if not self.limits.obstacle_avoidance else
-                      AsyncDynamicPredictiveQP if preview else ExecutionWBC)
+        controller = TrackingOnlyWBC if not self.limits.obstacle_avoidance else ExecutionWBC
         self.wbc = controller(self.limits, scene=scene, horizon_steps=4, horizon_dt=.3, replan_s=.4)
         self.wbc.set_trajectory(original)
         if coordination_async and isinstance(self.wbc, ExecutionWBC):
             from .coordination import AsyncCoordinationPreview
             self.wbc.coordination = AsyncCoordinationPreview()
             self.wbc.coordination.set_trajectory(original)
+            from .tpr_wbc import AsyncReconfigurationPreview
+            self.wbc.reconfiguration = AsyncReconfigurationPreview()
+            self.wbc.reconfiguration.reset(original)
         self.last_report_s = self.last_attempt_s = self.last_install_s = -float('inf')
         self.report, self.context, self.pipeline_parent = None, None, None
         self.pending_candidates = {}
         self.active_candidate = None
         self.history, self.pending_feedback = [], []
+        self.wbc_degraded_samples = 0
         self.revision, self.closed = 0, False
         self.validation_attempts = self.feasible_plans = self.installed_plans = self.rejected_stale = 0
         self.last_event_signature, self.pipeline_started_wall = None, None
@@ -69,8 +75,10 @@ class CinematicEngine:
         self.last_visual_stamp, self.observed_visual_valid = None, 'unknown'
         self._write('initialized', 0., mode=mode, original_sha256=original.sha256,
             original_budget_s=original.duration, upstream_fields=list(original.task),
-            architecture='exact_counterfactual/v2', budget=asdict(self.budget),
+            architecture='exact_counterfactual/v2', budget=asdict(self.budget), planner_model=self.planner_model,
             obstacle_avoidance_enabled=self.limits.obstacle_avoidance,
+            wbc_algorithm='TPR-WBC' if self.limits.obstacle_avoidance else 'tracking-only',
+            legacy_allocation_preview_ignored=bool(preview and self.limits.obstacle_avoidance),
             planning_obstacle_avoidance_enabled=self.planning_limits.obstacle_avoidance,
             visual_intrinsics=intrinsics, semantic_policy=type(decider).__name__)
 
@@ -90,6 +98,12 @@ class CinematicEngine:
             self.pipeline_started_wall = None
 
     def _submit_math(self, kind, function, *args, **kwargs):
+        if self.planner_model == 'floating_camera':
+            from . import task_space_planning
+            function = {'diagnose': task_space_planning.diagnose,
+                        'candidates': task_space_planning.build, 'verify': task_space_planning.verify}[kind]
+            if kind == 'diagnose':
+                kwargs.update(active=self.active, budget=self.budget)
         self.math_kind = kind
         self.math_future = self.pool.submit(function, *args, **kwargs)
 
@@ -97,7 +111,10 @@ class CinematicEngine:
         phase = self.original.phase(t)
         following = [p for p in self.original.task['shot_phase'] if p['start_s'] >= phase['end_s']]
         recovery = self.active is not self.original and not self.report['report']['issues'] and t-self.last_install_s > 1.5
-        return dict(time_s=t, duration_s=self.original.duration, phase=phase,
+        return dict(planner_model=self.planner_model, actual_robot_feedback=self.actual_feedback,
+            prediction_scope=("ideal camera sphere; measured pose seed; no WBC rollout or whole-body feasibility"
+                if self.planner_model == "floating_camera" else "whole-body WBC rollout"),
+            time_s=t, duration_s=self.original.duration, phase=phase,
             next_phase=following[0] if following else None,
             event='validation_failed' if self.pending_feedback else 'recovery' if recovery else 'difficulty',
             subject=self.original.task['subject'], intent=self.original.task['intent'],
@@ -148,6 +165,10 @@ class CinematicEngine:
 
     def update(self, state, scene, t, base_z, commanded_q=None):
         self.revision += 1
+        p,r,_ = whole_body_kinematics(state,base_z)
+        self.actual_feedback = dict(time_s=t,state=np.asarray(state).tolist(),camera_position=p.tolist(),
+            camera_quaternion_xyzw=Rotation.from_matrix(r).as_quat().tolist(),
+            target_position=self.active.sample(t)[0].tolist(),observation_stamp=scene['observation_stamp'])
         self.wbc.update_collision_map(scene)
         self.wbc.set_time(t)
         self._monitor_visual(t)
@@ -280,17 +301,32 @@ class CinematicEngine:
                 self.wbc.previous.copy(), t, base_z, self.planning_limits,
                 commanded_q=None if commanded_q is None else np.asarray(commanded_q).copy())
             self.last_report_s = t
-    def step(self, state, scene, t, dt, base_z=0., base_rotation=None, commanded_q=None, measured_control=None):
+    def step(self, state, scene, t, dt, base_z=0., base_rotation=None, commanded_q=None, measured_control=None,
+             measured_base_twist=None):
         started = time.monotonic()
         self.wbc.measured_control = None if measured_control is None else np.asarray(measured_control, float).copy()
+        self.wbc.measured_base_twist = None if measured_base_twist is None else np.asarray(measured_base_twist, float).copy()
         self.update(state, scene, t, base_z, commanded_q)
         target, rotation, feedforward = self.active.sample(t)
         brake = t >= self.original.duration or t-float(scene['observation_stamp']) > .6
         if brake and t < self.original.duration:
             self._write('sensor_stale_braking', t, observation_stamp=scene['observation_stamp'])
-        command, info = solve_with_certificate(self.wbc, state, target, rotation, feedforward, dt,
-            base_z=base_z, base_rotation=base_rotation, commanded_q=commanded_q,
-            trajectory_time=t, brake=brake)
+        try:
+            command, info = solve_with_certificate(self.wbc, state, target, rotation, feedforward, dt,
+                base_z=base_z, base_rotation=base_rotation, commanded_q=commanded_q,
+                trajectory_time=t, brake=brake)
+        except RuntimeError as error:
+            self._write('wbc_feasibility',t,status='failed',camera_task_feasible=False,
+                        trajectory_id=path_hash(self.active),reason=str(error),
+                        safety_guaranteed=False,command_published=False)
+            raise
+        self.wbc_degraded_samples += int(info.get('tpr_status') == 'degraded')
+        if info.get('tpr_status') in ('warning', 'degraded'):
+            if not self.pending_feedback or t-self.pending_feedback[-1].get('time_s', -1.) >= .5:
+                report = info['tpr_report']
+                self.pending_feedback.append(dict(error='trajectory_preserving_configuration_'+info['tpr_status'],
+                                                  time_s=t, wbc_feasibility=report))
+                self._write('wbc_feasibility', t, **report)
         if 'primary_qp_failure' in info:
             self._write('certified_safety_fallback', t, reason=info['primary_qp_failure'],
                         clearance_m=info['command_sweep_lower_m'])
@@ -336,7 +372,9 @@ class CinematicEngine:
         self.events.close()
 
     def summary(self):
-        return dict(mode=self.mode, semantic_model=self.semantic_model, jev_calls=self.jev.decider.client.calls,
+        return dict(mode=self.mode, planner_model=self.planner_model, semantic_model=self.semantic_model, jev_calls=self.jev.decider.client.calls,
+            wbc_algorithm='TPR-WBC' if self.limits.obstacle_avoidance else 'tracking-only',
+            wbc_degraded_samples=self.wbc_degraded_samples,
             validation_attempts=self.validation_attempts, feasible_plans=self.feasible_plans,
             planning_feasibility_rate=None if not self.validation_attempts else self.feasible_plans/self.validation_attempts,
             installed_plans=self.installed_plans, stale_rejections=self.rejected_stale,

@@ -118,6 +118,7 @@ def trajectory_summary(rows, original, engine_summary, failure='', physical_audi
                 errors[ids[-1]] <= EVALUATION_PROTOCOL['position_completion_m'] and
                 orientation_errors[ids[-1]] <= EVALUATION_PROTOCOL['orientation_completion_rad'])))
     finished = times[-1] >= original.duration-1e-6
+    task_preserved = not any(r['info'].get('tpr_status') == 'degraded' for r in rows)
     safe = bool(np.all(clearances >= EVALUATION_PROTOCOL['collision_margin_m']) and command_residual <= 1e-6 and joint_margins.min() >= 0)
     if physical_audit is not None:
         safe &= bool(physical_audit.get('pass_constraints', False))
@@ -128,7 +129,8 @@ def trajectory_summary(rows, original, engine_summary, failure='', physical_audi
             event_times.append(current['t'])
     return native(dict(**engine_summary, evaluation_protocol=EVALUATION_PROTOCOL,
         evaluation_sha256=digest(EVALUATION_PROTOCOL), completed=bool(finished and not failure), failure=failure,
-        within_budget_success=bool(finished and not failure and safe and all(p['completed'] for p in phases)),
+        within_budget_success=bool(finished and not failure and safe and task_preserved and all(p['completed'] for p in phases)),
+        received_task_preserved=task_preserved,
         safety_pass=safe, collision_samples=int(np.sum(clearances < 0.)),
         clearance_violation_samples=int(np.sum(clearances < EVALUATION_PROTOCOL['collision_margin_m'])),
         min_truth_clearance_m=float(clearances.min()), min_joint_margin_rad=float(joint_margins.min()),

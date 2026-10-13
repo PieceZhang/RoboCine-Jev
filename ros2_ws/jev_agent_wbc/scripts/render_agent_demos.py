@@ -119,6 +119,7 @@ class Run:
         self.times = np.array([r['t'] for r in self.rows])
         self.positions = np.array([r['camera_position'] for r in self.rows])
         self.targets = np.array([r['info']['target_position'] for r in self.rows])
+        self.camera_planner = self.summary.get('planner_model') == 'floating_camera'
         self.floating = self.summary['backend'] == 'ideal_floating_camera'
         self.replay = bool(self.summary.get('target_replay_source'))
         self.no_avoidance = self.summary.get('obstacle_avoidance_enabled') is False
@@ -287,9 +288,10 @@ def plot(draw, box, run, state, t, axes):
 def draw_frame(run,t,cutoff=None,label='',end=False):
     im=Image.new('RGB',(W,H),BG);d=ImageDraw.Draw(im);s=run.state(t,cutoff)
     backend=('CPU 独立悬空相机 · 1:1 任务空间跟踪' if run.floating else
+             'CPU 整机 · 相机候选规划 / WBC 避障开' if run.camera_planner else
              'CPU 整机 · 规划避障开 / 执行避障关' if run.split_avoidance else
              'CPU 整机 · WBC 避障关闭' if run.cpu and run.no_avoidance else
-             'CPU 数值闭环 · 悬空相机可视化' if run.cpu else 'PhysX 物理闭环 · 整机运行')
+             'CPU 整机 · WBC 运动预测 / 避障开' if run.cpu else 'PhysX 物理闭环 · 整机运行')
     txt(d,(20,10),f'{run.name}  |  {backend}',29)
     txt(d,(1030,16),f'决策模型：{run.model}',24,GOLD,width=870)
     phase=run.original.phase(t)
@@ -328,6 +330,7 @@ def draw_frame(run,t,cutoff=None,label='',end=False):
     txt(d,(24,456),'意图原文：'+run.task['intent'],17,FG,width=1868)
     txt(d,(20,484),'CPU：仅离线示意渲染，无 RGB 输入' if run.cpu else f'RGB 采集时刻 {captures[0]:.2f} s；事件页沿用最近已采集帧',17,MUTED)
     txt(d,(760,484),('碰撞仅检测不干预；相机半径 '+fmt(run.summary.get('camera_radius_m'))+' m' if run.floating else
+        '实际位姿播种相机预测；无整机预测；执行 WBC 避障开' if run.camera_planner else
         '规划 WBC 避障开启；执行关闭，碰撞仅检测' if run.split_avoidance else
         'WBC 避障关闭；碰撞仅检测不干预' if run.no_avoidance else
         'LiDAR 在线；SAM 未进入本次决策。未来遮挡 / 完整尺度：unknown'),17,MUTED)
@@ -348,7 +351,7 @@ def draw_frame(run,t,cutoff=None,label='',end=False):
         wrap(d,(680,617),run.task['intent'],1195,20,3,MUTED)
     else:
         txt(d,(670,558),'ID / 参数 r,l,h (m) / 激活→结束',18,MUTED)
-        txt(d,(1190,558),'源相机净距 / 无关节约束' if run.floating or run.replay else '预测净距 / 关节余量',18,MUTED)
+        txt(d,(1190,558),'源相机净距 / 无关节约束' if run.floating or run.replay or run.camera_planner else '预测净距 / 关节余量',18,MUTED)
         txt(d,(1480,558),'预测构图 / 尺度代理 / 观察角',18,MUTED)
         for j,c in enumerate(cards):
             assert j<3,'layout supports the configured maximum of 3 full candidates'
@@ -356,8 +359,8 @@ def draw_frame(run,t,cutoff=None,label='',end=False):
             submitted=s['evidence'].get('candidates',cards)
             alias=next((f'c{k}' for k,v in enumerate(submitted) if v['id']==c['id']), '未送审')
             txt(d,(670,yy),f'{alias} {c["id"][:8]}  [{vals[0]:+.2f}, {vals[1]:+.2f}, {vals[2]:+.2f}]',20,COLORS[j])
-            txt(d,(685,yy+25),f'{tr["activation_s"]:.2f}→{tr["envelope"]["end_s"]:.2f}s  {tr["envelope"]["terminal"]}  物理预测：{c["physical_valid"]}',16,MUTED)
-            txt(d,(1190,yy),f'{fmt(pred.get("min_clearance_m"))} m'+(' / 不适用' if run.floating or run.replay else f' / {fmt(pred.get("joint_margin_rad"))} rad'),19)
+            txt(d,(685,yy+25),f'{tr["activation_s"]:.2f}→{tr["envelope"]["end_s"]:.2f}s  {tr["envelope"]["terminal"]}  {"相机筛选" if run.camera_planner else "物理预测"}：{c["physical_valid"]}',16,MUTED)
+            txt(d,(1190,yy),f'{fmt(pred.get("min_clearance_m"))} m'+(' / 不适用' if run.floating or run.replay or run.camera_planner else f' / {fmt(pred.get("joint_margin_rad"))} rad'),19)
             txt(d,(1480,yy),f'{fmt(visual.get("composition_error"))} / {fmt(visual.get("range_scale_error"))} / {fmt(visual.get("view_angle_error_rad"))}',19)
             txt(d,(1190,yy+25),f'下一阶段已检查：{pred.get("next_phase_checked",False)}',16,MUTED)
             txt(d,(1480,yy+25),f'出画中心时长 {fmt(visual.get("center_out_of_frame_duration_s"))} s',16,MUTED)

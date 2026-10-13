@@ -78,6 +78,11 @@ def certified_escape(controller, state, target, rotation, dt, *, base_z=0., base
 
 
 def solve_with_certificate(controller, state, target, rotation, feedforward, dt, **kwargs):
+    if getattr(controller, 'trajectory_preserving', False):
+        # TPR performs explicit task-minimal safety degradation internally.
+        # An empty safety set must surface as failure, never enter the legacy
+        # weighted escape/heading fallback or silently report tracking success.
+        return controller.solve(state, target, rotation, feedforward, dt, **kwargs)
     if not getattr(controller, "obstacle_avoidance", True):
         return controller.solve(state, target, rotation, feedforward, dt, **kwargs)
     try:

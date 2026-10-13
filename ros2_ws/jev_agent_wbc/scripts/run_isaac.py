@@ -286,6 +286,7 @@ def run_case(args, app, name, mode, output):
                                  intrinsics=[.5/np.tan(np.deg2rad(27.5))*args.height/args.width,
                                              .5/np.tan(np.deg2rad(27.5)), .5, .5])
         audit = PhysicsAudit(str(output), physical_limits, 1/args.physics_hz)
+        engine.wbc.measured_limits=physical_limits
         audit.record(0., state[3:], measured, wheels, lateral)
         physical_t = 0.
 
@@ -327,7 +328,8 @@ def run_case(args, app, name, mode, output):
                     base_z=float(bp[2]), base_rotation=br.copy(),
                     active_is_original=engine.active is reference))
             try:
-                command, info = engine.step(state, observed, t, dt, base_z=bp[2], base_rotation=br, commanded_q=q_command, measured_control=measured)
+                command, info = engine.step(state, observed, t, dt, base_z=bp[2], base_rotation=br, commanded_q=q_command, measured_control=measured,
+                                           measured_base_twist=np.r_[robot.get_linear_velocity(),robot.get_angular_velocity()])
             except Exception:
                 from dataclasses import asdict
                 save_json(output/'failure_snapshot.json', dict(t=t, dt=dt, state=state,

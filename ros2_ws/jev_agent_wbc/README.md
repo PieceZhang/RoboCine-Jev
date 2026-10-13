@@ -223,3 +223,26 @@ PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /usr/b
 ```
 
 该配置有意采用不同的预测和执行控制器；规划通过不能证明关闭避障后的实际执行安全，需查看闭环真值净距。`summary.json` 和初始化事件分别记录 `planning_obstacle_avoidance_enabled` 与 `obstacle_avoidance_enabled`。新 demo 名称为 `agent_only_wbc_avoidance_off.mp4`，保持六场景布局及无讲解停留的连续回放。
+
+### 在线规划模型对比（执行 WBC 默认避障开启）
+
+运行器的 `--planner-model wbc` 是原有默认完整框架；`--planner-model floating_camera` 仅替换 Agent 的诊断、候选筛选与安装前预测。两者均接收实际机器人状态、同一套在线 LiDAR 跟踪观测和实际执行历史，实际运动由开启避障的 WBC 积分产生，绝不把候选位姿直接写入机器人。Perplexity 两阶段策略/选择、精确轨迹绑定、原始时钟和新鲜度检查保持一致。
+
+相机规划分支采用半径 0.06 m 球体，不预测底盘/机械臂：每次预测以实际 FK 相机位姿播种，并用五次平滑函数在激活提前量内收敛至候选目标；这是假设的理想跟踪过渡，不能当成实际 WBC 运动。使用同一观测 surfel 位置、速度及动态不确定性，按 50 Hz 相机采样与相对线段最近距离筛选；安装时重新核对实际相机位姿和地图变化。执行偏差再次进入下一轮 Agent。没有未来场景真值、RGB/SAM 或完整整机安全证书。
+
+```bash
+PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /usr/bin/python3 -m jev_agent_wbc.runner \
+  --case all --mode jev --pace .2 --activation-lead 1.5 \
+  --planner-model floating_camera --output <相机规划在线闭环目录>
+# 将 floating_camera 改为 wbc，在另一个新目录运行完整 WBC 预测对照。
+```
+
+本轮对比数据在 `results/online_planner_comparison_20261013/`。两组各六场景重新在线调用模型、顺序运行，保持相同场景/时长/候选预算/提前量/速度配置。视频沿用三视图布局且无讲解停留。CPU 在线闭环指执行中异步规划并消费实际反馈，`pace=.2` 不是实时性能承诺；单轮六场景对比不构成统计显著性结论。
+
+## TPR-WBC：轨迹保持的被动避障（2026-10-13）
+
+当前默认避障已替换为 **严格任务分层 QP＋短时构型预测**。Agent 决定相机轨迹修改；WBC 在收到的六维相机任务下协调底盘与机械臂，取消提前撤退、逃逸朝向和障碍相关相机权重退让。旧算法文件仅保留作历史/显式对照，不参与默认执行；旧 `allocation_preview` 开关不再切回旧控制器。上文历史对照中的“原有避障”描述的是当时版本。
+
+动态相对运动约束、关节停止余量、自碰撞、轮速和实测加速度共同进入安全集合。任务保持不可行时明确上报 `degraded`，不会算作正常跟踪成功；安全集合不可行时报告失败。ROS 使用异步构型预测，并要求新鲜且时间戳接近的底盘/关节实测速度。
+
+固定相机、飞行障碍 demo 的算法说明、复现命令和模型边界见 [TPR_WBC.md](TPR_WBC.md)。结果目录为 `results/tpr_wbc_20261013/`，其中 `final_kinematic_72s/demo.mp4` 是三圈连续运动学闭环。物理版使用 `physx_render_corrected_48s/demo.mp4`；旧 `physx_48s`、`physx_refined_48s` 的障碍物显示未同步 PhysX 位姿，视频中的球错误地静止，不能用作动态障碍视觉演示。新版逐物理步读回碰撞球位置，并逐帧核对画面中的球心。完整指标及未通过项见该目录 `REPORT.txt`；运动学通过不能替代物理约束审计。

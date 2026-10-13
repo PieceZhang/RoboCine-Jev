@@ -28,17 +28,34 @@ class ExecutionWBC(DynamicPredictiveQP):
         self.coordination = CoordinationPreview()
         self.coordination_reference = None
         self.measured_control = None
+        self.measured_base_twist = None
+        from .tpr_wbc import ReconfigurationPreview
+        self.reconfiguration = ReconfigurationPreview()
+        self.trajectory_preserving = self.limits.obstacle_avoidance
+        from .self_collision import SelfCollision
+        self.self_collision = SelfCollision()
 
     def set_trajectory(self, trajectory):
         super().set_trajectory(trajectory)
+        from .candidates import path_hash
+        self.received_trajectory_id=path_hash(trajectory) if hasattr(trajectory,'sha256') else 'received'
         self.coordination.set_trajectory(trajectory)
-        if self.coordination.enabled:
+        self.reconfiguration.reset(trajectory)
+        if self.coordination.enabled or self.trajectory_preserving:
             # The fast QP must retain the original deadline even while the
             # asynchronous allocator is late or unavailable.
             self.limits = replace(self.limits, deadline_s=trajectory.duration)
 
     def solve(self, state, target_p, target_r, feedforward, dt, **kwargs):
         t = kwargs.get('trajectory_time', 0.)
+        # Candidate activation is also the receipt boundary for its predictive
+        # configuration task. Before it, predict the currently active parent;
+        # otherwise an uninstalled candidate changes the shared execution prefix.
+        received = self.trajectory
+        while isinstance(received, DeformedReference) and t < received.activation_s-1e-9:
+            received = received.previous or received.original
+        self.coordination.set_trajectory(received)
+        self.reconfiguration.reset(received)
         old_command = self.previous.copy()
         self.coordination_reference = None
         if not kwargs.get('brake', False) and not kwargs.get('preparing', False):
@@ -47,12 +64,16 @@ class ExecutionWBC(DynamicPredictiveQP):
                 np.asarray(state)[3:] if kwargs.get('commanded_q') is None else np.asarray(kwargs['commanded_q']),
                 t, dt, kwargs.get('base_z', 0.), self.limits, kwargs.get('base_rotation'),
                 measured_control=self.measured_control)
-        command, info = super().solve(state, target_p, target_r, feedforward, dt, **kwargs)
+        if self.trajectory_preserving:
+            from .tpr_wbc import solve_tpr
+            command, info = solve_tpr(self, state, target_p, target_r, feedforward, dt, **kwargs)
+        else:
+            command, info = super().solve(state, target_p, target_r, feedforward, dt, **kwargs)
         info.update(self.coordination.info)
         info['coordination_active'] = self.coordination_reference is not None
         if self.coordination_reference is not None:
             info['coordination_reference'] = self.coordination_reference.tolist()
-        if self.coordination.enabled:
+        if self.coordination.enabled and not self.trajectory_preserving:
             p, r, jacobian = whole_body_kinematics(state, kwargs.get('base_z', 0.), kwargs.get('base_rotation'))
             error = np.r_[np.asarray(target_p)-p, Rotation.from_matrix(target_r@r.T).as_rotvec()]
             requested, _ = self.camera_task(error, feedforward, self.hold_weight(t))
@@ -76,6 +97,8 @@ class ExecutionWBC(DynamicPredictiveQP):
                 -j.T@(task*desired)-weight*(self.coordination_reference if self.coordination_reference is not None else np.zeros(8))-.15*self.previous)
 
     def close(self):
+        if hasattr(self.reconfiguration, 'close'):
+            self.reconfiguration.close()
         if hasattr(self.coordination, 'close'):
             self.coordination.close()
 
@@ -364,6 +387,9 @@ def validate_rollout(reference, scene, state, previous, t, base_z, limits,
             validation.min_clearance_m = info['command_sweep_lower_m']
             return validation
         validation.samples += 1
+        if info.get('tpr_status') == 'degraded':
+            validation.task_degraded_samples += 1
+            validation.last_task_degradation_s = float(now)
         validation.min_clearance_m = min(validation.min_clearance_m, info['command_sweep_lower_m'])
         validation.joint_margin_rad = min(validation.joint_margin_rad, joint_margin(robot))
         validation.max_velocity_ratio = max(validation.max_velocity_ratio, float(np.max(np.abs(command)/limits.velocity)))

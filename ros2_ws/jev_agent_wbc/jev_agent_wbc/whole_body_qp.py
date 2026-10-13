@@ -27,8 +27,14 @@ class Limits:
     command_ramp: bool = False
     deadline_s: float = None
     obstacle_avoidance: bool = True
+    # Identified first-order velocity response (seconds); zero is the ideal
+    # endpoint-velocity model. This is runtime robot calibration, not a task.
+    response_time: np.ndarray = field(default_factory=lambda: np.zeros(8))
 
     def __post_init__(self):
+        self.response_time=np.asarray(self.response_time,dtype=float)
+        if self.response_time.shape != (8,) or not np.isfinite(self.response_time).all() or np.any(self.response_time < 0):
+            raise ValueError('response_time must contain eight nonnegative finite time constants')
         for name in ('velocity', 'acceleration'):
             value = np.asarray(getattr(self, name), dtype=float)
             if value.shape != (8,) or not np.all(np.isfinite(value)) or np.any(value <= 0):

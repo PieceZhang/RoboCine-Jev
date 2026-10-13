@@ -160,6 +160,8 @@ class Validation:
     original_loss_integral: float = 0.
     original_objective: float = 0.
     target_tracking_loss_integral: float = 0.
+    task_degraded_samples: int = 0
+    last_task_degradation_s: float | None = None
     # Recorded from FK of the predicted execution, not from the modified target.
     camera_trace: list = field(default_factory=list)
 
