@@ -14,5 +14,6 @@ setup(name=package_name, version='0.2.0', packages=[package_name],
       maintainer='RoboCine', maintainer_email='robocine@example.com', license='MIT',
       description='Jev semantic task-space relaxation with dynamic cinematic whole-body control',
       entry_points={'console_scripts': ['cinematic_cpu=jev_agent_wbc.runner:main',
+                                        'cinematic_camera=jev_agent_wbc.floating_camera:main',
                                         'cinematic_sam=jev_agent_wbc.sam_observer:main',
                                         'cinematic_ros=jev_agent_wbc.ros_node:main']})

@@ -66,6 +66,8 @@ class SearchBudget:
 
 
 def path_spec(path):
+    if hasattr(path, 'to_spec'):
+        return path.to_spec()
     if not isinstance(path, DeformedReference):
         return dict(original_sha256=path.sha256)
     return dict(original_sha256=path.original.sha256, values=path.values.tolist(),
@@ -77,6 +79,9 @@ def restore_path(original, spec):
     """Reconstruct an exact logged target, rejecting a different original task."""
     if spec['original_sha256'] != original.sha256:
         raise ValueError('replay original reference hash mismatch')
+    if spec.get('kind') == 'intent_program/v1':
+        from .intent_paths import IntentPath
+        return IntentPath.from_spec(original, spec)
     if 'values' not in spec:
         return original
     from .contracts import Envelope
@@ -106,10 +111,12 @@ class Candidate:
         numeric.pop('camera_trace', None)
         numeric.pop('terminal_state', None)
         consequences = {k: v for k, v in self.consequences.items() if k != 'samples'}
+        intent_path = hasattr(self.path, 'program')
         return native(dict(id=self.id, strategy=self.strategy, trajectory=path_spec(self.path),
             physical_valid=self.validation.feasible, prediction=numeric,
             visual=consequences, valid_before_s=self.path.activation_s,
-            approval_scope='this exact camera target path and full activation/hold/recovery process only; robot execution is predicted, not prescribed'))
+            approval_scope=('exact camera motion program, directed intent intervals and physical timing; no WBC prediction'
+                if intent_path else 'this exact camera target path and full activation/hold/recovery process only; robot execution is predicted, not prescribed')))
 
 
 @dataclass(frozen=True)

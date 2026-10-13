@@ -1,4 +1,49 @@
-# Jev cinematic WBC
+# Jev 相机意图规划与独立执行层
+
+## 当前默认：可见运镜意图完成（2026-10-13）
+
+Agent 的诊断、候选生成、筛选和选择默认使用 **floating-camera 空间**，不调用 WBC rollout，也不使用 WBC/reference 逐点跟踪误差排序。独立入口是 `python -m jev_agent_wbc.floating_camera`（安装后为 `cinematic_camera`）。本轮实验只运行 CPU 悬空相机，没有运行下游 WBC、ROS 或 PhysX 控制。
+
+`camera_intent.py` 从原 reference 提取有向区间：move-in/out 使用固定内参下的无遮挡主体投影面积对数；truck 使用镜头起始相机坐标系的固定横轴；pedestal 使用世界竖直轴；orbit 使用绕同一主体的展开方位角，保留原观察扇区。连续同类型的 establish/develop/resolve 合并为一个运动区间并保留阶段标记；不同运镜保持顺序。非单调或暂不支持的意图明确返回未完成。
+
+`intent_paths.py` 将 Agent 选择的结构化搜索族实例化为左右绕行、内外半径、高度、联合变形及时间分配候选。既可绕行后返回，也可平滑进入另一条可见通路并保持至结束；终态只需满足原意图区间，不强制回到原始世界位姿。平移路径使用五次样条，激活前保持父轨迹，激活边界匹配位置、速度和加速度；候选的主体朝向沿用原构图偏置。move-in/out 的绕行会修正真实投影轮廓尺度，不能用遮挡、pan/tilt 或 zoom 替代相机移动。所有候选和父路径、几何采样、时间映射一起哈希绑定，可从日志精确重建。
+
+两次模型 Choice 分别负责提出搜索族和在合格候选中选择。几何工具执行分层筛选：相机球体与障碍/主体的碰撞、相机运动限制 → 完整有向区间和阶段顺序 → 可见条件下的有效覆盖。通过后比较可见性、平滑性和时长，reference 位置偏差仅作诊断。没有合格候选时不伪装为成功，失败反馈含各程序的碰撞/遮挡/覆盖原因。
+
+已执行的姿态及可见性记录会随重规划保留。区间分为 32 个进度格，仅对顺序正确、可见且在画面内的新增进度计入停留时间，不用终点、绝对路程或重复往返代替覆盖。当前固定实验门槛：净距 0.025 m、可见比例 0.85、覆盖至少 0.95、每格至少 0.025 s、最长连续不可用画面 0.25 s、起止误差不超过区间的 3.5%、反向运动不超过 2.5%。这些数值集中在 `IntentPolicy`，不是 Agent 自行放宽的语义权限。
+
+相机最大速度 1.5 m/s、加速度 4 m/s²、角速度 3 rad/s；总时间上限为原 reference 的 1.75 倍。时间映射单调且有界，改变的是运动进度，场景和障碍始终按物理仿真时间推进。独立相机执行循环随已批准的时长运行，不在原 reference 结束时强制截断。
+
+可见性用标定圆柱的投影轮廓内 13×17 网格射线检查，先求主体前表面，再检查外部球障碍遮挡；无遮挡尺度、外部遮挡和画面容纳分开。当前只验证静态标定主体和球障碍夹具：观测器从固定全向射线命中拟合球心/半径，用过去 0.8 s 估计速度，规划器不接收未来关键帧。缺主体几何、观测过期、缺可见性证据均不能作为已完成。它不是 RGB/SAM 测量，不覆盖一般动态主体或任意网格场景。
+
+```bash
+# 独立相机 CPU 闭环；默认 pace=1、activation-lead=3 s、最多 16 个程序/3 个送审候选
+PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  /usr/bin/python3 -m jev_agent_wbc.floating_camera --case all --mode jev \
+  --output /tmp/jev_camera_intent_new
+
+# rule 使用同一套候选生成工具和分层规则；strict 是未经修复的 reference 对照
+# .2 倍速度上限只用于慢速机制诊断，仍记录真实规划和 API 墙钟延迟
+PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 \
+  /usr/bin/python3 -m jev_agent_wbc.floating_camera --case all --mode rule \
+  --pace .2 --activation-lead 1.5 --output /tmp/jev_camera_rule_new
+
+# 意图判据、精确重建、纯相机规划和候选协议回归
+PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 \
+  /usr/bin/python3 -m pytest -q ros2_ws/jev_agent_wbc/test/test_camera_intent.py \
+  ros2_ws/jev_agent_wbc/test/test_task_space_planning.py \
+  ros2_ws/jev_agent_wbc/test/test_counterfactual_agent.py
+```
+
+每轮保存意图规格、候选程序及筛选原因、模型原始请求/响应、实时观测与运动进度、执行后独立真值评分。主要结果是 `camera_intent_success`、`intent.effective_coverage`、可见性、最小净距、时长与实际墙钟延迟。`within_budget_success` 的预算在此入口指显式的 1.75 倍上限；旧 WBC 评价仍使用原协议，不能混用。相机碰撞检查使用 50 Hz 采样及相邻位置的相对线段最近距离，独立执行审计使用 400 Hz；不是连续非线性路径安全证明。
+
+`CinematicEngine`/机器人 runner 的候选规划默认也切换为 floating camera，`--planner-model wbc` 仅保留历史对照。该旧执行适配器从当前 FK 播种相机预测，需要运行时 `subject_model` 标定；它保留现有机器人执行时钟，暂不发送延时镜头。可变时长实验应使用上述独立相机入口。本轮没有修改下游 WBC 控制算法，也不声称相机方案具有整机可执行性。
+
+本轮逐次失败、修复、冻结代码和六组结果见 [CPU 验证记录](results/intent_camera_20261013/VALIDATION.txt)。新视频按场景时间连续回放，候选表显示有效覆盖和可见性，参考画面按意图进度对齐；没有插入讲解停留。
+
+## 历史实现与实验记录
+
+以下保留先前实验原文以便追溯。其中关于默认 WBC 候选预测、固定时长、reference 跟踪排序及 floating-camera 盲区的说明已被上节替代；历史结果不能作为新意图规划器的验证。
 
 后续实验约定（2026-10-13）：WBC 避障默认开启，Agent 规划预测与实际执行均使用开启避障的 WBC。仅在用户明确要求关闭避障的对照实验时使用 `--disable-wbc-avoidance`；此前关闭避障的 demo 不作为后续实验默认配置。所有 demo 继续默认无讲解停留。
 

@@ -23,12 +23,15 @@ from .safety import solve_with_certificate
 class CinematicEngine:
     def __init__(self, original, scene, output, *, mode='jev', api_url=None, model='perplexity', limits=None,
                  decision_cooldown_s=None, preview=False, budget=None, intrinsics=None,
-                 decider=None, planning_obstacle_avoidance=None, planner_model="wbc", coordination_async=False):
+                 decider=None, planning_obstacle_avoidance=None, planner_model="floating_camera", coordination_async=False,
+                 subject_model=None):
         if mode not in ('jev', 'strict', 'rule'):
             raise ValueError('mode must be jev, rule or strict')
         if planner_model not in ("wbc", "floating_camera"):
             raise ValueError("unknown planner model")
         self.planner_model = planner_model
+        self.subject_model = subject_model
+        self.camera_history = []
         self.actual_feedback = None
         self.original = self.active = original
         self.mode, self.limits = mode, limits or Limits()
@@ -104,6 +107,7 @@ class CinematicEngine:
                         'candidates': task_space_planning.build, 'verify': task_space_planning.verify}[kind]
             if kind == 'diagnose':
                 kwargs.update(active=self.active, budget=self.budget)
+            kwargs['history'] = self.camera_history.copy()
         self.math_kind = kind
         self.math_future = self.pool.submit(function, *args, **kwargs)
 
@@ -112,6 +116,7 @@ class CinematicEngine:
         following = [p for p in self.original.task['shot_phase'] if p['start_s'] >= phase['end_s']]
         recovery = self.active is not self.original and not self.report['report']['issues'] and t-self.last_install_s > 1.5
         return dict(planner_model=self.planner_model, actual_robot_feedback=self.actual_feedback,
+            objective='visible_intent_completion' if self.planner_model == 'floating_camera' else 'legacy_reference_tracking',
             prediction_scope=("ideal camera sphere; measured pose seed; no WBC rollout or whole-body feasibility"
                 if self.planner_model == "floating_camera" else "whole-body WBC rollout"),
             time_s=t, duration_s=self.original.duration, phase=phase,
@@ -141,7 +146,15 @@ class CinematicEngine:
                 self._feedback('new_visibility_evidence_requires_review', t, finish_pipeline=False)
             return
         prediction = self.active_candidate.consequences
-        rows = prediction['samples']
+        if 'intent' in prediction and (visual.get('occluded') or visual.get('truncated')):
+            # Geometric intent cards have no timestamp-matched mask-center
+            # samples. A new observed occlusion still requires replanning.
+            self._write('visual_feedback', t, observed_visual_valid='unknown',
+                cause='new_visibility_evidence_requires_review', acquisition_stamp_s=stamp,
+                subject_evidence=snapshot)
+            self._feedback('new_visibility_evidence_requires_review', t, finish_pipeline=False)
+            return
+        rows = prediction.get('samples', [])
         status, cause = 'unknown', snapshot['diagnosis']
         valid = [r for r in rows if r['projected_center'] is not None]
         # Causal comparison on the image's original capture time, not callback time.
@@ -164,11 +177,22 @@ class CinematicEngine:
             self._feedback(cause, t, finish_pipeline=False)
 
     def update(self, state, scene, t, base_z, commanded_q=None):
+        if self.planner_model == 'floating_camera':
+            scene = dict(scene, subject_model=self.subject_model or scene.get('subject_model'),
+                         intrinsics=self.intrinsics)
         self.revision += 1
         p,r,_ = whole_body_kinematics(state,base_z)
         self.actual_feedback = dict(time_s=t,state=np.asarray(state).tolist(),camera_position=p.tolist(),
             camera_quaternion_xyzw=Rotation.from_matrix(r).as_quat().tolist(),
             target_position=self.active.sample(t)[0].tolist(),observation_stamp=scene['observation_stamp'])
+        if self.planner_model == 'floating_camera':
+            from .task_space_planning import camera_scene
+            from .camera_intent import visibility, progress_at, default_intrinsics
+            observed = camera_scene(scene,t,self.active.duration)
+            self.camera_history.append(dict(t=t,camera_position=p.tolist(),
+                camera_quaternion_xyzw=Rotation.from_matrix(r).as_quat().tolist(),
+                progress_s=progress_at(self.active,t),visual=visibility(p,r,observed,t,
+                    observed.get('subject_model'),self.intrinsics or default_intrinsics())))
         self.wbc.update_collision_map(scene)
         self.wbc.set_time(t)
         self._monitor_visual(t)
@@ -251,7 +275,8 @@ class CinematicEngine:
                     check = result['validation'].to_dict()
                     check.pop('camera_trace', None)
                     self._write('plan_installed', t, candidate_id=candidate.id,
-                        approval=asdict(result['approval']), envelope=self.active.envelope.to_dict(),
+                        approval=asdict(result['approval']),
+                        envelope=(dict(program=self.active.program) if hasattr(self.active,'program') else self.active.envelope.to_dict()),
                         activation_s=self.active.activation_s, optimizer_return_s=self.active.return_s,
                         actual_parameters=dict(zip(PARAMETERS, self.active.values)),
                         checks=result['checks'], visual_checks=result['visual_checks'],
@@ -276,7 +301,8 @@ class CinematicEngine:
                 candidate = self.pending_candidates.get(semantic['candidate_id'])
                 if candidate is None:
                     self._feedback('selection_not_in_pending_candidate_set', t)
-                elif self.active is self.original and not np.any(candidate.path.values):
+                elif ((hasattr(candidate.path,'program') and candidate.path.program['route']=='continuation') or
+                      (not hasattr(candidate.path,'program') and self.active is self.original and not np.any(candidate.path.values))):
                     # Selecting the unchanged target is a continuation decision,
                     # not an installed repair or evidence of task success.
                     self._write('continuation_selected', t, candidate_id=candidate.id, decision=semantic)

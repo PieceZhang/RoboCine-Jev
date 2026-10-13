@@ -17,7 +17,7 @@ def setup():
     runtime=json.loads((ROOT/'scenarios/movein/runtime_scene.json').read_text())
     original=OriginalReference(ROOT/'scenarios/movein/task.json',runtime['subject']['position'])
     scene=dict(observation_stamp=0.,surfel_centers=[[8.,8.,8.]],surfel_radius=.1,
-               surfel_velocities=[[0.,0.,0.]],minimum_clearance_m=.025)
+               surfel_velocities=[[0.,0.,0.]],minimum_clearance_m=.025,subject_model=runtime['subject'])
     return original,np.array(runtime['initial_state']),runtime['base_z'],scene
 
 

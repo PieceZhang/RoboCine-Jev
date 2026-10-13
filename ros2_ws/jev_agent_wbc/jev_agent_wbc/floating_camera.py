@@ -2,7 +2,7 @@
 
 CPU diagnostic only: camera pose equals the active reference exactly. A spherical
 camera body is audited independently; collision observations never deflect motion.
-The same repair family, two Jev choices and exact-path binding are retained.
+The agent proposes motion programs and selects by visible intent completion.
 """
 import argparse
 from collections import deque
@@ -16,15 +16,25 @@ import time
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from .candidates import Candidate, SearchBudget, path_hash, propose_paths
+from .candidates import Candidate, SearchBudget, path_hash
+from .camera_intent import (IntentSpec, POLICY, default_intrinsics, progress_at,
+                            selection_key, visibility, subject_clearances)
+from .intent_paths import propose_intent_paths, positions_at, pose_at
 from .contracts import Validation, native, digest
-from .evaluation import save_json, EVALUATION_PROTOCOL, smoothness
+from .evaluation import save_json, smoothness
 from .jev import AsyncJev, CandidateDecider, SystemOneClient, PhaseAwareDecider
-from .perception import visual_consequences
 from .provenance import source_manifest
 from .reference import OriginalReference
 from .scenarios import RuntimeScene, NAMES
-from .sensors import RAYS, sphere_raycast
+from .sensors import sphere_raycast
+
+
+# A floating camera has no robot-mounted scanner blind zone. This fixed
+# omnidirectional CPU sensor is independent of obstacle positions and keyframes.
+_azimuth, _elevation = np.meshgrid(np.linspace(-np.pi,np.pi,360,endpoint=False),
+                                  np.linspace(-1.55,1.55,91))
+CAMERA_RAYS = np.column_stack([(np.cos(_elevation)*np.cos(_azimuth)).ravel(),
+    (np.cos(_elevation)*np.sin(_azimuth)).ravel(),np.sin(_elevation).ravel()])
 
 
 class CameraObserver:
@@ -39,7 +49,7 @@ class CameraObserver:
     def scan(self, runtime, position, t):
         if len(runtime.document['obstacles']) != 1:
             raise ValueError('camera diagnostic observer supports exactly one sphere')
-        points = sphere_raycast(position, RAYS, runtime.obstacles(t))
+        points = sphere_raycast(position, CAMERA_RAYS, runtime.obstacles(t))
         if len(points) >= 6:
             fit, _, rank, _ = np.linalg.lstsq(
                 np.column_stack([2*points, np.ones(len(points))]), (points*points).sum(axis=1), rcond=None)
@@ -59,20 +69,22 @@ class CameraObserver:
 
 
 def predicted_clearances(positions, times, scene, radius):
-    if not scene.get('valid') or not len(scene['centers']):
+    if not scene.get('valid'):
         return np.full(len(times), -1.)  # unknown cannot pass screening
+    if not len(scene['centers']):
+        return subject_clearances(positions,scene.get('subject_model'),radius)
     centers = np.asarray(scene['centers'])[None] + (
         np.asarray(times)[:, None, None]-scene['observation_stamp'])*np.asarray(scene['velocities'])[None]
-    return (np.linalg.norm(np.asarray(positions)[:, None]-centers, axis=2)
+    clearance = (np.linalg.norm(np.asarray(positions)[:, None]-centers, axis=2)
             -np.asarray(scene['radii'])[None]
             -np.maximum(0.,np.asarray(times)-scene['observation_stamp'])[:,None]
              *np.asarray(scene.get('radius_rates',np.zeros(len(scene['radii']))))[None]-radius).min(axis=1)
+    return np.minimum(clearance,subject_clearances(positions,scene.get('subject_model'),radius))
 
 
 def evaluate_path(path, scene, t, end, radius, step=.02, visual=False):
-    times = np.unique(np.r_[np.arange(t, end, step), end])
-    poses = [path.sample(float(at)) for at in times]
-    positions = np.array([p for p, _, _ in poses])
+    times = np.r_[np.arange(t, end-1e-8, step), end]
+    positions = positions_at(path,times)
     clearance = predicted_clearances(positions, times, scene, radius)
     # Exact closest approach on the piecewise-linear relative path, in addition
     # to samples. This prevents a fast crossing between two sample endpoints.
@@ -86,44 +98,71 @@ def evaluate_path(path, scene, t, end, radius, step=.02, visual=False):
             swept = min(swept,float(np.min(np.linalg.norm(relative[:-1]+u[:,None]*delta,axis=1)-obstacle_radius-radius
                 -rate*np.maximum(0.,times[1:]-scene['observation_stamp']))))
     original = getattr(path,'original',path)
-    nominal = np.array([original.sample(float(at))[0] for at in times])
+    velocities = np.gradient(positions, times, axis=0) if len(times)>2 else np.zeros_like(positions)
+    accelerations = np.gradient(velocities, times, axis=0) if len(times)>2 else np.zeros_like(positions)
     value = Validation(swept >= .025, 'ideal_camera_sampled_sweep', min_clearance_m=swept,
-        joint_margin_rad=None, cost=float(np.mean(np.sum((positions-nominal)**2,axis=1))),
-        samples=len(times), next_phase_checked=end >= original.duration)
+        joint_margin_rad=None, cost=float(np.mean(np.sum(accelerations**2,axis=1))),
+        samples=len(times), next_phase_checked=end >= getattr(path,'duration',original.duration))
     if visual:
         # Visual cards need only 10 Hz; collision checks above always use 50 Hz.
         indices = sorted(set([*range(0,len(times),max(1,round(.1/step))),len(times)-1]))
-        value.camera_trace = [dict(t=float(times[i]), position=poses[i][0].tolist(),
-            quaternion_xyzw=Rotation.from_matrix(poses[i][1]).as_quat().tolist(),
+        value.camera_trace = [dict(t=float(times[i]), position=positions[i].tolist(),
+            quaternion_xyzw=Rotation.from_matrix(pose_at(path,float(times[i]))[1]).as_quat().tolist(),
             joint_margin_rad=None) for i in indices]
     risk = next((float(at) for at,c in zip(times,clearance) if c < .105),None)
     return value, risk
 
 
-def camera_candidates(original, active, strategy, scene, t, budget, radius):
+def intent_prediction(spec, path, scene, t, history=(), step=.05):
+    times = np.r_[np.arange(t, path.duration-1e-8, step), path.duration]
+    poses = [pose_at(path,float(at)) for at in times]
+    previous = [row for row in history if row['t'] < t-1e-8]
+    positions = [row['camera_position'] for row in previous]+[pose[0] for pose in poses]
+    rotations = [Rotation.from_quat(row['camera_quaternion_xyzw']).as_matrix() for row in previous]+[pose[1] for pose in poses]
+    progress = [row['progress_s'] for row in previous]+[progress_at(path, at) for at in times]
+    measurements = [row['visual'] for row in previous]+[
+        visibility(pose[0], pose[1], scene, float(at), spec.model, spec.intrinsics) for at, pose in zip(times, poses)]
+    all_times = np.r_[[row['t'] for row in previous], times]
+    result = spec.score(all_times, positions, rotations, measurements, progress)
+    velocity = np.gradient(np.array([pose[0] for pose in poses]), times, axis=0)
+    acceleration = np.gradient(velocity, times, axis=0)
+    angular = [(Rotation.from_matrix(b[1]@a[1].T).magnitude()/(tb-ta))
+               for a, b, ta, tb in zip(poses[:-1], poses[1:], times[:-1], times[1:])]
+    result['max_speed_m_s'] = float(np.linalg.norm(velocity, axis=1).max())
+    result['max_acceleration_m_s2'] = float(np.linalg.norm(acceleration, axis=1).max())
+    result['max_angular_speed_rad_s'] = float(max(angular, default=0.))
+    result['camera_limits_pass'] = (result['max_speed_m_s'] <= POLICY.max_speed_m_s and
+        result['max_acceleration_m_s2'] <= POLICY.max_acceleration_m_s2 and
+        result['max_angular_speed_rad_s'] <= POLICY.max_angular_speed_rad_s)
+    return result
+
+
+def camera_candidates(original, active, strategy, scene, t, budget, radius, history=(), allow_time_extension=True):
     start = time.monotonic()
-    if min(original.duration,t+budget.max_horizon_s)-t-budget.activation_lead_s < .6:
+    if active.duration-t-budget.activation_lead_s < .3:
         return dict(error='insufficient_time_for_exact_plan_activation')
-    caps = dict(radial_m=1.5,lateral_m=1.5,height_m=.65,yaw_rad=np.pi,pitch_rad=np.pi/2,roll_rad=np.pi/2)
-    paths = propose_paths(original,active,strategy,t,budget,caps)
-    end = min(original.duration,t+budget.max_horizon_s)
+    spec = IntentSpec(original, scene.get('subject_model'), scene.get('intrinsics'))
+    paths = propose_intent_paths(original,active,strategy,t,budget,spec.model,spec.intrinsics,allow_time_extension)
     ranked, evaluations = [], []
-    for path in paths[:budget.max_proposals]:
-        value, _ = evaluate_path(path,scene,t,end,radius)
-        evaluations.append(dict(id=path_hash(path),coarse=value.to_dict()))
+    for path in paths:
+        value, _ = evaluate_path(path,scene,t,path.duration,radius)
+        detail = dict(id=path_hash(path), program=path.program, physical=value.to_dict())
         if value.feasible:
-            ranked.append((value.cost,path))
-    candidates = []
-    fy=.5/np.tan(np.deg2rad(27.5))
-    for _, path in sorted(ranked,key=lambda pair:pair[0])[:budget.max_rollouts]:
-        value, _ = evaluate_path(path,scene,t,end,radius,visual=True)
-        consequences = visual_consequences(original,value.camera_trace,intrinsics=[fy*288/384,fy,.5,.5])
-        consequences['source']='ideal_task_space_camera_projection_no_robot'
-        candidates.append(Candidate(path,value,consequences,t,strategy))
-        detail=value.to_dict();detail.pop('camera_trace',None)
-        evaluations.append(dict(id=path_hash(path),full=detail))
+            metrics = intent_prediction(spec,path,scene,t,history)
+            detail['intent'] = metrics
+            if metrics['camera_limits_pass'] and metrics['intent_complete']:
+                consequences = dict(intent=metrics, source='floating_camera_calibrated_geometry_no_wbc',
+                    summary=metrics, prediction_interval_s=[t,path.duration])
+                candidate = Candidate(path,value,consequences,t,strategy)
+                ranked.append((selection_key(metrics,value.cost),candidate))
+            else:
+                detail['rejected'] = 'camera_limits' if not metrics['camera_limits_pass'] else 'incomplete_visible_intent'
+        else:
+            detail['rejected'] = 'camera_collision'
+        evaluations.append(detail)
+    candidates = [c for _,c in sorted(ranked,key=lambda pair:pair[0])[:budget.max_rollouts]]
     return dict(candidates=candidates,evaluations=evaluations,wall_s=time.monotonic()-start,
-                error='' if candidates else 'no_camera_candidate_passed_collision_screening')
+                error='' if candidates else 'no_safe_candidate_completes_visible_intent')
 
 
 class FloatingAgent:
@@ -134,6 +173,7 @@ class FloatingAgent:
         self.jev=AsyncJev(decider)
         self.pool=ProcessPoolExecutor(max_workers=1,mp_context=multiprocessing.get_context('spawn'))
         self.future=None;self.pending={};self.last_attempt=-np.inf;self.report={};self.history=[]
+        self.executed=[];self.spec=None
         self.installed=0;self.started=None;self.outcomes=[];self.failures=[];self.feasible=0;self.attempts=0
         self.events=(self.output/'events.jsonl').open('w')
         self.write('initialized',0.,budget=asdict(budget),backend='ideal_floating_camera',camera_radius_m=radius,
@@ -150,22 +190,34 @@ class FloatingAgent:
             self.started=None
 
     def evidence(self,t,stage):
-        phase=self.original.phase(t)
+        phase=self.original.phase(progress_at(self.active,t))
         following=[p for p in self.original.task['shot_phase'] if p['start_s']>=phase['end_s']]
-        return dict(stage=stage,time_s=t,duration_s=self.original.duration,phase=phase,
+        return dict(stage=stage,time_s=t,duration_s=self.active.duration,phase=phase,
             next_phase=following[0] if following else None,intent=self.original.task['intent'],
             subject=self.original.task['subject'],event='difficulty',difficulty=self.report,
             active_modification=self.active is not self.original,execution_history=self.history[-4:],
-            validation_feedback=self.failures[-3:],remaining_budget_s=self.original.duration-t,
+            validation_feedback=self.failures[-3:],remaining_budget_s=POLICY.max_duration_factor*self.original.duration-t,
+            objective='visible_intent_completion',intent_specification=self.spec.to_dict() if self.spec else None,
+            motion_progress_s=progress_at(self.active,t),
             execution_model='ideal floating camera, exact target tracking; no base, joints or WBC',
             subject_evidence=dict(visual=dict(status='unknown'),geometry=dict(status='unknown')))
 
     def update(self,scene,t):
-        if self.mode=='strict' or t>=self.original.duration:return
+        if self.mode=='strict' or t>=self.active.duration:return
+        if self.spec is None:
+            self.spec=IntentSpec(self.original,scene.get('subject_model'),scene.get('intrinsics'))
         if self.future is not None and self.future.done():
-            result=self.future.result();self.future=None;self.attempts+=1
+            try:result=self.future.result()
+            except Exception as error:result=dict(error=f'camera_planner: {type(error).__name__}: {error}')
+            self.future=None;self.attempts+=1
+            self.write('candidate_evaluation',t,evaluations=result.get('evaluations',[]),planner_wall_s=result.get('wall_s'))
             if result.get('error'):
                 self.reject(result['error'],t)
+                self.failures[-1]['candidate_feedback']=[dict(program=e['program'],
+                    reason=e.get('rejected'),clearance_m=e['physical']['min_clearance_m'],
+                    effective_coverage=e.get('intent',{}).get('effective_coverage'),
+                    longest_occlusion_s=e.get('intent',{}).get('longest_occlusion_s'))
+                    for e in result.get('evaluations',[])][:16]
             else:
                 self.feasible+=1
                 cards=[c.card() for c in result['candidates']]
@@ -183,107 +235,162 @@ class FloatingAgent:
                 if decision['strategy']=='refuse':self.reject('search_refused',t)
                 else:
                     self.parent=path_hash(self.active)
-                    self.future=self.pool.submit(camera_candidates,self.original,self.active,decision['strategy'],scene,t,self.budget,self.radius)
+                    self.future=self.pool.submit(camera_candidates,self.original,self.active,decision['strategy'],scene,t,self.budget,self.radius,self.executed)
             else:
                 candidate=self.pending.get(decision['candidate_id']);self.pending={}
                 if candidate is None:self.reject('selection_outside_pending_set',t)
-                elif t>=candidate.path.activation_s:self.reject('candidate_expired_no_retiming_allowed',t)
+                elif t>=candidate.path.activation_s:self.reject('candidate_expired_requires_new_program',t)
                 elif path_hash(candidate.path)!=candidate.id or path_hash(self.active)!=self.parent:self.reject('candidate_binding_changed',t)
-                elif self.active is self.original and not np.any(candidate.path.values):
+                elif candidate.path.program['route']=='continuation':
                     self.write('continuation_selected',t,candidate_id=candidate.id,decision=decision)
                     self.started=None;self.last_attempt=t
                 else:
                     approval=dict(candidate_id=candidate.id,card_sha256=digest(candidate.card()),parent_id=self.parent)
                     self.write('candidate_approved',t,approval=approval,decision=decision)
                     refreshed,_=evaluate_path(candidate.path,scene,t,candidate.path.envelope.end_s,self.radius)
+                    current_intent=intent_prediction(self.spec,candidate.path,scene,t,self.executed)
                     if not refreshed.feasible:self.reject('latest_camera_prediction_collision',t)
                     elif not scene['valid'] or t-scene['observation_stamp']>.3:self.reject('camera_observation_stale',t)
+                    elif not current_intent['intent_complete'] or not current_intent['camera_limits_pass']:
+                        self.reject('latest_visible_intent_incomplete',t)
                     else:
                         self.active=candidate.path;self.installed+=1;self.last_attempt=t
                         latency=time.monotonic()-self.started
                         self.outcomes.append(dict(outcome='installed',time_s=t,wall_s=latency));self.started=None
                         self.write('plan_installed',t,candidate_id=candidate.id,approval=approval,
-                            actual_parameters=self.active.values.tolist(),checks=dict(physical_valid='pass',state_fresh='pass',
-                            target_authorized='pass',predicted_visual_valid='unknown',observed_visual_valid='unknown'),
-                            end_to_end_wall_s=latency,latest_state_check=refreshed.to_dict())
+                            program=self.active.program,actual_parameters=self.active.values.tolist(),
+                            checks=dict(physical_valid='pass',state_fresh='pass',target_authorized='pass',
+                            predicted_visual_valid='pass_calibrated_geometry',observed_visual_valid='unknown_RGB'),
+                            end_to_end_wall_s=latency,latest_state_check=refreshed.to_dict(),intent=current_intent)
         if (self.future is None and self.jev.future is None and t-self.last_attempt>=self.budget.decision_period_s
-                and self.original.duration-t>self.budget.activation_lead_s+.8):
-            value,risk=evaluate_path(self.active,scene,t,min(t+5,self.original.duration),self.radius,step=.05)
+                and self.active.duration-t>self.budget.activation_lead_s+.3):
+            value,risk=evaluate_path(self.active,scene,t,self.active.duration,self.radius,step=.05)
+            intent=intent_prediction(self.spec,self.active,scene,t,self.executed,step=.1)
             self.last_attempt=t
-            if risk is not None or not value.feasible:
-                self.report=dict(issues=['predicted_camera_collision_or_low_clearance'],first_risk_s=risk,
+            if risk is not None or not value.feasible or not intent['intent_complete']:
+                issues=[]
+                if risk is not None or not value.feasible:issues.append('predicted_camera_collision_or_low_clearance')
+                if not intent['intent_complete']:issues.append('incomplete_visible_intent')
+                self.report=dict(issues=issues,first_risk_s=risk,intent=intent,
                     min_clearance_m=value.min_clearance_m,joint_margin_rad=None,
-                    local_repair_evidence='task-space translation families; no robot Jacobian')
-                self.write('whole_body_difficulty',t,report=self.report,execution_model='camera_only')
+                    local_repair_evidence='intent-preserving spatial routes and time allocation; no WBC')
+                self.write('camera_difficulty',t,report=self.report,execution_model='camera_only')
                 self.started=time.monotonic();evidence=self.evidence(t,'strategy')
                 self.jev.submit(evidence);self.write('strategy_requested',t,evidence=evidence)
 
     def close(self):
-        self.jev.close();self.pool.shutdown(wait=True,cancel_futures=True);self.events.close()
+        if self.started is not None:
+            self.outcomes.append(dict(outcome='unfinished_at_shot_end',
+                time_s=self.executed[-1]['t'] if self.executed else 0.,wall_s=time.monotonic()-self.started))
+            self.write('pipeline_unfinished',self.executed[-1]['t'] if self.executed else 0.)
+        future=self.jev.future
+        self.jev.close()
+        if future is not None:
+            try:future.result(timeout=4.)
+            except Exception:pass
+        self.pool.shutdown(wait=True,cancel_futures=True);self.events.close()
 
 
 def run_case(case,output,mode,budget,radius,model,api_url,pace):
     output=Path(output);output.mkdir(parents=True,exist_ok=False)
     runtime=RuntimeScene(Path(case)/'runtime_scene.json')
     original=OriginalReference(Path(case)/'task.json',runtime.document['subject']['position'])
+    subject_model=runtime.document['subject']
+    intrinsics=default_intrinsics()
+    specification=IntentSpec(original,subject_model,intrinsics)
     save_json(output/'original_task.json',original.task);save_json(output/'runtime_scene.json',runtime.document)
+    save_json(output/'intent_specification.json',specification.to_dict())
     observer=CameraObserver()
     p0=original.sample(0.)[0]
     for t in np.linspace(-.8,0.,9):scene=observer.scan(runtime,p0,float(t))
     agent=FloatingAgent(original,output,mode,budget,radius,model,api_url)
     rows=[];failure='';begin=time.monotonic();dt=.02
     try:
-        for i in range(round(original.duration/dt)+1):
+        for i in range(round(POLICY.max_duration_factor*original.duration/dt)+1):
+            loop_started=time.monotonic()
             t=i*dt;before=agent.active.sample(t)[0]
             if i%5==0:scene=observer.scan(runtime,before,t)
+            scene.update(subject_model=subject_model,intrinsics=intrinsics)
             agent.update(scene,t)
             p,r,_=agent.active.sample(t) # Exact 1:1 pose assignment, no integration or robot FK.
-            end=min(t+dt,original.duration)
+            end=min(t+dt,agent.active.duration)
             true_clearance=min(float(np.linalg.norm(agent.active.sample(float(at))[0]-obstacle['center'])-obstacle['radius']-radius)
                 for at in np.linspace(t,end,9) for obstacle in runtime.obstacles(float(at)))
+            true_clearance=min(true_clearance,float(subject_clearances(
+                positions_at(agent.active,np.linspace(t,end,9)),subject_model,radius).min()))
             op,ori,_=original.sample(t)
             info=dict(target_position=p.tolist(),position_error=0.,orientation_error=0.,joint_margin_rad=None,
                 active_decision='' if agent.active is original else agent.active.envelope.decision_id,
-                loop_wall_s=0.,dynamic_constraint_count=0,obstacle_avoidance_enabled=False)
+                dynamic_constraint_count=0,obstacle_avoidance_enabled=False)
             rows.append(dict(t=t,camera_position=p.tolist(),camera_quaternion_xyzw=Rotation.from_matrix(r).as_quat().tolist(),
-                truth_clearance_m=true_clearance,info=info,observation_stamp=scene['observation_stamp']))
+                truth_clearance_m=true_clearance,info=info,observation_stamp=scene['observation_stamp'],
+                progress_s=progress_at(agent.active,t),visual=visibility(p,r,scene,t,subject_model,intrinsics)))
+            # Only causal observed geometry is allowed into subsequent planning.
+            # Independent true-scene visual auditing is performed after execution.
+            agent.executed.append(rows[-1])
+            info['loop_wall_s']=time.monotonic()-loop_started
             if i%25==0:agent.history.append(dict(time_s=t,target_tracking_residual_m=0.,clearance_m=true_clearance,
                 original_position_error_m=float(np.linalg.norm(p-op))))
             if pace>0:
                 remaining=(i+1)*dt/pace-(time.monotonic()-begin)
                 if remaining>0:time.sleep(remaining)
+            if t >= agent.active.duration-1e-8:break
     except Exception as error:
         failure=f'{type(error).__name__}: {error}';agent.write('run_failed',len(rows)*dt,failure=failure)
     finally:
+        agent.close()
         elapsed=rows[-1]['t'] if rows else 0.
         positions=np.array([x['camera_position'] for x in rows])
         errors=[np.linalg.norm(np.asarray(x['camera_position'])-original.sample(x['t'])[0]) for x in rows]
         clearance=[x['truth_clearance_m'] for x in rows]
-        completed=not failure and elapsed>=original.duration-1e-8
+        completed=not failure and elapsed>=agent.active.duration-1e-8
         safe=bool(clearance and min(clearance)>=.025)
-        phase_ok=[]
-        for phase in original.shots:
-            matching=[x for x in rows if x['t']<=phase['end_s']+1e-8]
-            row=matching[-1] if matching else None
-            p,r,_=original.sample(phase['end_s'])
-            phase_ok.append(bool(row and abs(row['t']-phase['end_s'])<1e-8 and
-                np.linalg.norm(np.array(row['camera_position'])-p)<=.05 and
-                (Rotation.from_quat(row['camera_quaternion_xyzw'])*Rotation.from_matrix(r).inv()).magnitude()<=.1))
+        rotations=[Rotation.from_quat(row['camera_quaternion_xyzw']).as_matrix() for row in rows]
+        true_measurements=[]
+        for row,r in zip(rows,rotations):
+            obstacles=runtime.obstacles(row['t'])
+            truth=dict(valid=True,observation_stamp=row['t'],centers=[o['center'] for o in obstacles],
+                radii=[o['radius'] for o in obstacles],velocities=[o['velocity'] for o in obstacles])
+            true_measurements.append(visibility(np.array(row['camera_position']),r,truth,row['t'],subject_model,intrinsics))
+            row['truth_visual']=true_measurements[-1]
+        intent=specification.score([row['t'] for row in rows],positions,rotations,true_measurements,
+            [row['progress_s'] for row in rows]) if rows else dict(intent_complete=False,effective_coverage=0.)
+        velocity=np.diff(positions,axis=0)/dt if len(rows)>1 else np.zeros((1,3))
+        acceleration=np.diff(velocity,axis=0)/dt if len(rows)>2 else np.zeros((1,3))
+        angular=[Rotation.from_matrix(b@a.T).magnitude()/dt for a,b in zip(rotations[:-1],rotations[1:])]
+        kinematics=dict(max_speed_m_s=float(np.linalg.norm(velocity,axis=1).max()),
+            max_acceleration_m_s2=float(np.linalg.norm(acceleration,axis=1).max()),
+            max_angular_speed_rad_s=float(max(angular,default=0.)))
+        limits_pass=(kinematics['max_speed_m_s']<=POLICY.max_speed_m_s and
+            kinematics['max_acceleration_m_s2']<=POLICY.max_acceleration_m_s2 and
+            kinematics['max_angular_speed_rad_s']<=POLICY.max_angular_speed_rad_s)
+        loop_ms=np.array([row['info']['loop_wall_s']*1000 for row in rows])
         summary=dict(backend='ideal_floating_camera',mode=mode,semantic_model=model,completed=completed,
-            safety_pass=safe,within_budget_success=completed and safe and all(phase_ok),failure=failure,
+            safety_pass=safe,camera_intent_success=completed and safe and limits_pass and intent['intent_complete'],
+            within_budget_success=completed and safe and limits_pass and intent['intent_complete'] and elapsed<=POLICY.max_duration_factor*original.duration,
+            camera_limits_pass=limits_pass,camera_kinematics=kinematics,
+            control_loop_wall_ms=({k:float(v) for k,v in zip(('mean','p95','p99','max'),
+                [loop_ms.mean(),np.percentile(loop_ms,95),np.percentile(loop_ms,99),loop_ms.max()])} if len(rows) else None),
+            intent=intent,failure=failure,planner_model='floating_camera',
             installed_plans=agent.installed,jev_calls=agent.jev.decider.client.calls,wall_s=time.monotonic()-begin,
             elapsed_shot_s=elapsed,original_position_rms_m=float(np.sqrt(np.mean(np.square(errors)))) if errors else None,
             min_truth_clearance_m=min(clearance) if clearance else None,collision_samples=sum(c<0 for c in clearance),
             clearance_violation_samples=sum(c<.025 for c in clearance),target_tracking_max_m=0.,target_tracking_max_rad=0.,
             camera_radius_m=radius,robot_state_used=False,obstacle_avoidance_enabled=False,
-            collision_audit='ground-truth spheres sampled at 400 Hz; camera sphere; no control intervention',
+            collision_audit='ground-truth obstacle spheres and subject cylinder sampled at 400 Hz; camera sphere; no control intervention',
             prediction_audit='50 Hz camera path with piecewise-linear relative-segment closest approach; not a continuous nonlinear certificate',
             observation_source='current ray hits and past fitted-center velocity; no future keyframes',
             decision_outcomes=agent.outcomes,original_duration_s=original.duration,
             execution_configuration=dict(pace=pace,activation_lead_s=budget.activation_lead_s),
-            evaluation_protocol=EVALUATION_PROTOCOL)
-        save_json(output/'summary.json',summary);save_json(output/'telemetry.json',rows);agent.close()
-    print(json.dumps(dict(case=runtime.document['name'],mode=mode,completed=completed,safe=safe,installed=agent.installed,failure=failure)),flush=True)
+            evaluation_protocol=asdict(POLICY),time_extension_s=max(0.,elapsed-original.duration),
+            visual_smoothness=smoothness([row['t'] for row in rows],positions,
+                [row['camera_quaternion_xyzw'] for row in rows]),
+            observed_visual_source='causal fitted spheres and calibrated cylinder; no SAM',
+            whole_body_execution='not_run')
+        save_json(output/'summary.json',summary);save_json(output/'telemetry.json',rows)
+    print(json.dumps(dict(case=runtime.document['name'],mode=mode,completed=completed,safe=safe,
+        intent=intent['intent_complete'],coverage=intent['effective_coverage'],duration_s=elapsed,
+        installed=agent.installed,failure=failure)),flush=True)
     return summary
 
 
@@ -294,10 +401,10 @@ def main():
     p.add_argument('--output',type=Path,required=True);p.add_argument('--mode',choices=['jev','rule','strict','both'],default='jev')
     p.add_argument('--model',default='perplexity');p.add_argument('--api-url',default='http://127.0.0.1:8000/v1/systemone')
     p.add_argument('--camera-radius',type=float,default=.06);p.add_argument('--pace',type=float,default=1.)
-    p.add_argument('--activation-lead',type=float,default=1.5)
+    p.add_argument('--activation-lead',type=float,default=3.)
     a=p.parse_args()
     if not np.isfinite(a.camera_radius) or a.camera_radius<=0 or not np.isfinite(a.pace) or a.pace<0:p.error('invalid radius or pace')
-    budget=SearchBudget(activation_lead_s=a.activation_lead)
+    budget=SearchBudget(activation_lead_s=a.activation_lead,max_proposals=16)
     a.output.mkdir(parents=True,exist_ok=True)
     save_json(a.output/'provenance.json',source_manifest(root,{k:str(v) if isinstance(v,Path) else v for k,v in vars(a).items()}))
     results=[]
@@ -306,7 +413,7 @@ def main():
         for mode in ['strict','jev'] if a.mode=='both' else [a.mode]:
             results.append(run_case(a.scenarios/case,a.output/f'{case}_{mode}',mode,budget,a.camera_radius,a.model,a.api_url,a.pace))
             save_json(a.output/'runs.json',results)
-    return 0 if all(x['completed'] for x in results) else 2
+    return 0 if all(x['completed'] if x['mode']=='strict' else x['camera_intent_success'] for x in results) else 2
 
 
 if __name__=='__main__':raise SystemExit(main())
