@@ -33,7 +33,7 @@ def arguments():
     parser.add_argument('--scenarios', type=Path, default=ROOT/'scenarios')
     parser.add_argument('--mode', choices=['jev', 'strict', 'rule', 'both'], default='jev')
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--model', default='typesafe-jev', help='explicit backend model ID')
+    parser.add_argument('--model', default='perplexity', help='explicit backend model ID')
     parser.add_argument('--api-url', default='http://127.0.0.1:8000/v1/systemone')
     parser.add_argument('--record', action='store_true')
     parser.add_argument('--record-fps', type=float, default=8.)

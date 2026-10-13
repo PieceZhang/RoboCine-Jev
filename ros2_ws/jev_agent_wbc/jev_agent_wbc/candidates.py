@@ -73,6 +73,18 @@ def path_spec(path):
         previous=path_spec(path.previous) if path.previous is not None else None)
 
 
+def restore_path(original, spec):
+    """Reconstruct an exact logged target, rejecting a different original task."""
+    if spec['original_sha256'] != original.sha256:
+        raise ValueError('replay original reference hash mismatch')
+    if 'values' not in spec:
+        return original
+    from .contracts import Envelope
+    return DeformedReference(original, Envelope(**spec['envelope']), spec['values'],
+        previous=restore_path(original,spec['previous']) if spec.get('previous') else None,
+        activation_s=spec['activation_s'],return_s=spec.get('return_s'))
+
+
 def path_hash(path):
     return digest(path_spec(path))
 
@@ -165,19 +177,12 @@ def local_repair_evidence(original, scene, state, t, base_z):
         meaning='local whole-body Jacobian sensitivity only; compute complete candidates before authorizing')
 
 
-def build_candidates(original, active, strategy, scene, state, previous, t, base_z, limits,
-                     evidence=None, intrinsics=None, budget=None, commanded_q=None):
-    budget = budget or SearchBudget()
-    begin = time.monotonic()
-    if strategy not in STRATEGIES:
-        return dict(error='unknown_search_strategy')
-    activation = t+budget.activation_lead_s
-    prediction_end = min(original.duration, t+budget.max_horizon_s)
-    remaining = prediction_end-activation
-    if remaining < .6:
-        return dict(error='insufficient_time_for_exact_plan_activation')
-    blend = min(1., remaining/2.)
-    caps = physical_caps(state, limits, original.duration-t)
+def propose_paths(original, active, strategy, t, budget, caps):
+    """Shared task-space repair family; caps are supplied by the execution model."""
+    activation = t + budget.activation_lead_s
+    prediction_end = min(original.duration, t + budget.max_horizon_s)
+    remaining = prediction_end - activation
+    blend = min(1., remaining / 2.)
     current = None if active is original else active
     # Small finite family; no assumption that acceptance is monotone in magnitude.
     vectors = [np.zeros(6)]
@@ -214,6 +219,23 @@ def build_candidates(original, active, strategy, scene, state, previous, t, base
         proposals = proposals[:budget.max_proposals-1]
         proposals.append(DeformedReference(original, last.envelope, last.values, current,
                                            activation, prediction_end-blend))
+    return proposals
+
+
+def build_candidates(original, active, strategy, scene, state, previous, t, base_z, limits,
+                     evidence=None, intrinsics=None, budget=None, commanded_q=None):
+    budget = budget or SearchBudget()
+    begin = time.monotonic()
+    if strategy not in STRATEGIES:
+        return dict(error='unknown_search_strategy')
+    activation = t+budget.activation_lead_s
+    prediction_end = min(original.duration, t+budget.max_horizon_s)
+    remaining = prediction_end-activation
+    if remaining < .6:
+        return dict(error='insufficient_time_for_exact_plan_activation')
+    blend = min(1., remaining/2.)
+    caps = physical_caps(state, limits, original.duration-t)
+    proposals = propose_paths(original, active, strategy, t, budget, caps)
     # Every proposal follows active identically before activation. Compute that
     # prefix once, then rank AFTER activation, where the operators actually differ.
     prefix = {}

@@ -17,7 +17,7 @@ from jev_agent_wbc.perception import (SubjectEvidence, mask_evidence, project_su
     camera_lidar_transform, visual_consequences, phase_progress)
 from jev_agent_wbc.candidates import (Candidate, Approval, SearchBudget, path_hash,
     verify_candidate, installation_guard, contract_comparison, build_candidates)
-from jev_agent_wbc.jev import CandidateDecider, AsyncJev, compact_evidence
+from jev_agent_wbc.jev import CandidateDecider, AsyncJev, compact_evidence, CANDIDATE_POLICY, SELECTION_POLICY
 from jev_agent_wbc.sam_observer import LatestMaskWorker, rgb_from_message
 from jev_agent_wbc.whole_body_qp import Limits, whole_body_kinematics
 
@@ -229,16 +229,22 @@ def test_jev_two_calls_and_no_chained_same_call_dependency(setup_case):
     assert decider.decide({'stage': 'selection', 'candidates': [card]})['candidate_id'] == card['id']
     assert len(client.calls) == 2
     assert set(client.calls[1]) == {'candidate'}
+    assert 'refuse' in client.calls[0]['strategy']['criteria']
+    assert set(client.calls[1]['candidate']['criteria']) == {'c0'}
+    assert '这些候选已经经过程序筛选' in client.calls[1]['candidate']['instructions']
     assert compact_evidence({'candidates': [card]})['candidates'][0]['trajectory'] == card['trajectory']
+    assert client.policy == SELECTION_POLICY
+    decider.decide({'stage': 'strategy'})
+    assert client.policy == CANDIDATE_POLICY
 
 
-def test_explicit_semantic_refusal_cannot_execute(setup_case):
+def test_out_of_set_semantic_response_cannot_execute(setup_case):
     original, state, scene, z = setup_case
     card = candidate_for(original, state, z).card()
     class Client:
         def ask(self, evidence, queries):
             return {'candidate': {'choice': 'refuse'}}
-    with pytest.raises(RuntimeError, match='no_complete_candidate_accepted'):
+    with pytest.raises(RuntimeError, match='selection_outside_candidate_set'):
         CandidateDecider(Client()).decide({'stage': 'selection', 'candidates': [card]})
 
 
@@ -438,3 +444,16 @@ def test_failed_search_is_counted_and_visual_feedback_cannot_starve_events(setup
         assert engine.last_attempt_s == attempted
     finally:
         engine.close()
+
+
+def test_empty_candidates_do_not_call_model():
+    class Client:
+        def ask(self, *args):
+            pytest.fail('empty candidate set must not reach the API')
+    with pytest.raises(RuntimeError, match='empty_candidate_set'):
+        CandidateDecider(Client()).decide({'stage': 'selection', 'candidates': []})
+
+
+def test_default_model_is_perplexity():
+    from jev_agent_wbc.jev import SystemOneClient
+    assert SystemOneClient().model == 'perplexity'

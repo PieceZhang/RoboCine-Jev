@@ -78,6 +78,8 @@ def certified_escape(controller, state, target, rotation, dt, *, base_z=0., base
 
 
 def solve_with_certificate(controller, state, target, rotation, feedforward, dt, **kwargs):
+    if not getattr(controller, "obstacle_avoidance", True):
+        return controller.solve(state, target, rotation, feedforward, dt, **kwargs)
     try:
         return controller.solve(state, target, rotation, feedforward, dt, **kwargs)
     except RuntimeError as primary:

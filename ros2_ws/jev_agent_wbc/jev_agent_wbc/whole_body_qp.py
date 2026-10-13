@@ -26,6 +26,7 @@ class Limits:
     position_margin: float = 0.01
     command_ramp: bool = False
     deadline_s: float = None
+    obstacle_avoidance: bool = True
 
     def __post_init__(self):
         for name in ('velocity', 'acceleration'):

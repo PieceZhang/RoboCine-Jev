@@ -52,7 +52,7 @@ def main():
     parser.add_argument('--selector', choices=['rule', 'pose', 'jev'], default='rule')
     parser.add_argument('--ablation', choices=['none', 'no_context', 'no_future', 'no_perception'], default='none')
     parser.add_argument('--api-url', default='http://127.0.0.1:8000/v1/systemone')
-    parser.add_argument('--model', default='typesafe-jev', help='same typed endpoint for model comparisons')
+    parser.add_argument('--model', default='perplexity', help='same typed endpoint for model comparisons')
     parser.add_argument('--seed', type=int, default=17)
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()

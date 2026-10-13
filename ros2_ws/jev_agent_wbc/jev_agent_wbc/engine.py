@@ -1,6 +1,6 @@
 """Slow event-driven semantic planning; continuously certified independent WBC."""
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
 import multiprocessing
 from pathlib import Path
@@ -11,7 +11,7 @@ from scipy.spatial.transform import Rotation
 
 from .contracts import native, PARAMETERS, digest
 from .jev import AsyncJev, CandidateDecider, PhaseAwareDecider, SystemOneClient
-from .planning import joint_margin, ExecutionWBC
+from .planning import joint_margin, ExecutionWBC, TrackingOnlyWBC
 from .candidates import (SearchBudget, Approval, diagnose_bounded, build_candidates,
                          verify_candidate, installation_guard, path_hash, support_violation)
 from .perception import SubjectEvidence
@@ -22,13 +22,17 @@ from .safety import solve_with_certificate
 
 
 class CinematicEngine:
-    def __init__(self, original, scene, output, *, mode='jev', api_url=None, model='typesafe-jev', limits=None,
+    def __init__(self, original, scene, output, *, mode='jev', api_url=None, model='perplexity', limits=None,
                  decision_cooldown_s=None, preview=False, budget=None, intrinsics=None,
-                 decider=None):
+                 decider=None, planning_obstacle_avoidance=None):
         if mode not in ('jev', 'strict', 'rule'):
             raise ValueError('mode must be jev, rule or strict')
         self.original = self.active = original
         self.mode, self.limits = mode, limits or Limits()
+        # Planning may model avoidance independently of the execution controller.
+        self.planning_limits = replace(self.limits, obstacle_avoidance=(
+            self.limits.obstacle_avoidance if planning_obstacle_avoidance is None
+            else planning_obstacle_avoidance))
         self.semantic_model = model if mode == 'jev' and decider is None else 'custom' if decider is not None else 'none'
         self.budget = budget or SearchBudget()
         self.cooldown = self.budget.decision_period_s if decision_cooldown_s is None else decision_cooldown_s
@@ -44,7 +48,8 @@ class CinematicEngine:
         self.jev = AsyncJev(decider)
         self.pool = ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context('spawn'), initializer=initialize_worker)
         self.math_future, self.math_kind = None, ''
-        controller = AsyncDynamicPredictiveQP if preview else ExecutionWBC
+        controller = (TrackingOnlyWBC if not self.limits.obstacle_avoidance else
+                      AsyncDynamicPredictiveQP if preview else ExecutionWBC)
         self.wbc = controller(self.limits, scene=scene, horizon_steps=4, horizon_dt=.3, replan_s=.4)
         self.wbc.set_trajectory(original)
         self.last_report_s = self.last_attempt_s = self.last_install_s = -float('inf')
@@ -61,6 +66,8 @@ class CinematicEngine:
         self._write('initialized', 0., mode=mode, original_sha256=original.sha256,
             original_budget_s=original.duration, upstream_fields=list(original.task),
             architecture='exact_counterfactual/v2', budget=asdict(self.budget),
+            obstacle_avoidance_enabled=self.limits.obstacle_avoidance,
+            planning_obstacle_avoidance_enabled=self.planning_limits.obstacle_avoidance,
             visual_intrinsics=intrinsics, semantic_policy=type(decider).__name__)
 
     def _write(self, event, t, **details):
@@ -237,7 +244,7 @@ class CinematicEngine:
                     self.pipeline_parent = path_hash(self.active)
                     self._submit_math('candidates', build_candidates, self.original, self.active,
                         semantic['strategy'], scene, np.asarray(state).copy(), self.wbc.previous.copy(),
-                        t, base_z, self.limits, evidence=self.perception.snapshot(t),
+                        t, base_z, self.planning_limits, evidence=self.perception.snapshot(t),
                         intrinsics=self.intrinsics, budget=self.budget,
                         commanded_q=None if commanded_q is None else np.asarray(commanded_q).copy())
             elif semantic['stage'] == 'selection':
@@ -258,7 +265,7 @@ class CinematicEngine:
                         {key: self.context['subject_evidence'][key]['status'] for key in ('visual', 'geometry')})
                     self._write('candidate_approved', t, approval=asdict(approval), decision=semantic)
                     self._submit_math('verify', verify_candidate, candidate, approval, self.original,
-                        scene, np.asarray(state).copy(), self.wbc.previous.copy(), t, base_z, self.limits,
+                        scene, np.asarray(state).copy(), self.wbc.previous.copy(), t, base_z, self.planning_limits,
                         evidence=self.perception.snapshot(t), intrinsics=self.intrinsics, budget=self.budget,
                         commanded_q=None if commanded_q is None else np.asarray(commanded_q).copy())
                 self.pending_candidates = {}
@@ -266,7 +273,7 @@ class CinematicEngine:
                 t-max(self.last_report_s, self.last_attempt_s) >= self.cooldown and
                 self.original.duration-t > self.budget.activation_lead_s+.8):
             self._submit_math('diagnose', diagnose_bounded, self.original, scene, np.asarray(state).copy(),
-                self.wbc.previous.copy(), t, base_z, self.limits,
+                self.wbc.previous.copy(), t, base_z, self.planning_limits,
                 commanded_q=None if commanded_q is None else np.asarray(commanded_q).copy())
             self.last_report_s = t
     def step(self, state, scene, t, dt, base_z=0., base_rotation=None, commanded_q=None):

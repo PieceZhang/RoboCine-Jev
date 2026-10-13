@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from importlib.metadata import version, PackageNotFoundError
 
 from .contracts import digest, native
-from .jev import POLICY, CANDIDATE_POLICY
+from .jev import POLICY, CANDIDATE_POLICY, SELECTION_POLICY
 
 
 def source_manifest(root, configuration=None):
@@ -26,7 +26,8 @@ def source_manifest(root, configuration=None):
     return dict(source_sha256=digest(hashes), files=hashes, python=sys.executable,
         created_at_utc=datetime.now(timezone.utc).isoformat(), dependency_versions=versions,
         python_version=platform.python_version(), platform=platform.platform(),
-        semantic_model=(configuration or {}).get('model', 'typesafe-jev'), semantic_policy='exact_candidate_choice',
+        semantic_model=(configuration or {}).get('model', 'perplexity'), semantic_policy='screened_candidate_ranking',
+        selection_policy_sha256=hashlib.sha256(SELECTION_POLICY.encode()).hexdigest(),
         policy_sha256=hashlib.sha256(CANDIDATE_POLICY.encode()).hexdigest(),
         legacy_policy_sha256=hashlib.sha256(POLICY.encode()).hexdigest(),
         configuration=native(configuration or {}))

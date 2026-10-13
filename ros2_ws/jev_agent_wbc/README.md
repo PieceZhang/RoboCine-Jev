@@ -1,8 +1,10 @@
 # Jev cinematic WBC
 
-独立 ROS 2 包，用于差动底盘与六轴机械臂的运镜修复。默认 Agent 已改为 **选择修复族 → 有界整机预测 → 审批完整候选 → 最新状态复核**。WBC 持续执行并检查安全；它不等待 Jev、SAM2.1 或数学进程。原始相机轨迹、修改目标和实际执行始终分开。
+后续实验约定（2026-10-13）：WBC 避障默认开启，Agent 规划预测与实际执行均使用开启避障的 WBC。仅在用户明确要求关闭避障的对照实验时使用 `--disable-wbc-avoidance`；此前关闭避障的 demo 不作为后续实验默认配置。所有 demo 继续默认无讲解停留。
 
-论文定位、最小实验矩阵与统计方案见 [PAPER_DESIGN.md](PAPER_DESIGN.md)。最新的约 1.5 小时优化记录、demo 和卡点见 [优化报告](results/optimization_20261013_0835/REPORT.md)。前一轮重构验证见 [VALIDATION.md](VALIDATION.md)；旧版历史实验仍保留在 [EVALUATION.md](EVALUATION.md)，不可当成新架构的结果。当前系统尚未达到全部动态场景的安全完成标准，也未证明 Jev 优于规则基线。
+独立 ROS 2 包，用于差动底盘与六轴机械臂的运镜修复。默认 Agent 已改为 **选择修复族 → 有界整机预测 → 选择最符合意图的候选 → 最新状态复核**。WBC 持续执行并检查安全；它不等待 Jev、SAM2.1 或数学进程。原始相机轨迹、修改目标和实际执行始终分开。
+
+论文定位、最小实验矩阵与统计方案见 [PAPER_DESIGN.md](PAPER_DESIGN.md)。候选相对排序与 Perplexity 的最新 CPU 结果见 [验证记录](results/selection_ranking_20261013/VALIDATION.txt)。此前约 1.5 小时优化记录、demo 和卡点见 [优化报告](results/optimization_20261013_0835/REPORT.md)。前一轮重构验证见 [VALIDATION.md](VALIDATION.md)；旧版历史实验仍保留在 [EVALUATION.md](EVALUATION.md)，不可当成新架构的结果。当前系统尚未达到全部动态场景的安全完成标准，也未证明 Jev 优于规则基线。
 
 ## 外部输入与运行时证据
 
@@ -29,11 +31,11 @@
 1. 数学进程在最多 5 秒窗口内诊断原参考的碰撞、关节、速度和执行困难；最多 9 个廉价 Jacobian 探针提供局部方向证据，不承担轨迹可执行性证明。新冲突、观测问题或恢复事件触发慢速决策。
 2. Jev 用一次 Choice 选择半径/高度、横移/高度、联合修改或恢复搜索族。这里没有运动授权。
 3. 最多 8 个提案做粗筛，最多 3 个分支做完整 WBC 预测。相同激活前缀只计算一次，粗筛在激活之后的最多 2.4 秒内进行。候选相对不可变原参考构造 C2 变化；初版修复族主要搜索平移并补偿原始主体构图，不是任意六维或拓扑规划器。
-4. Jev 用一次带拒绝选项的 Choice 审批完整方案。输入包含预测**实际执行**的构图、距离尺度代理、观察角、阶段进度、最差时刻和后续余量；不发送点云或图像，不做六轮数值权限搜索。
+4. Jev 用一次无拒绝选项的 Choice，从已经经过程序筛选的候选中选择最符合当前意图的一条；候选为空时不调用模型。输入包含预测**实际执行**的构图、距离尺度代理、观察角、阶段进度、最差时刻和后续余量；不发送点云或图像，不做六轮数值权限搜索。
 5. 批准绑定候选哈希、原参考和父方案。数学进程从新快照重预测；控制侧只做有界的状态、占用、尺寸/速度变化与证据门禁。迟到方案不能偷偷改变生效时刻。
 6. 执行反馈可触发新的取舍。底层仍独立通过约束与动态扫掠证书，无法认证时报告失败。镜头时间不会暂停或延长。
 
-当前 API 默认为 `http://127.0.0.1:8000/v1/systemone`、`model="typesafe-jev"`（可通过 `--model` 显式切换），采用本机服务的 Choice 协议。候选使用短别名，精确轨迹及别名到哈希的绑定保留在日志中。模型概率只记录为决策信息，不作碰撞或传感器可信度证明。
+当前 API 默认为 `http://127.0.0.1:8000/v1/systemone`、`model="perplexity"`（可通过 `--model` 显式切换），采用本机服务的 Choice 协议。候选使用短别名，精确轨迹及别名到哈希的绑定保留在日志中。模型概率只记录为决策信息，不作碰撞或传感器可信度证明。
 
 `Envelope` 仍是数值路径构造器的边界，但搜索生成的 Envelope 明确标为未批准。主路径只有 `Approval` 才可安装。旧 `SemanticDecider` 与 `optimize_envelope` 保留供历史回归使用，默认 Engine 不调用它们。
 
@@ -150,3 +152,60 @@ ros2 launch jev_agent_wbc cinematic_ros.launch.py task_file:=<绝对路径>
 物理侧检查 `completed`、`safety_pass`、`within_budget_success`、接触、净距和子步约束；中止前未碰撞不代表整个任务成功。当前存在 PhysX 无认证控制、加速度/关节余量及预测一致性问题。LiDAR 为稀疏理想射线或 ROS 外部输入；未证明未知环境、通用移动主体、自碰撞全局覆盖或实体硬件安全。
 
 模型身份更正与四模型实测见 [模型对照](results/optimization_20261013_0835/MODEL_COMPARISON.md)：旧 `perplexity` 别名实际返回 Perplexity Decider，历史 `mode=jev` 不能当作 TypeSafe Jev 结果。
+
+
+## 候选排序与 CPU demo（2026-10-13）
+
+第二次调用使用独立的 `SELECTION_POLICY`，问题为“这些候选已经经过程序筛选，请选择最符合当前意图的一条。”选项只有 `c0`、`c1` 等实际候选，没有 `refuse`。第一次搜索策略仍使用原来的 `CANDIDATE_POLICY`，每次进入策略阶段都会恢复该提示。选择结果仍绑定原候选哈希，物理约束、最新状态和预测一致性复核保持启用。空候选集不发送请求；模型返回集合之外的值视为协议错误。
+
+客户端、Engine、CPU/Isaac 运行器及决策回放的默认模型统一为 `perplexity`，可用 `--model` 显式覆盖。本机服务返回的模型名称为 `perplexity-decider-v1.1`，以每次 API 日志为准。
+
+本轮验证与录像位于 `results/selection_ranking_20261013/`：`live_cpu` 使用默认速度上限和 4 秒激活提前量；`slow_cpu` 使用 0.2 倍速度上限和 1.5 秒提前量作机制诊断，两组不混为实时性能结果。CPU 延续既有整机数值积分与虚拟悬空相机示意回放，未替换为自由飞行相机控制器。完整结论见该目录的 `VALIDATION.txt`。
+
+新运行可以直接沿用现有 demo 布局录制，输出路径必须尚不存在：
+
+```bash
+OPENBLAS_NUM_THREADS=1 /usr/bin/python3 ros2_ws/jev_agent_wbc/scripts/render_agent_demos.py \
+  --runs <运行目录1> <运行目录2> --output <新目录>/demo.mp4
+```
+
+所有后续 demo 默认按仿真时间连续回放，不插入中途讲解停留、事件定格或章节结果停留；候选和结果讲解仅保存为独立预览图。
+
+每段保留三视图、原始/实际/候选轨迹、模型输入输出、复核与安装状态；同名 JSON 保存来源哈希、事件时间线和视频校验和。录制结果经过完整解码检查，关键帧保存在同目录的 `_previews` 文件夹。旧 demo 文件未覆盖。
+
+## 独立悬空相机与 WBC 避障消融（2026-10-13）
+
+`floating_camera` 是独立执行模型：只有相机位置和朝向，没有底盘、关节状态、机器人 FK、WBC、执行器限幅或局部避障干预。每个控制时刻直接使用当前 Agent 目标的位姿，达到 1:1 task-space 跟踪。默认相机碰撞体为半径 0.06 m 的球体；预测用 50 Hz 路径加相邻采样之间的相对线段最近距离，独立真值评分以 400 Hz 采样。它不是连续非线性路径或实物安全认证。
+
+该诊断沿用两次 Jev Choice、相同任务空间修复族与精确候选绑定；把整机 rollout 换为理想相机路径检查。观测器仅适用于当前单球障碍夹具：从当前相机射线命中点拟合球体，从过去 0.8 秒的中心估计速度，不向规划器提供未来关键帧。视觉使用原任务的主体标定，未接入 RGB/SAM。候选生成异步运行；镜头预算不延长。
+
+```bash
+PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  /usr/bin/python3 -m jev_agent_wbc.floating_camera --case all --mode jev \
+  --pace .2 --activation-lead 1.5 --output <新的独立相机结果目录>
+```
+
+CPU WBC 运行器新增 `--disable-wbc-avoidance`：使用同一套 shot-aware 相机任务、姿态偏好、关节余量与执行器约束，跳过静态/动态碰撞约束、障碍相关的跟踪权重退让、撤退、避障制动和逃逸回退；扫掠计算只作为观察值，不改变命令。执行器不可行仍报错。候选预测同步使用该控制模式，但独立碰撞筛选仍会淘汰预测碰撞的候选。关闭避障不意味着候选为空时会自动得到一条安全路径。
+
+```bash
+PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  /usr/bin/python3 -m jev_agent_wbc.runner --case all --mode jev \
+  --pace .2 --activation-lead 1.5 --disable-wbc-avoidance --output <新的WBC结果目录>
+```
+
+`--target-replay-root <独立相机结果目录>` 与 `--mode strict` 联用，可将源 Agent 已安装的目标按相同哈希、安装时刻和激活时刻交给 WBC，分别打开/关闭避障。此处 strict 只关闭新的语义调用；复用的是修改后的目标，不是未修改的原始轨迹。日志记为 `target_replayed`，不冒充新安装或新模型决策；为了隔离执行器差异，固定目标回放不重新进行 WBC 安装审批。所有碰撞均独立记录。
+
+本轮数据位于 `results/independent_camera_20261013/`，包括独立相机、原轨迹对照、相同目标的 WBC 开/关对照、关闭避障的在线 Agent 运行，以及 `demo/` 视频。默认 ROS/PhysX 配置仍启用原有避障；本轮关闭操作通过上述 CPU 开关显式选择。独立相机避障通过不等于整机扫掠安全或原始镜头完全达标，详见该目录 `VALIDATION.txt`。
+
+### 规划避障开启、执行避障关闭的 CPU 对照
+
+`--disable-wbc-avoidance --planning-wbc-avoidance` 将两个控制器分开：Agent 的困难诊断、候选完整轨迹筛选和安装前重新预测使用开启避障的 WBC；实际执行使用关闭避障的 TrackingOnlyWBC。预测始终从实际观测状态和上一条实际命令出发，独立碰撞检测仍保留。未指定 `--planning-wbc-avoidance` 时，规划沿用执行端的避障设置，兼容原有对照。
+
+```bash
+PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /usr/bin/python3 -m jev_agent_wbc.runner \
+  --case all --mode jev --pace .2 --activation-lead 1.5 \
+  --disable-wbc-avoidance --planning-wbc-avoidance \
+  --output <新运行目录>
+```
+
+该配置有意采用不同的预测和执行控制器；规划通过不能证明关闭避障后的实际执行安全，需查看闭环真值净距。`summary.json` 和初始化事件分别记录 `planning_obstacle_avoidance_enabled` 与 `obstacle_avoidance_enabled`。新 demo 名称为 `agent_only_wbc_avoidance_off.mp4`，保持六场景布局及无讲解停留的连续回放。

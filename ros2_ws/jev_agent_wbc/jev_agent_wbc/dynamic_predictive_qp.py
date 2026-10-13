@@ -138,6 +138,13 @@ class DynamicPredictiveQP(ObstaclePredictiveQP):
             weight = profile.get('joint_reserve_weight', 10000.)*np.minimum(1., (low+high)/reserve)**2
             H[2:, 2:] += np.diag(weight)
             g[2:] -= weight*2.*(low-high)
+        if not self.limits.obstacle_avoidance:
+            # CPU ablation: retain the identical camera, posture, joint-reserve
+            # and actuator objectives above. Skip all static/dynamic collision
+            # rows, obstacle-dependent tracking weights, retreat and braking.
+            self.safety_info = dict(safety_constraint_count=0, dynamic_anticipation_rows=0,
+                dynamic_escape_omega_target=0., dynamic_braking_rows=0)
+            return H, g, A, lo, hi
         tracking_H, tracking_g = H.copy(), g.copy()
         original_count = len(A)
         H, g, A, lo, hi = super().execution_collision(state, z, br, dt, H, g, A, lo, hi, brake)

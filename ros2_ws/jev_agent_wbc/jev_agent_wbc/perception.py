@@ -251,7 +251,7 @@ def visual_consequences(original, trace, evidence=None, intrinsics=None):
             out['executed_phase_progress_end'] = selected[-1]['phase_progress']
             out['reference_phase_progress_start'] = selected[0]['reference_phase_progress']
             out['reference_phase_progress_end'] = selected[-1]['reference_phase_progress']
-        out['min_joint_margin_rad'] = min((r['joint_margin_rad'] for r in selected), default=None)
+        out['min_joint_margin_rad'] = min((r['joint_margin_rad'] for r in selected if r['joint_margin_rad'] is not None), default=None)
         return out
     phases = {phase['name']: summary([r for r in rows if r['phase'] == phase['name']])
               for phase in original.task['shot_phase'] if any(r['phase'] == phase['name'] for r in rows)}

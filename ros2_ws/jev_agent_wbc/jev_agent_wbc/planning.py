@@ -26,8 +26,26 @@ class ExecutionWBC(DynamicPredictiveQP):
         return False
 
 
+class TrackingOnlyWBC(ExecutionWBC):
+    """Same shot-aware WBC task/actuator objectives, with avoidance disabled."""
+    obstacle_avoidance = False
+
+    def __init__(self, limits, scene, **kwargs):
+        if limits.obstacle_avoidance:
+            raise ValueError('tracking-only controller requires obstacle_avoidance=False')
+        super().__init__(limits, scene=scene, **kwargs)
+        self.collision_mode = 'none'
+
+    def solve(self, *args, **kwargs):
+        command, info = super().solve(*args, **kwargs)
+        info.update(dynamic_constraint_count=0, obstacle_avoidance_enabled=False,
+                    collision_audit_only=True)
+        return command, info
+
+
 def make_wbc(limits, scene, reference, preview=False):
-    controller = ExecutionWBC(limits, scene=scene, preview=preview,
+    controller_type = ExecutionWBC if limits.obstacle_avoidance else TrackingOnlyWBC
+    controller = controller_type(limits, scene=scene, preview=preview,
                                      horizon_steps=4, horizon_dt=.3, replan_s=.4)
     controller.set_trajectory(reference)
     return controller
@@ -283,6 +301,10 @@ def validate_rollout(reference, scene, state, previous, t, base_z, limits,
         except RuntimeError as error:
             validation.feasible, validation.reason = False, str(error)
             validation.cost += 1e4
+            return validation
+        if info['command_sweep_lower_m'] < controller.collision.margin:
+            validation.feasible, validation.reason = False, 'predicted_tracking_collision'
+            validation.min_clearance_m = info['command_sweep_lower_m']
             return validation
         validation.samples += 1
         validation.min_clearance_m = min(validation.min_clearance_m, info['command_sweep_lower_m'])
