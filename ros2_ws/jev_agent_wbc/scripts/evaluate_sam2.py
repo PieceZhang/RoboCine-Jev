@@ -89,6 +89,21 @@ def evaluate(predictor, folder, model_info):
         mask_source='SAM 2.1 video predictor; simulator geometry only seeds the first-frame subject box',
         angle_source='timestamped LiDAR subject track and measured camera pose; invalid tracks excluded and counted',
         per_frame=values)
+    # Data-quality screening only: flag abrupt mask changes for visual review.
+    # Do not silently remove frames or alter the fixed error definitions.
+    jumps = {}
+    for stream in ('reference', 'execution'):
+        areas = [None if not row.get(stream) else row[stream]['area_scale'] for row in values]
+        jumps[stream] = [i for i in range(1, len(areas)) if areas[i] and areas[i-1]
+                        and not .25 <= areas[i]/areas[i-1] <= 4.]
+    rendering = video/'reference_rendering.json'
+    rendering_info = (json.loads(rendering.read_text()) if rendering.exists() else
+        dict(protocol='legacy_live_visibility_toggle', independently_checked=False))
+    result['quality_control'] = dict(mask_area_jump_frames=jumps,
+        ratio_screen=[.25, 4.], automatically_excluded=False,
+        review_required=bool(any(jumps.values()) or result['segmentation_failure_frames']
+                             or rendering_info.get('valid') is not True),
+        reference_rendering=rendering_info)
     result['phases'] = {p['name']: {key: stats(key, [row for row in values if row['phase'] == p['name']])
         for key in ('composition_error', 'subject_scale_error', 'observation_angle_error_rad')}
         for p in task['shot_phase']}

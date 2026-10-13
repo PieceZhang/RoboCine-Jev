@@ -80,6 +80,7 @@ class OriginalReference:
                       for p in self._task['shot_phase']]
         self.document = {}  # no authored tracking tolerances or changed scoring gates
         self.automatic_transitions = []
+        self._sample_cache = {}
 
     @property
     def task(self):
@@ -93,12 +94,20 @@ class OriginalReference:
         return {'orbit': 'orbit', 'pan': 'pan', 'movein': 'moveout', 'moveout': 'moveout'}.get(motion, 'neutral')
 
     def sample(self, t):
+        key = float(t)
+        cached = self._sample_cache.get(key)
+        if cached is not None:
+            return tuple(value.copy() for value in cached)
         s = float(np.clip(t, 0., self.duration))
         r = self.rotation(s).as_matrix()
         twist = np.r_[self.translation(s, 1), r@self.rotation(s, 1)]
         if t < 0. or t >= self.duration:
             twist[:] = 0.
-        return self.translation(s).copy(), r, twist
+        result = (self.translation(s).copy(), r, twist)
+        if len(self._sample_cache) >= 512:
+            self._sample_cache.pop(next(iter(self._sample_cache)))
+        self._sample_cache[key] = tuple(value.copy() for value in result)
+        return result
 
     def phase(self, t):
         return deepcopy(next((p for p in self._task['shot_phase'] if t < p['end_s']), self._task['shot_phase'][-1]))

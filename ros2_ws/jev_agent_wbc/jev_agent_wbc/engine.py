@@ -1,5 +1,6 @@
-"""Event-driven asynchronous Jev -> bounded planning -> independent safety WBC."""
+"""Slow event-driven semantic planning; continuously certified independent WBC."""
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import asdict
 import json
 import multiprocessing
 from pathlib import Path
@@ -8,105 +9,138 @@ import time
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from .contracts import native, PARAMETERS
-from .jev import AsyncJev, SemanticDecider, SystemOneClient
-from .planning import (unrelaxed_prediction, useful_directions, time_windows,
-                       optimize_envelope, validate_rollout, permission_violation, joint_margin, ExecutionWBC)
+from .contracts import native, PARAMETERS, digest
+from .jev import AsyncJev, CandidateDecider, PhaseAwareDecider, SystemOneClient
+from .planning import joint_margin, ExecutionWBC
+from .candidates import (SearchBudget, Approval, diagnose_bounded, build_candidates,
+                         verify_candidate, installation_guard, path_hash, support_violation)
+from .perception import SubjectEvidence
 from .dynamic_predictive_qp import AsyncDynamicPredictiveQP
-from .reference import DeformedReference
 from .shot_preview_worker import initialize_worker
 from .whole_body_qp import Limits, whole_body_kinematics
 from .safety import solve_with_certificate
 
 
-def diagnose(original, scene, state, previous, t, base_z, limits, commanded_q=None):
-    report = unrelaxed_prediction(original, scene, state, previous, t, base_z, limits, commanded_q=commanded_q)
-    directions, caps = useful_directions(original, scene, state, t, base_z, limits, report, previous, commanded_q)
-    return dict(report=report, directions=directions, caps=caps, snapshot_time_s=t)
-
-
 class CinematicEngine:
-    def __init__(self, original, scene, output, *, mode='jev', api_url=None, limits=None,
-                 decision_cooldown_s=.8, preview=False):
-        if mode not in ('jev', 'strict'):
-            raise ValueError('mode must be jev or strict')
+    def __init__(self, original, scene, output, *, mode='jev', api_url=None, model='typesafe-jev', limits=None,
+                 decision_cooldown_s=None, preview=False, budget=None, intrinsics=None,
+                 decider=None):
+        if mode not in ('jev', 'strict', 'rule'):
+            raise ValueError('mode must be jev, rule or strict')
         self.original = self.active = original
         self.mode, self.limits = mode, limits or Limits()
+        self.semantic_model = model if mode == 'jev' and decider is None else 'custom' if decider is not None else 'none'
+        self.budget = budget or SearchBudget()
+        self.cooldown = self.budget.decision_period_s if decision_cooldown_s is None else decision_cooldown_s
+        self.intrinsics = intrinsics
+        self.perception = SubjectEvidence(original.task['subject']['id'])
         self.output = Path(output)
         self.output.mkdir(parents=True, exist_ok=True)
         self.events = (self.output/'events.jsonl').open('w')
-        client = SystemOneClient(journal=self.output/'jev_api.jsonl', **({} if api_url is None else {'url': api_url}))
-        self.jev = AsyncJev(SemanticDecider(client))
+        if decider is None:
+            client = SystemOneClient(model=model, journal=self.output/'jev_api.jsonl',
+                **({} if api_url is None else {'url': api_url}))
+            decider = PhaseAwareDecider() if mode in ('rule', 'strict') else CandidateDecider(client)
+        self.jev = AsyncJev(decider)
         self.pool = ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context('spawn'), initializer=initialize_worker)
-        self.math_future = None
-        self.math_kind = ''
+        self.math_future, self.math_kind = None, ''
         controller = AsyncDynamicPredictiveQP if preview else ExecutionWBC
         self.wbc = controller(self.limits, scene=scene, horizon_steps=4, horizon_dt=.3, replan_s=.4)
         self.wbc.set_trajectory(original)
-        self.last_report_s = -float('inf')
-        self.last_decision_s = -float('inf')
-        self.last_attempt_s = -float('inf')
-        self.cooldown = decision_cooldown_s
-        self.report = None
-        self.history = []
-        self.pending_feedback = []
-        self.revision = 0
-        self.last_install_s = -float('inf')
-        self.closed = False
-        self.failures = []
-        self.validation_attempts = self.feasible_plans = self.installed_plans = 0
-        self.rejected_stale = 0
-        self.last_event_signature = None
+        self.last_report_s = self.last_attempt_s = self.last_install_s = -float('inf')
+        self.report, self.context, self.pipeline_parent = None, None, None
+        self.pending_candidates = {}
+        self.active_candidate = None
+        self.history, self.pending_feedback = [], []
+        self.revision, self.closed = 0, False
+        self.validation_attempts = self.feasible_plans = self.installed_plans = self.rejected_stale = 0
+        self.last_event_signature, self.pipeline_started_wall = None, None
+        self.pipeline_latencies = []
+        self.pipeline_outcomes = []
+        self.last_visual_stamp, self.observed_visual_valid = None, 'unknown'
         self._write('initialized', 0., mode=mode, original_sha256=original.sha256,
-                    original_budget_s=original.duration, upstream_fields=list(original.task))
+            original_budget_s=original.duration, upstream_fields=list(original.task),
+            architecture='exact_counterfactual/v2', budget=asdict(self.budget),
+            visual_intrinsics=intrinsics, semantic_policy=type(decider).__name__)
 
     def _write(self, event, t, **details):
         self.events.write(json.dumps(native(dict(event=event, time_s=t, **details)), ensure_ascii=False, allow_nan=False)+'\n')
         self.events.flush()
 
-    def _submit_diagnosis(self, scene, state, t, base_z, commanded_q=None):
-        self.math_kind = 'diagnose'
-        self.math_future = self.pool.submit(diagnose, self.original, scene, np.asarray(state).copy(),
-            self.wbc.previous.copy(), t, base_z, self.limits,
-            None if commanded_q is None else np.asarray(commanded_q).copy())
-        self.last_report_s = t
+    def _feedback(self, error, t, finish_pipeline=True):
+        self.pending_feedback.append(dict(error=error, time_s=t))
+        self.pending_feedback = self.pending_feedback[-4:]
+        self._write('proposal_rejected', t, error=error)
+        if finish_pipeline:
+            self.last_attempt_s = t
+        if finish_pipeline and self.pipeline_started_wall is not None:
+            self.pipeline_outcomes.append(dict(outcome='rejected', reason=error, time_s=t,
+                wall_s=time.monotonic()-self.pipeline_started_wall))
+            self.pipeline_started_wall = None
 
-    def _evidence(self, diagnostic, scene, state, t):
-        task = self.original.task
-        event = 'difficulty'
-        if self.pending_feedback:
-            event = 'validation_failed'
-        elif self.active is not self.original:
-            event = 'recovery' if not diagnostic['report']['issues'] or t-self.last_install_s > 1.5 else 'difficulty'
+    def _submit_math(self, kind, function, *args, **kwargs):
+        self.math_kind = kind
+        self.math_future = self.pool.submit(function, *args, **kwargs)
+
+    def _evidence(self, t):
         phase = self.original.phase(t)
-        following = [p for p in task['shot_phase'] if p['start_s'] >= phase['end_s']]
-        return dict(event=event, time_s=t, duration_s=self.original.duration, reference_sha256=self.original.sha256,
-            phase=phase, next_phase=following[0] if following else None, subject=task['subject'], intent=task['intent'],
-            reference_samples=[dict(t=float(s), position=self.original.sample(s)[0].tolist(),
-                quaternion_xyzw=Rotation.from_matrix(self.original.sample(s)[1]).as_quat().tolist())
-                for s in np.linspace(t, self.original.duration, 5)],
-            runtime_subject_position=self.original.subject.tolist(),
-            difficulty=diagnostic['report'], directions=diagnostic['directions'], physical_caps=diagnostic['caps'],
-            robot_state=np.asarray(state).tolist(), runtime_tracks=scene.get('tracks', []),
-            time_windows=time_windows(t, self.original.duration, diagnostic['report'], self.limits),
-            active_envelope=None if self.active is self.original else self.active.envelope.to_dict(),
-            current_absolute_parameters=dict(zip(PARAMETERS, np.zeros(len(PARAMETERS)) if self.active is self.original else self.active.parameters(t))),
-            execution_history=self.history[-4:], validation_feedback=self.pending_feedback[-3:], revision=self.revision)
+        following = [p for p in self.original.task['shot_phase'] if p['start_s'] >= phase['end_s']]
+        recovery = self.active is not self.original and not self.report['report']['issues'] and t-self.last_install_s > 1.5
+        return dict(time_s=t, duration_s=self.original.duration, phase=phase,
+            next_phase=following[0] if following else None,
+            event='validation_failed' if self.pending_feedback else 'recovery' if recovery else 'difficulty',
+            subject=self.original.task['subject'], intent=self.original.task['intent'],
+            reference_subject_position=self.original.subject.tolist(),
+            active_modification=self.active is not self.original,
+            difficulty=self.report['report'], subject_evidence=self.perception.snapshot(t),
+            active_plan=path_hash(self.active), execution_history=self.history[-4:],
+            validation_feedback=self.pending_feedback[-3:], revision=self.revision,
+            remaining_budget_s=max(0., self.original.duration-t))
 
-    def _event_signature(self, result, evidence):
-        report = result['report']
-        clearance = report['min_clearance_m']
-        clearance_band = int(np.floor(clearance/.1)) if np.isfinite(clearance) else None
-        return (evidence['event'], evidence['phase']['name'], tuple(report['issues']), clearance_band,
-                int(np.floor(report['joint_margin_rad']/.1)),
-                '' if self.active is self.original else self.active.envelope.decision_id,
-                self.pending_feedback[-1].get('error', '') if self.pending_feedback else '')
+    def _monitor_visual(self, t):
+        snapshot = self.perception.snapshot(t)
+        visual = snapshot['visual']
+        self.observed_visual_valid = 'unknown'
+        if visual['status'] != 'valid':
+            return
+        stamp = visual['stamp_s']
+        if stamp == self.last_visual_stamp:
+            self.observed_visual_valid = getattr(self, '_last_visual_status', 'unknown')
+            return
+        self.last_visual_stamp = stamp
+        if self.active_candidate is None:
+            if visual.get('truncated') or visual.get('occluded'):
+                self._feedback('new_visibility_evidence_requires_review', t, finish_pipeline=False)
+            return
+        prediction = self.active_candidate.consequences
+        rows = prediction['samples']
+        status, cause = 'unknown', snapshot['diagnosis']
+        valid = [r for r in rows if r['projected_center'] is not None]
+        # Causal comparison on the image's original capture time, not callback time.
+        if valid and valid[0]['t'] <= stamp <= valid[-1]['t']:
+            expected = np.array([np.interp(stamp, [r['t'] for r in valid],
+                [r['projected_center'][i] for r in valid]) for i in range(2)])
+            residual = float(np.linalg.norm(np.asarray(visual['centroid'])-expected))
+            if visual.get('occluded') is False and not visual.get('truncated'):
+                status = 'pass' if residual <= .05 else 'fail'
+                cause = 'projection_mask_consistency' if status == 'pass' else 'perception_or_prediction_mismatch'
+            elif visual.get('truncated') or visual.get('occluded'):
+                # Unknown in the candidate cannot be retroactively declared an intent violation.
+                cause = 'new_visibility_evidence_requires_review'
+        # Center consistency alone cannot certify scale, view angle or occlusion.
+        self.observed_visual_valid = self._last_visual_status = 'fail' if status == 'fail' else 'unknown'
+        self._write('visual_feedback', t, observed_visual_valid=self.observed_visual_valid,
+                    observed_composition_consistent=status, cause=cause,
+                    acquisition_stamp_s=stamp, subject_evidence=snapshot)
+        if status == 'fail' or cause == 'new_visibility_evidence_requires_review':
+            self._feedback(cause, t, finish_pipeline=False)
 
     def update(self, state, scene, t, base_z, commanded_q=None):
         self.revision += 1
         self.wbc.update_collision_map(scene)
         self.wbc.set_time(t)
-        if self.mode != 'jev' or t >= self.original.duration-.4:
+        self._monitor_visual(t)
+        if self.mode == 'strict' or t >= self.original.duration:
             return
         if self.math_future is not None and self.math_future.done():
             future, kind = self.math_future, self.math_kind
@@ -115,86 +149,126 @@ class CinematicEngine:
                 result = future.result()
             except Exception as error:
                 result = dict(error=f'{type(error).__name__}: {error}')
-            if kind == 'diagnose':
-                if 'error' in result:
-                    self._write('diagnosis_error', t, detail=result)
-                else:
-                    self.report = result
-                    self._write('whole_body_difficulty', t, **result)
-                    wants_recovery = self.active is not self.original and t-self.last_install_s > 1.5
-                    if ((result['report']['issues'] or self.pending_feedback or wants_recovery) and
-                            t-self.last_attempt_s >= self.cooldown and self.jev.future is None):
-                        evidence = self._evidence(result, scene, state, t)
-                        signature = self._event_signature(result, evidence)
-                        if signature != self.last_event_signature and self.jev.submit(evidence):
-                            self.last_event_signature = signature
-                            self.last_attempt_s = t
-                            self._write('jev_requested', t, evidence=evidence)
-            elif kind == 'optimize':
+            if kind == 'candidates':
                 self.validation_attempts += 1
-                if 'error' in result:
-                    self.pending_feedback.append(result)
-                    self._write('planning_rejected', t, **result)
+            if result.get('error'):
+                if kind == 'verify':
+                    self.rejected_stale += 1
+                self._feedback(result['error'], t)
+                self._write('math_failure', t, kind=kind,
+                            checks=result.get('checks'), visual_checks=result.get('visual_checks'),
+                            common_prefix=result.get('common_prefix'),
+                            evaluations=result.get('evaluations'))
+            elif kind == 'diagnose':
+                self.report = result
+                self._write('whole_body_difficulty', t, **result)
+                if t-result['snapshot_time_s'] > self.budget.max_prediction_age_s:
+                    self._feedback('diagnosis_expired', t)
+                elif (result['report']['issues'] or self.pending_feedback or self.active is not self.original):
+                    self.context = self._evidence(t)
+                    signature = (self.context['event'], self.context['phase']['name'],
+                        tuple(result['report']['issues']), path_hash(self.active),
+                        self.pending_feedback[-1]['error'] if self.pending_feedback else '')
+                    # Retry unchanged evidence at a bounded rate after a refusal/timeout.
+                    if signature != self.last_event_signature or t-self.last_attempt_s >= 2*self.cooldown:
+                        self.last_event_signature = signature
+                        self.last_attempt_s = t
+                        self.pipeline_started_wall = time.monotonic()
+                        evidence = dict(self.context, stage='strategy')
+                        self.jev.submit(evidence)
+                        self._write('strategy_requested', t, evidence=evidence)
+            elif kind == 'candidates':
+                candidates = result['candidates']
+                self.feasible_plans += bool(candidates)
+                self.pending_candidates = {c.id: c for c in candidates if t < c.path.activation_s}
+                self._write('candidate_set', t, cards=[c.card() for c in candidates],
+                    evaluations=result['evaluations'], planner_wall_s=result['wall_s'])
+                if not self.pending_candidates:
+                    self.rejected_stale += 1
+                    self._feedback('all_candidates_expired_before_selection', t)
                 else:
-                    self.feasible_plans += 1
-                    path = result['path']
-                    # The original envelope authorizes an interval, not an exact onset.
-                    # Rebase a late mathematical proposal within that interval, then
-                    # recheck the latest observation/robot state before installation.
-                    try:
-                        activation = max(t+.02, path.envelope.start_s)
-                        current = None if self.active is self.original else self.active
-                        path = DeformedReference(self.original, path.envelope, path.values, current, activation, path.return_s)
-                        semantic_error = permission_violation(path, t, self.original.duration)
-                        if semantic_error:
-                            raise ValueError(semantic_error)
-                        verification = validate_rollout(path, scene, state, self.wbc.previous, t,
-                            base_z, self.limits, horizon=min(.2, self.original.duration-t), step=.04,
-                            commanded_q=commanded_q)
-                        if not verification.feasible:
-                            raise ValueError(verification.reason)
-                        if t-result['snapshot_time_s'] > 2.4:
-                            raise ValueError('whole-body prediction is older than its horizon')
-                    except (ValueError, RuntimeError) as error:
-                        self.rejected_stale += 1
-                        feedback = dict(error='latest_state_validation: '+str(error))
-                        self.pending_feedback.append(feedback)
-                        self._write('latest_state_rejected', t, **feedback)
-                    else:
-                        self.active = path
-                        self.wbc.set_trajectory(path)
-                        self.wbc.input_generation = getattr(self.wbc, 'input_generation', 0)+1
-                        self.wbc.route = None
-                        self.wbc.route_map_time = -np.inf
-                        self.wbc.comfort_cache.clear()
-                        self.wbc.guide_costs.clear()
-                        self.last_install_s = t
-                        self.installed_plans += 1
-                        self.pending_feedback.clear()
-                        self._write('plan_installed', t, envelope=path.envelope.to_dict(), activation_s=path.activation_s,
-                            optimizer_return_s=path.return_s,
-                            actual_parameters=dict(zip(PARAMETERS, path.values)),
-                            prediction=result['validation'].to_dict(), latest_state_check=verification.to_dict(),
-                            optimizer_wall_s=result['wall_s'], evaluations=result['evaluations'])
+                    self.context = self._evidence(t)
+                    evidence = dict(self.context, stage='selection',
+                        candidates=[c.card() for c in self.pending_candidates.values()])
+                    self.jev.submit(evidence)
+                    self._write('selection_requested', t, evidence=evidence)
+            elif kind == 'verify':
+                error = installation_guard(result, self.active, scene, state, t, self.budget)
+                error = error or support_violation(result['approval'], self.perception.snapshot(t))
+                if error:
+                    self.rejected_stale += 1
+                    self._feedback(error, t)
+                    self._write('installation_rejected', t, error=error,
+                                diagnostics=result.get('installation_diagnostics'))
+                else:
+                    candidate = result['candidate']
+                    self.active = candidate.path
+                    self.active_candidate = candidate
+                    self.wbc.set_trajectory(self.active)
+                    self.wbc.input_generation = getattr(self.wbc, 'input_generation', 0)+1
+                    self.wbc.route, self.wbc.route_map_time = None, -np.inf
+                    self.wbc.comfort_cache.clear()
+                    self.wbc.guide_costs.clear()
+                    self.last_install_s = t
+                    self.installed_plans += 1
+                    self.pending_feedback.clear()
+                    latency = time.monotonic()-self.pipeline_started_wall
+                    self.pipeline_latencies.append(latency)
+                    self.pipeline_outcomes.append(dict(outcome='installed', time_s=t, wall_s=latency))
+                    self.pipeline_started_wall = None
+                    check = result['validation'].to_dict()
+                    check.pop('camera_trace', None)
+                    self._write('plan_installed', t, candidate_id=candidate.id,
+                        approval=asdict(result['approval']), envelope=self.active.envelope.to_dict(),
+                        activation_s=self.active.activation_s, optimizer_return_s=self.active.return_s,
+                        actual_parameters=dict(zip(PARAMETERS, self.active.values)),
+                        checks=result['checks'], visual_checks=result['visual_checks'],
+                        installation_diagnostics=result.get('installation_diagnostics'),
+                        latest_state_check=check, end_to_end_wall_s=latency)
         semantic = self.jev.poll()
         if semantic is not None:
             if 'error' in semantic:
-                self._write('jev_unavailable_or_refused', t, **semantic)
-                self.pending_feedback.append(dict(error=semantic['error'], time_s=t))
-            elif self.math_future is None:
-                envelope = semantic['envelope']
-                self._write('jev_permission', t, envelope=envelope.to_dict(), wall_s=semantic['wall_s'], recovery=semantic['recovery'])
-                self.math_kind = 'optimize'
-                self.math_future = self.pool.submit(optimize_envelope, self.original, self.active,
-                    envelope, semantic['recovery'], scene, np.asarray(state).copy(), self.wbc.previous.copy(),
-                    t, base_z, self.limits, commanded_q=None if commanded_q is None else np.asarray(commanded_q).copy())
-                self.last_decision_s = t
-            else:
-                self._write('permission_discarded_busy', t)
-        if (self.math_future is None and self.jev.future is None and t-self.last_report_s >= self.cooldown
-                and self.original.duration-t > .8):
-            self._submit_diagnosis(scene, state, t, base_z, commanded_q)
-
+                self._feedback('semantic: '+semantic['error'], t)
+            elif semantic['stage'] == 'strategy':
+                self._write('search_strategy', t, **semantic)
+                if semantic['strategy'] == 'refuse':
+                    self._feedback('search_refused', t)
+                else:
+                    self.pipeline_parent = path_hash(self.active)
+                    self._submit_math('candidates', build_candidates, self.original, self.active,
+                        semantic['strategy'], scene, np.asarray(state).copy(), self.wbc.previous.copy(),
+                        t, base_z, self.limits, evidence=self.perception.snapshot(t),
+                        intrinsics=self.intrinsics, budget=self.budget,
+                        commanded_q=None if commanded_q is None else np.asarray(commanded_q).copy())
+            elif semantic['stage'] == 'selection':
+                candidate = self.pending_candidates.get(semantic['candidate_id'])
+                if candidate is None:
+                    self._feedback('selection_not_in_pending_candidate_set', t)
+                elif self.active is self.original and not np.any(candidate.path.values):
+                    # Selecting the unchanged target is a continuation decision,
+                    # not an installed repair or evidence of task success.
+                    self._write('continuation_selected', t, candidate_id=candidate.id, decision=semantic)
+                    self.pipeline_outcomes.append(dict(outcome='continued', time_s=t,
+                        wall_s=time.monotonic()-self.pipeline_started_wall))
+                    self.pipeline_started_wall = None
+                    self.last_attempt_s = t
+                else:
+                    approval = Approval(candidate.id, digest(candidate.card()), self.pipeline_parent,
+                        self.original.sha256, semantic['selected_probability'], self.context['revision'],
+                        {key: self.context['subject_evidence'][key]['status'] for key in ('visual', 'geometry')})
+                    self._write('candidate_approved', t, approval=asdict(approval), decision=semantic)
+                    self._submit_math('verify', verify_candidate, candidate, approval, self.original,
+                        scene, np.asarray(state).copy(), self.wbc.previous.copy(), t, base_z, self.limits,
+                        evidence=self.perception.snapshot(t), intrinsics=self.intrinsics, budget=self.budget,
+                        commanded_q=None if commanded_q is None else np.asarray(commanded_q).copy())
+                self.pending_candidates = {}
+        if (self.math_future is None and self.jev.future is None and
+                t-max(self.last_report_s, self.last_attempt_s) >= self.cooldown and
+                self.original.duration-t > self.budget.activation_lead_s+.8):
+            self._submit_math('diagnose', diagnose_bounded, self.original, scene, np.asarray(state).copy(),
+                self.wbc.previous.copy(), t, base_z, self.limits,
+                commanded_q=None if commanded_q is None else np.asarray(commanded_q).copy())
+            self.last_report_s = t
     def step(self, state, scene, t, dt, base_z=0., base_rotation=None, commanded_q=None):
         started = time.monotonic()
         self.update(state, scene, t, base_z, commanded_q)
@@ -215,6 +289,7 @@ class CinematicEngine:
         parameters = np.zeros(len(PARAMETERS)) if self.active is self.original else self.active.parameters(t)
         info.update(jev_busy=self.jev.future is not None, math_busy=self.math_future is not None,
                     active_decision='' if self.active is self.original else self.active.envelope.decision_id,
+                    observed_visual_valid=self.observed_visual_valid,
                     parameters=parameters.tolist(), original_position=original_p.tolist(),
                     target_position=target.tolist(), joint_margin_rad=joint_margin(np.asarray(state)),
                     loop_wall_s=time.monotonic()-started, fixed_progress_s=min(t, self.original.duration))
@@ -236,6 +311,10 @@ class CinematicEngine:
         if self.closed:
             return
         self.closed = True
+        if self.pipeline_started_wall is not None:
+            self.pipeline_outcomes.append(dict(outcome='unfinished_at_close',
+                wall_s=time.monotonic()-self.pipeline_started_wall))
+            self.pipeline_started_wall = None
         self.jev.close()
         if self.math_future:
             self.math_future.cancel()
@@ -245,8 +324,12 @@ class CinematicEngine:
         self.events.close()
 
     def summary(self):
-        return dict(mode=self.mode, jev_calls=self.jev.decider.client.calls,
+        return dict(mode=self.mode, semantic_model=self.semantic_model, jev_calls=self.jev.decider.client.calls,
             validation_attempts=self.validation_attempts, feasible_plans=self.feasible_plans,
             planning_feasibility_rate=None if not self.validation_attempts else self.feasible_plans/self.validation_attempts,
             installed_plans=self.installed_plans, stale_rejections=self.rejected_stale,
-            original_sha256=self.original.sha256, original_duration_s=self.original.duration)
+            original_sha256=self.original.sha256, original_duration_s=self.original.duration,
+            architecture='exact_counterfactual/v2', agent_period_s=self.cooldown,
+            end_to_end_wall_s=self.pipeline_latencies, decision_outcomes=list(self.pipeline_outcomes),
+            pending_decision_wall_s=None if self.pipeline_started_wall is None else time.monotonic()-self.pipeline_started_wall,
+            observed_visual_valid=self.observed_visual_valid)

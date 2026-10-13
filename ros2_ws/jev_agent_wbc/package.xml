@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>jev_agent_wbc</name><version>0.1.0</version>
+  <name>jev_agent_wbc</name><version>0.2.0</version>
   <description>Independent Jev cinematic dynamic whole-body controller and evaluation</description>
   <maintainer email="robocine@example.com">RoboCine</maintainer><license>MIT</license>
   <buildtool_depend>ament_python</buildtool_depend>

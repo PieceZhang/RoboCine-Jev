@@ -7,12 +7,13 @@ import numpy as np
 from .contracts import digest, native
 
 
-EVALUATION_PROTOCOL = dict(version='cinematic_eval/v1', correspondence='original_elapsed_time',
+EVALUATION_PROTOCOL = dict(version='cinematic_eval/v1.1', correspondence='original_elapsed_time',
     position_completion_m=.05, orientation_completion_rad=.10,
     collision_margin_m=.025, constraint_numeric_tolerance=1e-6,
     smoothness='raw uniform-time poses; translation jerk and world angular acceleration RMS',
     mask_invalid='null; separately count missing, empty, segmentation failure, occlusion and frame edge',
-    semantic_intent_assessment='not_equivalent_to_geometry')
+    semantic_intent_assessment='not_equivalent_to_geometry',
+    phase_progress='Pan: nearest SO3 orientation; other motions: nearest position; diagnostic only, no retiming')
 
 
 def mask_statistics(mask):
@@ -99,10 +100,18 @@ def trajectory_summary(rows, original, engine_summary, failure='', physical_audi
             continue
         # Progress diagnostic only: never used to rematch/reduce composition/scale/angle errors.
         sample_times = np.linspace(phase['start_s'], phase['end_s'], 101)
-        curve = np.array([original.sample(t)[0] for t in sample_times])
-        nearest = int(np.argmin(np.linalg.norm(curve-actual[ids[-1]], axis=1)))
+        if phase['motion'].lower() == 'pan':
+            curve = Rotation.from_matrix(np.array([original.sample(t)[1] for t in sample_times]))
+            distances = (Rotation.from_quat(rotations[ids[-1]])*curve.inv()).magnitude()
+            progress_metric = 'SO3_orientation_nearest_reference_sample'
+        else:
+            curve = np.array([original.sample(t)[0] for t in sample_times])
+            distances = np.linalg.norm(curve-actual[ids[-1]], axis=1)
+            progress_metric = 'position_nearest_reference_sample'
+        nearest = int(np.argmin(distances))
         coverage = float(np.clip((times[ids[-1]]-phase['start_s'])/(phase['end_s']-phase['start_s']), 0., 1.))
         phases.append(dict(name=phase['name'], time_coverage=coverage, geometric_progress=nearest/100.,
+            progress_metric=progress_metric,
             delay_s=max(0., times[ids[-1]]-sample_times[nearest]),
             end_position_error_m=float(errors[ids[-1]]), end_orientation_error_rad=float(orientation_errors[ids[-1]]),
             completed=bool(coverage >= .99 and
@@ -134,6 +143,8 @@ def trajectory_summary(rows, original, engine_summary, failure='', physical_audi
         unfinished_reference_budget_s=max(0., original.duration-times[-1]),
         certified_escape_samples=sum(bool(r['info'].get('certified_escape')) for r in rows),
         control_loop_wall_ms=dict(mean=1000*np.mean([r['info'].get('loop_wall_s', 0.) for r in rows]),
+                                  p95=1000*np.percentile([r['info'].get('loop_wall_s', 0.) for r in rows], 95),
+                                  p99=1000*np.percentile([r['info'].get('loop_wall_s', 0.) for r in rows], 99),
                                   max=1000*max(r['info'].get('loop_wall_s', 0.) for r in rows),
                                   over_20ms=sum(r['info'].get('loop_wall_s', 0.) > .02 for r in rows)),
         sam_visual_measurement='pending_offline_segmentation', observation_angle_measurement='requires_valid_subject_lidar_track'))

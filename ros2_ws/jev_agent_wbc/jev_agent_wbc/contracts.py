@@ -160,6 +160,8 @@ class Validation:
     original_loss_integral: float = 0.
     original_objective: float = 0.
     target_tracking_loss_integral: float = 0.
+    # Recorded from FK of the predicted execution, not from the modified target.
+    camera_trace: list = field(default_factory=list)
 
     def to_dict(self):
         return native(asdict(self))

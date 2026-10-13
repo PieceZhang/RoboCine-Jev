@@ -12,7 +12,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.clock import Clock, ClockType
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.qos import qos_profile_sensor_data
-from sensor_msgs.msg import JointState
+from sensor_msgs.msg import JointState, CameraInfo
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseStamped
 from std_msgs.msg import String
@@ -20,8 +20,11 @@ from std_msgs.msg import String
 from .dynamic_lidar_input import DynamicLidarCollisionInput
 from .reference import OriginalReference
 from .engine import CinematicEngine
+from .candidates import SearchBudget
 from .contracts import native, validate_task
 from .isaac_bridge import ARM_JOINT_NAMES, WHEEL_JOINT_NAMES
+from .dynamic_lidar_input import transform_parts
+from tf2_ros import TransformException
 
 
 class CinematicNode(Node):
@@ -30,6 +33,9 @@ class CinematicNode(Node):
         defaults = dict(task_file='', output_directory='/tmp/jev_cinematic_ros',
             api_url='http://127.0.0.1:8000/v1/systemone', mode='jev', control_rate_hz=50., allocation_preview=False,
             subject_pose_topic='/cinematic/subject_pose', state_timeout_s=.2,
+            subject_visual_topic='/cinematic/subject_visual', camera_info_topic='/camera/camera_info',
+            camera_frame='camera_link',
+            agent_period_s=.5, candidate_activation_lead_s=4.,
             lidar_topics=['/lidar/points', '/lidar/front/points'], lidar_voxel_size=.04,
             lidar_map_radius=4.5, lidar_minimum_height=.03, lidar_maximum_height=1.6,
             lidar_minimum_clearance=.025, lidar_retention_s=.5, lidar_timeout_s=.6,
@@ -49,6 +55,10 @@ class CinematicNode(Node):
         self.timeout = float(value('state_timeout_s'))
         self.api_url, self.mode = value('api_url'), value('mode')
         self.allocation_preview = value('allocation_preview')
+        self.agent_budget = SearchBudget(decision_period_s=float(value('agent_period_s')),
+            activation_lead_s=float(value('candidate_activation_lead_s')))
+        self.visual_record = self.subject_record = self.intrinsics = None
+        self.camera_frame = value('camera_frame')
         self.lidar = DynamicLidarCollisionInput(self, value)
         self.subject = self.state = self.q_command = self.engine = None
         self.base_z, self.base_rotation = 0., np.eye(3)
@@ -64,6 +74,8 @@ class CinematicNode(Node):
         self.create_subscription(JointState, '/joint_states', self.on_joints, qos_profile_sensor_data, callback_group=self.feedback_group)
         self.create_subscription(Odometry, '/base_controller/odom', self.on_odom, qos_profile_sensor_data, callback_group=self.feedback_group)
         self.create_subscription(PoseStamped, value('subject_pose_topic'), self.on_subject, 1, callback_group=self.feedback_group)
+        self.create_subscription(String, value('subject_visual_topic'), self.on_visual, 1, callback_group=self.feedback_group)
+        self.create_subscription(CameraInfo, value('camera_info_topic'), self.on_camera_info, 1, callback_group=self.feedback_group)
         self.create_timer(self.period, self.tick, callback_group=self.control_group)
         self.create_timer(.05, self.watchdog, clock=Clock(clock_type=ClockType.STEADY_TIME), callback_group=self.control_group)
         self.telemetry = (self.output/'ros_telemetry.jsonl').open('w')
@@ -96,6 +108,43 @@ class CinematicNode(Node):
         point = np.array([p.x, p.y, p.z])
         if np.isfinite(point).all():
             self.subject = point
+            self.subject_record = dict(position=point.tolist(), valid=True, stationary=False,
+                subject_id=self.task['subject']['id'], source='runtime_world_subject_tracker',
+                stamp_s=message.header.stamp.sec+message.header.stamp.nanosec*1e-9)
+
+    def on_visual(self, message):
+        try:
+            record = json.loads(message.data)
+            if record['subject_id'] == self.task['subject']['id']:
+                if self.intrinsics is not None:
+                    try:
+                        # Never use latest TF for a delayed segmentation result.
+                        transform = self.lidar.buffer.lookup_transform('odom', self.camera_frame,
+                            rclpy.time.Time(seconds=float(record['stamp_s'])))
+                        translation, rotation = transform_parts(transform)
+                        record.update(camera_position=translation.tolist(),
+                            camera_quaternion_xyzw=Rotation.from_matrix(rotation).as_quat().tolist(),
+                            intrinsics=list(self.intrinsics), camera_pose_source='TF_at_RGB_acquisition')
+                    except TransformException:
+                        record['camera_pose_source'] = 'unavailable_at_RGB_acquisition'
+                self.visual_record = record
+        except (ValueError, KeyError, TypeError):
+            self.get_logger().warning('Invalid subject visual evidence')
+
+    def on_camera_info(self, message):
+        if message.width > 0 and message.height > 0 and message.k[0] > 0 and message.k[4] > 0:
+            self.intrinsics = [message.k[0]/message.width, message.k[4]/message.height,
+                               message.k[2]/message.width, message.k[5]/message.height]
+
+    def update_evidence(self):
+        self.engine.intrinsics = self.intrinsics
+        for record, update in ((self.visual_record, self.engine.perception.update_visual),
+                               (self.subject_record, self.engine.perception.update_geometry)):
+            if record is not None:
+                try:
+                    update(dict(record, stamp_s=record['stamp_s']-self.start_s))
+                except (ValueError, TypeError, KeyError) as error:
+                    self.get_logger().warning(f'Rejected subject evidence: {error}')
 
     def publish(self, command, dt):
         self.q_command += dt*command[2:]
@@ -127,7 +176,8 @@ class CinematicNode(Node):
             snapshot = self.lidar.map.snapshot()
             snapshot['observation_stamp'] -= self.start_s
             self.engine = CinematicEngine(reference, snapshot, self.output, mode=self.mode, api_url=self.api_url,
-                                          preview=self.allocation_preview)
+                                          preview=self.allocation_preview, budget=self.agent_budget,
+                                          intrinsics=self.intrinsics)
             start = String()
             start.data = json.dumps(dict(epoch_s=now))
             self.scene_start.publish(start)
@@ -143,6 +193,7 @@ class CinematicNode(Node):
         t = now-self.start_s
         snapshot = self.lidar.map.snapshot()
         snapshot['observation_stamp'] -= self.start_s
+        self.update_evidence()
         try:
             if self.fault or self.completed or self.lidar.stale(now):
                 self.engine.wbc.update_collision_map(snapshot)

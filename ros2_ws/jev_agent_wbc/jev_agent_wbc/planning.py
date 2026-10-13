@@ -1,5 +1,6 @@
 """Whole-body difficulty reports, useful directions and bounded trajectory search."""
 from dataclasses import replace
+from copy import deepcopy
 import time
 
 import numpy as np
@@ -77,6 +78,7 @@ def unrelaxed_prediction(original, scene, state, previous, t, base_z, limits, ho
         result['min_clearance_m'] = min(result['min_clearance_m'], clearance)
         if clearance < collision.margin+.08 and result['first_risk_s'] is None:
             result['first_risk_s'] = float(now)
+            result['conflict_state'] = robot.tolist()
         result['velocity_ratio'] = max(result['velocity_ratio'], float(np.max(np.abs(u)/limits.velocity)))
         result['acceleration_ratio'] = max(result['acceleration_ratio'], float(np.max(np.abs(u-old)/(dt*limits.acceleration))))
         result['tracking_residual_m'] = max(result['tracking_residual_m'], info['position_error'])
@@ -232,7 +234,8 @@ def permission_violation(reference, start, end, step=.02):
 
 
 def validate_rollout(reference, scene, state, previous, t, base_z, limits,
-                     horizon=2.4, step=.08, check_terminal=False, commanded_q=None):
+                     horizon=2.4, step=.08, check_terminal=False, commanded_q=None,
+                     record_trace=False, checkpoint=None, resume=None, fine_until_s=None):
     """Nonholonomic WBC rollout + swept dynamic collision and physical residuals.
 
     Reference tracking error is an objective and reported residual, never a
@@ -250,9 +253,24 @@ def validate_rollout(reference, scene, state, previous, t, base_z, limits,
     q_command = robot[3:].copy() if commanded_q is None else np.asarray(commanded_q).copy()
     original = getattr(reference, 'original', reference)
     validation = Validation(True, 'verified_prediction', joint_margin_rad=joint_margin(robot), cost=0.)
+    if resume is not None:
+        # Branch an identical already-computed execution prefix. This is an exact
+        # computation reuse, not a reduced-dynamics approximation or safety skip.
+        controller = deepcopy(resume['controller'])
+        controller.set_trajectory(reference)
+        robot = resume['state'].copy()
+        q_command = resume['commanded_q'].copy()
+        validation = deepcopy(resume['validation'])
+        t = resume['time_s']
+        if validation.camera_trace and abs(validation.camera_trace[-1]['t']-t) < 1e-8:
+            validation.camera_trace.pop()
     actual_positions, original_positions = [], []
-    for now in np.arange(t, end-1e-8, step):
-        dt = min(step, end-now)
+    # Selected-plan verification resolves the installation interval at the
+    # execution period; the distant suffix keeps the cheaper preview step.
+    fine_end = t if fine_until_s is None else min(end, max(t, fine_until_s))
+    intervals = [(now, min(.02, fine_end-now)) for now in np.arange(t, fine_end-1e-8, .02)]
+    intervals += [(now, min(step, end-now)) for now in np.arange(fine_end, end-1e-8, step)]
+    for now, dt in intervals:
         controller.set_time(now)
         target, rotation, twist = reference.sample(now)
         old = controller.previous.copy()
@@ -275,6 +293,10 @@ def validate_rollout(reference, scene, state, previous, t, base_z, limits,
         validation.max_tracking_error_m = max(validation.max_tracking_error_m, info['position_error'])
         validation.max_orientation_error_rad = max(validation.max_orientation_error_rad, info['orientation_error'])
         p, r, _ = whole_body_kinematics(robot, base_z)
+        if record_trace:
+            validation.camera_trace.append(dict(t=float(now), position=p.tolist(),
+                quaternion_xyzw=Rotation.from_matrix(r).as_quat().tolist(),
+                state=robot.tolist(), joint_margin_rad=joint_margin(robot)))
         op, ori, _ = original.sample(now)
         original_error = np.linalg.norm(p-op)**2+.15*np.linalg.norm(Rotation.from_matrix(r@ori.T).as_rotvec())**2
         deficit = max(0., .16-joint_margin(robot))
@@ -293,6 +315,11 @@ def validate_rollout(reference, scene, state, previous, t, base_z, limits,
         robot = advance_command(robot, old, command, dt, limits.command_ramp)
         q_command += dt*(.5*(old[2:]+command[2:]) if limits.command_ramp else command[2:])
     validation.terminal_state = robot.tolist()
+    if record_trace:
+        p, r, _ = whole_body_kinematics(robot, base_z)
+        validation.camera_trace.append(dict(t=float(end), position=p.tolist(),
+            quaternion_xyzw=Rotation.from_matrix(r).as_quat().tolist(),
+            state=robot.tolist(), joint_margin_rad=joint_margin(robot)))
     validation.original_objective = validation.original_loss_integral
     if check_terminal:
         endpoint, er, _ = whole_body_kinematics(robot, base_z)
@@ -302,6 +329,9 @@ def validate_rollout(reference, scene, state, previous, t, base_z, limits,
         validation.original_objective += terminal_loss
         validation.cost += terminal_loss
     validation.next_phase_checked = check_terminal or any(t < s['start_s'] < end for s in reference.shots)
+    if checkpoint is not None:
+        checkpoint.update(controller=controller, state=robot.copy(), commanded_q=q_command.copy(),
+                          validation=deepcopy(validation), time_s=end)
     return validation
 
 

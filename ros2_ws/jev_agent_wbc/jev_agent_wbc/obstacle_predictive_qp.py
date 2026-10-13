@@ -491,9 +491,18 @@ class ObstaclePredictiveQP(ShotPredictiveQP):
         # ROS feedback can arrive in larger increments than a control tick.
         # Retain braking authority for that lag instead of using almost the
         # entire acceleration budget just to stay on the velocity barrier.
-        gain = (min(1.2, .6*float(np.min(self.limits.acceleration/self.limits.velocity)))
-                if self.collision.is_mesh else 1.2)
         rows = gradients @ integration_matrix(state[2])
+        if self.collision.is_mesh:
+            # Project actuator scales into each distance derivative. A reduced
+            # yaw acceleration must not slow a purely longitudinal wall row.
+            # This is a local CBF design scale, not a joint braking certificate:
+            # the QP actuator bounds and independent swept gate remain final.
+            sensitivity = np.abs(rows)
+            speed = sensitivity @ self.limits.velocity
+            acceleration = sensitivity @ self.limits.acceleration
+            gain = np.minimum(1.2, .6*acceleration/np.maximum(speed, 1e-12))
+        else:
+            gain = 1.2
         lower = -gain*(distances-self.collision.margin-.006)
         if self.collision.is_mesh:
             # Nearest-k witnesses can switch to an already violated CBF while

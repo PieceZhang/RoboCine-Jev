@@ -247,9 +247,12 @@ class CollisionGeometry:
     def point_jacobians(self, x, points, body, origins, axes, z=0.):
         j = np.zeros((len(points), 3, 9))
         j[:, :2, :2] = np.eye(2)
-        j[:, :, 2] = np.cross([0., 0., 1.], points-np.r_[x[:2], z])
-        for k in range(min(body, 6)):
-            j[:, :, k+3] = np.cross(axes[k], points-origins[k])
+        j[:, 0, 2] = -(points[:, 1]-x[1])
+        j[:, 1, 2] = points[:, 0]-x[0]
+        count = min(body, 6)
+        if count:
+            j[:, :, 3:3+count] = np.cross(axes[None, :count],
+                points[:, None, :]-origins[None, :count]).transpose(0, 2, 1)
         return j
 
     def distances(self, x, centers, z=0., base_rotation=None, gradient=False):

@@ -82,9 +82,11 @@ class RelativeTrajectory:
 def _rotation(axis: np.ndarray, angle: float) -> np.ndarray:
     """Return a 3x3 active rotation matrix for a unit axis."""
     x, y, z = axis
-    skew = np.array([[0.0, -z, y], [z, 0.0, -x], [-y, x, 0.0]])
-    identity = np.eye(3)
-    return identity + math.sin(angle) * skew + (1.0 - math.cos(angle)) * (skew @ skew)
+    c, s = math.cos(angle), math.sin(angle)
+    v = 1.0-c
+    return np.array([[c+x*x*v, x*y*v-z*s, x*z*v+y*s],
+                     [y*x*v+z*s, c+y*y*v, y*z*v-x*s],
+                     [z*x*v-y*s, z*y*v+x*s, c+z*z*v]])
 
 
 def rpy_matrix(roll: float, pitch: float, yaw: float) -> np.ndarray:
@@ -150,9 +152,9 @@ def forward_kinematics(
     if not with_jacobian:
         return position, orientation
     jacobian = np.zeros((6, 6))
-    for index, (origin, axis) in enumerate(zip(origins_world, axes_world)):
-        jacobian[:3, index] = np.cross(axis, position - origin)
-        jacobian[3:, index] = axis
+    axes_array = np.asarray(axes_world)
+    jacobian[:3] = np.cross(axes_array, position-np.asarray(origins_world)).T
+    jacobian[3:] = axes_array.T
     return position, orientation, jacobian
 
 

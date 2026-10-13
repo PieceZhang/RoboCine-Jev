@@ -31,19 +31,26 @@ def arguments():
             action.required = False
     parser.add_argument('--case', default='all')
     parser.add_argument('--scenarios', type=Path, default=ROOT/'scenarios')
-    parser.add_argument('--mode', choices=['jev', 'strict', 'both'], default='jev')
+    parser.add_argument('--mode', choices=['jev', 'strict', 'rule', 'both'], default='jev')
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--model', default='typesafe-jev', help='explicit backend model ID')
     parser.add_argument('--api-url', default='http://127.0.0.1:8000/v1/systemone')
     parser.add_argument('--record', action='store_true')
     parser.add_argument('--record-fps', type=float, default=8.)
     parser.add_argument('--width', type=int, default=384)
     parser.add_argument('--height', type=int, default=288)
     parser.add_argument('--pace', type=float, default=1., help='maximum sim/wall rate; 0 means unpaced')
+    parser.add_argument('--agent-period', type=float, default=.5)
+    parser.add_argument('--activation-lead', type=float, default=4.)
+    parser.add_argument('--candidate-budget', type=int, default=3)
+    parser.add_argument('--prediction-horizon', type=float, default=8.)
+    parser.add_argument('--prediction-step', type=float, default=.1)
+    parser.add_argument('--audit-prediction', action='store_true', help='save bounded observation snapshots for offline predictor diagnostics')
     parser.add_argument('--no-preview', action='store_true', help='ablate inherited allocation MPC, retaining safety and bounded task planner')
     parser.add_argument('--allocation-preview', action='store_true', help='enable inherited shot-specific base-allocation MPC for ablation')
     parser.add_argument('--acceleration-reserve', type=float, default=.4,
                         help='operating acceleration / physical acceleration; evaluation limits stay fixed')
-    parser.add_argument('--yaw-acceleration-reserve', type=float, default=.15,
+    parser.add_argument('--yaw-acceleration-reserve', type=float, default=.1,
                         help='optional separate operating fraction for chassis yaw acceleration')
     args = parser.parse_args()
     backend.validate_args(args)
@@ -69,6 +76,7 @@ def run_case(args, app, name, mode, output):
     from jev_agent_wbc.reference import OriginalReference
     from jev_agent_wbc.sensors import RuntimeLidar, RAYS, estimate_subject_from_points
     from jev_agent_wbc.engine import CinematicEngine
+    from jev_agent_wbc.candidates import SearchBudget
     from jev_agent_wbc.evaluation import EVALUATION_PROTOCOL, save_json, trajectory_summary
     from jev_agent_wbc.dynamic_collision import DynamicCollision
     from jev_agent_wbc.whole_body_qp import Limits, whole_body_kinematics
@@ -88,6 +96,8 @@ def run_case(args, app, name, mode, output):
     save_json(output/'evaluation_protocol.json', EVALUATION_PROTOCOL)
     engine = audit = recorder = None
     rows, contacts, failure = [], [], ''
+    prediction_snapshots = []
+    recording_error = ''
     physical_summary = None
     begin = time.monotonic()
     dt = .02
@@ -264,8 +274,14 @@ def run_case(args, app, name, mode, output):
         state, bp, br, measured, wheels, lateral, cp, cr = observe()
         if not len(observed['surfel_centers']):
             raise RuntimeError('PhysX LiDAR startup produced no observed surface map')
-        engine = CinematicEngine(reference, observed, output, mode=mode, api_url=args.api_url, limits=limits,
-                                 preview=args.allocation_preview and not args.no_preview)
+        save_json(output/'initial_observed_scene.json', observed)
+        engine = CinematicEngine(reference, observed, output, mode=mode, api_url=args.api_url, model=args.model, limits=limits,
+                                 preview=args.allocation_preview and not args.no_preview,
+                                 budget=SearchBudget(decision_period_s=args.agent_period,
+                                     activation_lead_s=args.activation_lead, max_rollouts=args.candidate_budget,
+                                     max_horizon_s=args.prediction_horizon, prediction_step_s=args.prediction_step),
+                                 intrinsics=[.5/np.tan(np.deg2rad(27.5))*args.height/args.width,
+                                             .5/np.tan(np.deg2rad(27.5)), .5, .5])
         audit = PhysicsAudit(str(output), physical_limits, 1/args.physics_hz)
         audit.record(0., state[3:], measured, wheels, lateral)
         physical_t = 0.
@@ -300,6 +316,13 @@ def run_case(args, app, name, mode, output):
                     np.savez_compressed(sensor_folder/f'{k:05d}.npz',
                         **{key: np.asarray(value) for key, value in observed.items() if key.startswith('surfel_')},
                         observation_stamp=observed['observation_stamp'], t=t)
+            if subject_track is not None:
+                engine.perception.update_geometry(subject_track)
+            if args.audit_prediction and k % 50 == 0 and len(prediction_snapshots) < 16:
+                prediction_snapshots.append(dict(t=t, state=state.copy(), scene=observed,
+                    previous=engine.wbc.previous.copy(), commanded_q=q_command.copy(),
+                    base_z=float(bp[2]), base_rotation=br.copy(),
+                    active_is_original=engine.active is reference))
             try:
                 command, info = engine.step(state, observed, t, dt, base_z=bp[2], base_rotation=br, commanded_q=q_command)
             except Exception:
@@ -362,6 +385,7 @@ def run_case(args, app, name, mode, output):
             try:
                 recorder.close()
             except Exception as error:
+                recording_error = f'{type(error).__name__}: {error}'
                 print(f'RECORDER_CLOSE_ERROR {error}', flush=True)
         summary = trajectory_summary(rows, reference, {} if engine is None else engine.summary(), failure, physical_summary)
         contact_count = sum(c['points'] > 0 for c in contacts)
@@ -372,11 +396,13 @@ def run_case(args, app, name, mode, output):
             operating_yaw_acceleration_fraction=(args.yaw_acceleration_reserve
                 if args.yaw_acceleration_reserve is not None else args.acceleration_reserve),
             sensor_limitation='PhysX first-hit raycasting; no RTX material/noise/motion-distortion simulation',
-            measured_physical_constraints=physical_summary is not None)
+            measured_physical_constraints=physical_summary is not None, recording_error=recording_error)
         if contact_count:
             summary['safety_pass'] = summary['within_budget_success'] = False
         save_json(output/'summary.json', summary)
         save_json(output/'telemetry.json', rows)
+        if prediction_snapshots:
+            save_json(output/'prediction_snapshots.json', prediction_snapshots)
         save_json(output/'contacts.json', contacts)
         if engine:
             engine.close()
@@ -400,7 +426,7 @@ class RGBPair:
         self.hide_for_reference = [UsdGeom.Imageable(stage.GetPrimAtPath(robot_scope)),
                                     UsdGeom.Imageable(stage.GetPrimAtPath('/World/Moving'))]
         self.cameras, self.products, self.annotators, self.writers = {}, {}, {}, {}
-        for key in ('reference', 'execution'):
+        for key in ('reference', 'execution', 'overview'):
             folder = self.root/key
             folder.mkdir()
             cam = UsdGeom.Camera.Define(stage, '/World/Eval_'+key)
@@ -421,6 +447,10 @@ class RGBPair:
             if not writer.isOpened():
                 raise RuntimeError('cannot open RGB video writer')
             self.writers[key] = writer
+        from jev_agent_wbc.reference import look_at
+        import numpy as np
+        overview_position = np.array([2.6, -3.2, 2.1])
+        self.pose('overview', overview_position, look_at(overview_position, np.array([.6, 0., .65])))
         for _ in range(3):
             sim.render()
 
@@ -437,26 +467,12 @@ class RGBPair:
         import numpy as np
         from jev_agent_wbc.contracts import native
         from scipy.spatial.transform import Rotation
-        self.pose('reference', rp, rr)
         self.pose('execution', ap, ar)
-        images = {}
-        for key in ('execution', 'reference'):
-            for obj in self.hide_for_reference:
-                obj.MakeInvisible() if key == 'reference' else obj.MakeVisible()
-            # Explicit zero-time capture, per the Isaac 5.1 Replicator API.
-            # https://docs.isaacsim.omniverse.nvidia.com/5.1.0/replicator_tutorials/tutorial_replicator_getting_started.html
-            self.rep.orchestrator.step(rt_subframes=2, delta_time=0.0, pause_timeline=False)
-            rgba = np.asarray(self.annotators[key].get_data())
-            if rgba.ndim != 3 or rgba.shape[:2] != (self.args.height, self.args.width):
-                raise RuntimeError(f'RGB annotator is not ready: {key} {rgba.shape}')
-            rgb = rgba[:, :, :3].copy()
-            images[key] = rgb
-            bgr = self.cv2.cvtColor(rgb, self.cv2.COLOR_RGB2BGR)
-            index = len(self.frame_metadata)
-            self.cv2.imwrite(str(self.root/key/f'{index:05d}.jpg'), bgr)
-            self.writers[key].write(bgr)
-        for obj in self.hide_for_reference:
-            obj.MakeVisible()
+        # Keep all actors visible throughout execution. Repeatedly toggling USD
+        # visibility between render products can leave a delayed reference image
+        # containing the robot. Reference RGB is rendered in one isolated pass.
+        self.capture_rgb('execution', len(self.frame_metadata))
+        self.capture_rgb('overview', len(self.frame_metadata), advance_render=False)
         record = dict(frame=len(self.frame_metadata), t=t,
             reference_camera_position=rp, actual_camera_position=ap,
             reference_camera_quaternion_xyzw=Rotation.from_matrix(rr).as_quat(),
@@ -472,6 +488,18 @@ class RGBPair:
         self.frame_metadata.append(native(record))
         with (self.root/'frames.jsonl').open('a') as journal:
             journal.write(json.dumps(self.frame_metadata[-1], allow_nan=False)+'\n')
+
+    def capture_rgb(self, key, index, advance_render=True):
+        import numpy as np
+        if advance_render:
+            self.rep.orchestrator.step(rt_subframes=2, delta_time=0.0, pause_timeline=False)
+        rgba = np.asarray(self.annotators[key].get_data())
+        if rgba.ndim != 3 or rgba.shape[:2] != (self.args.height, self.args.width):
+            raise RuntimeError(f'RGB annotator is not ready: {key} {rgba.shape}')
+        bgr = self.cv2.cvtColor(rgba[:, :, :3].copy(), self.cv2.COLOR_RGB2BGR)
+        if not self.cv2.imwrite(str(self.root/key/f'{index:05d}.jpg'), bgr):
+            raise RuntimeError('could not save paired RGB frame')
+        self.writers[key].write(bgr)
 
     def project_box(self, p, r):
         import numpy as np
@@ -516,21 +544,39 @@ class RGBPair:
 
     def close(self):
         from jev_agent_wbc.evaluation import save_json
-        for writer in self.writers.values():
-            writer.release()
-        save_json(self.root/'frames.json', self.frame_metadata)
-        # Replicator may share graph nodes between products. Detach every consumer
-        # before deleting any product, and preserve written frames even on Kit cleanup errors.
-        for annotator in self.annotators.values():
-            try:
-                annotator.detach()
-            except RuntimeError:
-                pass
-        for product in self.products.values():
-            try:
-                product.destroy()
-            except RuntimeError:
-                pass
+        from scipy.spatial.transform import Rotation
+        rendered = 0
+        try:
+            for obj in self.hide_for_reference:
+                obj.MakeInvisible()
+            # Flush visibility changes once, outside the shot/control clock.
+            for _ in range(4):
+                self.rep.orchestrator.step(rt_subframes=2, delta_time=0.0, pause_timeline=False)
+            for row in self.frame_metadata:
+                self.pose('reference', row['reference_camera_position'],
+                          Rotation.from_quat(row['reference_camera_quaternion_xyzw']).as_matrix())
+                self.capture_rgb('reference', row['frame'])
+                rendered += 1
+        finally:
+            for obj in self.hide_for_reference:
+                obj.MakeVisible()
+            for writer in self.writers.values():
+                writer.release()
+            save_json(self.root/'frames.json', self.frame_metadata)
+            save_json(self.root/'reference_rendering.json', dict(
+                protocol='static_reference_separate_pass/v2', frames_expected=len(self.frame_metadata),
+                frames_written=rendered, valid=rendered == len(self.frame_metadata),
+                scope='stationary subject and background fixture; original-time camera poses; not online perception'))
+            for annotator in self.annotators.values():
+                try:
+                    annotator.detach()
+                except RuntimeError:
+                    pass
+            for product in self.products.values():
+                try:
+                    product.destroy()
+                except RuntimeError:
+                    pass
 
 
 def main():
@@ -555,8 +601,10 @@ def main():
         save_json(args.output/'provenance.json', source_manifest(ROOT,
             {key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()}))
         names = list(NAMES) if args.case == 'all' else args.case.split(',')
-        if set(names)-set(NAMES):
-            raise ValueError('unknown case')
+        for name in names:
+            if (Path(name).name != name or name in ('.', '..') or
+                    not all((args.scenarios/name/file).is_file() for file in ('task.json', 'runtime_scene.json'))):
+                raise ValueError(f'missing or invalid authored case: {name}')
         results = []
         for name in names:
             for mode in (['strict', 'jev'] if args.mode == 'both' else [args.mode]):

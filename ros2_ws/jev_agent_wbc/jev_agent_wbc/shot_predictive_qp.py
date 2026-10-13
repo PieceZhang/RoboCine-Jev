@@ -28,6 +28,26 @@ def integration_matrix(yaw):
     return b
 
 
+def remove_box_redundancy(matrix, lower, upper):
+    """Drop only rows implied by the first eight actuator box constraints.
+
+    Every retained feasible command also satisfies a removed row. No nearest-k
+    approximation or obstacle deletion is involved; callers audit the full QP.
+    """
+    if len(matrix) < 8 or not np.array_equal(matrix[:8], np.eye(8)):
+        return matrix, lower, upper
+    lo, hi = lower[:8], upper[:8]
+    if not np.isfinite(lo).all() or not np.isfinite(hi).all() or np.any(lo > hi):
+        return matrix, lower, upper
+    positive, negative = np.maximum(matrix, 0.), np.minimum(matrix, 0.)
+    minimum = positive@lo+negative@hi
+    maximum = positive@hi+negative@lo
+    redundant = (minimum >= lower+1e-10) & (maximum <= upper-1e-10)
+    redundant[:8] = False
+    keep = ~redundant
+    return matrix[keep], lower[keep], upper[keep]
+
+
 def pose_jacobian(state, base_z):
     p, r, j = whole_body_kinematics(state, base_z)
     c = np.zeros((6, 9))
@@ -537,6 +557,8 @@ class ShotPredictiveQP(WholeBodyQP):
             state, base_z, base_rotation, dt, hessian, gradient, A, lo, hi, brake)
         if np.any(lo > hi):
             raise RuntimeError('infeasible hard bounds: state outside braking envelope')
+        full_A, full_lo, full_hi = A, lo, hi
+        A, lo, hi = remove_box_redundancy(A, lo, hi)
         solver = osqp.OSQP()
         begin = time.perf_counter()
         solver.setup(P=sparse.csc_matrix(np.triu(hessian)), q=gradient, A=sparse.csc_matrix(A), l=lo, u=hi,
@@ -550,7 +572,7 @@ class ShotPredictiveQP(WholeBodyQP):
         candidate = None if result.x is None else np.asarray(result.x, dtype=float)
         if (self.fast_eps > 1e-8 and result.info.status_val in retry_statuses
                 and candidate is not None and np.all(np.isfinite(candidate))):
-            residual = max(0., np.max(lo-A@candidate), np.max(A@candidate-hi))
+            residual = max(0., np.max(full_lo-full_A@candidate), np.max(full_A@candidate-full_hi))
             if result.info.status_val != 1 or residual > 1e-6:
                 # Dense mesh halfspaces do not always polish successfully at
                 # the coarse tolerance. Refine before applying the unchanged
@@ -563,19 +585,19 @@ class ShotPredictiveQP(WholeBodyQP):
         solved = result.info.status_val == 1
         fast_solver = 'osqp'
         finite = solution is not None and np.all(np.isfinite(solution))
-        violation = (float(max(0., np.max(lo-A@solution), np.max(A@solution-hi)))
+        violation = (float(max(0., np.max(full_lo-full_A@solution), np.max(full_A@solution-full_hi)))
                      if finite else np.inf)
         if (self.fast_eps > 1e-8 and result.info.status_val in retry_statuses
                 and (not solved or violation > 1e-6)):
             refined = refine_execution_qp(hessian, gradient, A, lo, hi, self.previous)
             if refined.success and np.all(np.isfinite(refined.x)):
                 solution, solved, fast_solver = refined.x, True, 'slsqp'
-                violation = float(max(0., np.max(lo-A@solution), np.max(A@solution-hi)))
+                violation = float(max(0., np.max(full_lo-full_A@solution), np.max(full_A@solution-full_hi)))
             else:
                 status += '; refinement: ' + refined.message
         if not solved or solution is None or not np.all(np.isfinite(solution)):
             self.failure_problem = dict(state=state.tolist(), previous=self.previous.tolist(), dt=dt,
-                commanded_q=qcmd.tolist(), matrix=A.tolist(), lower=lo.tolist(), upper=hi.tolist(),
+                commanded_q=qcmd.tolist(), matrix=full_A.tolist(), lower=full_lo.tolist(), upper=full_hi.tolist(),
                 status=status, hessian=hessian.tolist(), gradient=gradient.tolist())
             raise RuntimeError('shot WBC failed: '+status)
         if violation > 1e-6:
@@ -585,6 +607,7 @@ class ShotPredictiveQP(WholeBodyQP):
         info = dict(position_error=float(np.linalg.norm(error[:3])), orientation_error=float(np.linalg.norm(error[3:])),
                     qp_violation=violation, solve_s=time.perf_counter()-begin,
                     fast_retried=retried, fast_solver=fast_solver,
+                    qp_total_rows=len(full_A), qp_solver_rows=len(A),
                     command_position_violation=float(max(0, np.max(JOINT_LOWER-nextq), np.max(nextq-JOINT_UPPER))),
                     command_diff_drive_violation=0., solver_iterations=int(result.info.iter),
                     shot_type=ctx['shot_type'], shot_phase=ctx['shot_phase'], next_shot=ctx['next_shot'],
