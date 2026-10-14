@@ -31,6 +31,48 @@ Refuse if no proposed change preserves intent. Safety runs independently.
 def compact_evidence(state):
     """Remove duplicate/verbose data and round measurement precision, not decisions."""
     out = dict(state)
+    if out.get('objective') == 'visible_intent_completion':
+        # Exact geometry, full measurements and dwell traces stay in event logs.
+        # Preserve decisions and missing-data flags; summarize repeated states.
+        frame_keys=('valid','centroid','unoccluded_area','bbox_size','view_direction',
+                    'silhouette_axis_rad','body_orientation')
+        def frame(value):return {k:value[k] for k in frame_keys if k in value}
+        def reduce_intent(value):
+            if isinstance(value,dict):
+                if 'intent_complete' in value:
+                    keys=('intent_complete','range_complete','effective_coverage','visibility_min',
+                        'longest_occlusion_s','in_frame_min','phase_order_valid','duration_s',
+                        'max_speed_m_s','max_acceleration_m_s2','camera_limits_pass','motion_trend')
+                    out={k:value[k] for k in keys if k in value}
+                    out['segments']=[{k:v for k,v in row.items() if k in
+                        ('motion','complete','reverse_travel_fraction','effective_coverage','start_error_fraction','end_error_fraction')}
+                        for row in value.get('segments',[])]
+                    terminal=value.get('terminal_frame',{})
+                    out['terminal_frame']={k:v for k,v in terminal.items() if k not in ('target','predicted_or_actual','source')}
+                    if 'predicted_or_actual' in terminal:out['endpoint_state']=frame(terminal['predicted_or_actual'])
+                    return out
+                if 'unoccluded_area' in value and 'view_direction' in value:return frame(value)
+                omit={'coverage_bin_dwell_s','landmarks','subject_model','reference_range',
+                      'execution_model','motion_clock','execution_history','remaining_budget_s'}
+                return {k:reduce_intent(v) for k,v in value.items() if k not in omit}
+            if isinstance(value,list):return [reduce_intent(v) for v in value]
+            return value
+        out=reduce_intent(out)
+        subject=out.get('subject_evidence',{})
+        if subject:
+            out['subject_evidence']={k:v for k,v in subject.items() if k in
+                ('subject_id','stamp_s','status','age_s','source','measured','scale_trend_log_per_s',
+                 'scale_measurement_valid','scale_trend','measured_scale_trend_log_per_s','visual','geometry','diagnosis')}
+            geometry=subject.get('geometry',{})
+            out['subject_evidence']['geometry']={k:v for k,v in geometry.items() if k in
+                ('valid','status','position','stamp_s','source','position_components','position_uncertainty_m',
+                 'orientation_valid','body_orientation','reason','selected_returns')}
+        if 'intent_specification' in out and out['intent_specification']:
+            spec=out['intent_specification']
+            spec['policy']={k:v for k,v in spec['policy'].items() if k in
+                ('version','collision_margin_m','effective_coverage_min','terminal_centroid_tolerance',
+                 'terminal_log_area_tolerance','terminal_view_tolerance_rad','terminal_hold_s',
+                 'companion_displacement_max_m','companion_travel_max_m')}
     if 'difficulty' in out:
         out['difficulty'] = {k: v for k, v in out['difficulty'].items() if k != 'predicted_state'}
     for key in ('directions', 'selected_directions'):
@@ -364,7 +406,15 @@ for move-in/out, fixed-axis relative displacement for truck/pedestal, and the SA
 ordered unwrapped azimuth sector for orbit. Never shrink or shift the requested
 interval, count reversals twice, use pan/tilt/zoom instead of translation, or count
 occluded travel as filmed coverage. Existing executed history cannot be erased.
-Time extensions are allowed within the stated limit; obstacles continue moving in
+Preserve the ORIGINAL immutable terminal subject frame: centroid, unoccluded scale,
+bounding box and observation direction, with a stable confirmation window. Match
+process trends at motion progress, including companion changes already in the
+reference. Large detours are not complete-intent solutions. Prefer bounded slowing
+while obstacles pass, then small local returning adjustments. Compare reference,
+candidate and actual subject states; measured LiDAR and SAM feature records are
+plain text, never images. Unknown body pose, occlusion or stale evidence remains
+unknown. SAM visible area is not unoccluded size; mask principal axis is not body yaw.
+Faster or slower progress is allowed within the stated duration and camera limits; obstacles continue moving in
 physical time. Prefer effective visible coverage and continuous visibility, then
 framing, smoothness and duration. Reference pose error and WBC tracking error are
 not optimization goals. Geometry is a calibrated prediction, not RGB/SAM evidence.

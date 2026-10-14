@@ -42,7 +42,19 @@ def mask_evidence(mask, subject_id, stamp_s, *, identity_valid=False,
         return {**result, 'reason': 'empty_mask'}
     h, w = values.shape
     edge = min(x.min()/w, (w-1-x.max())/w, y.min()/h, (h-1-y.max())/h)
+    coordinates = np.column_stack([(x+.5)/w, (y+.5)/h])
+    covariance = np.cov(coordinates, rowvar=False, bias=True) if len(x)>1 else np.zeros((2,2))
+    eigenvalues, axes = np.linalg.eigh(covariance)
+    principal = axes[:, -1]
+    anisotropy = float((eigenvalues[-1]-eigenvalues[0])/max(eigenvalues.sum(),1e-12))
     return {**result, 'valid': True, 'reason': '',
+            'bbox': [float(x.min()/w),float(y.min()/h),float((x.max()+1)/w),float((y.max()+1)/h)],
+            'bbox_size': [float((x.max()-x.min()+1)/w),float((y.max()-y.min()+1)/h)],
+            'aspect_ratio': float(((x.max()-x.min()+1)/w)/((y.max()-y.min()+1)/h)),
+            'silhouette_axis_rad': float(np.arctan2(principal[1],principal[0])%np.pi) if anisotropy>.1 else None,
+            'silhouette_anisotropy': anisotropy, 'body_orientation': 'unknown',
+            'unoccluded_area': None, 'external_visibility_fraction': None,
+            'scale_measurement_valid': bool(occluded is False and edge>0),
             'centroid': [float(np.mean(x+.5)/w), float(np.mean(y+.5)/h)],
             'visible_area': float(values.mean()), 'edge_margin': float(edge),
             'truncated': bool(edge == 0.)}
@@ -104,6 +116,7 @@ class SubjectEvidence:
         self.subject_id, self.max_age_s, self.max_skew_s = subject_id, max_age_s, max_skew_s
         self.visual = self.geometry = self.last_trusted_visual = None
         self.geometry_history = deque(maxlen=64)
+        self.visual_history = deque(maxlen=32)
         self.revision = 0
 
     def update_visual(self, record):
@@ -132,6 +145,7 @@ class SubjectEvidence:
         if self.visual and data['stamp_s'] <= self.visual['stamp_s']:
             return False
         self.visual = data
+        self.visual_history.append(data)
         if data.get('valid') and data.get('identity_valid'):
             self.last_trusted_visual = deepcopy(data)
         self.revision += 1
@@ -189,7 +203,14 @@ class SubjectEvidence:
                          'visibility_unknown' if visual.get('occluded') is None else 'observed')
         if consistent is False:
             diagnosis = 'projection_association_mismatch'
+        recent=[v for v in self.visual_history if now-v['stamp_s']<=1.2 and v.get('valid')
+                and v.get('identity_valid') and v.get('occluded') is False and v.get('truncated') is False]
+        slope=None
+        if scale_valid and len(recent)>=3 and recent[-1]['stamp_s']-recent[0]['stamp_s']>.2:
+            slope=float(np.polyfit([v['stamp_s']-recent[0]['stamp_s'] for v in recent],
+                np.log([v['visible_area'] for v in recent]),1)[0])
         return native(dict(subject_id=self.subject_id, revision=self.revision, time_s=now,
+            measured_scale_trend_log_per_s=slope,
             visual=visual, geometry=geometry, aligned_geometry=aligned_geometry, time_aligned=aligned,
             fusion_consistent=consistent,
             scale_measurement_valid=scale_valid, diagnosis=diagnosis,

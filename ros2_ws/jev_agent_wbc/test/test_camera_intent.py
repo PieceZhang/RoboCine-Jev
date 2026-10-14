@@ -114,10 +114,10 @@ def test_subject_is_a_collision_body_even_without_external_obstacles():
 
 def test_safe_detour_can_win_with_larger_reference_error_and_exact_replay():
     original, scene, spec = fixture()
-    path = IntentPath(original,original,1.5,dict(route='above',amplitude_m=.35,extension_s=2.),spec.model)
+    path = IntentPath(original,original,1.5,dict(route='above',amplitude_m=.12,extension_s=2.),spec.model)
     assert path.duration==10.
     assert intent_prediction(spec,path,scene,0)['intent_complete']
-    assert np.linalg.norm(path.sample(4)[0]-original.sample(4)[0])>.1
+    assert np.linalg.norm(path.sample(4)[0]-original.sample(4)[0])>.05
     restored=restore_path(original,path_spec(path))
     assert path_hash(restored)==path_hash(path)
     for t in np.linspace(0,path.duration,37):
@@ -149,13 +149,14 @@ def test_lexicographic_selection_never_trades_completion_for_cost():
 
 @pytest.mark.parametrize('name,route', [('movein','above'),('truck_left','outer'),
     ('truck_right','outer'),('pedestal_up','inner'),('pedestal_down','inner'),('orbit','above')])
-def test_final_pose_may_differ_while_full_intent_is_completed(name,route):
+def test_large_held_offset_covers_range_but_fails_frame_and_trend(name,route):
     original,scene,spec=fixture(name)
     path=IntentPath(original,original,1.5,dict(route=route,amplitude_m=.35,extension_s=0.,
         profile='hold',rise_s=1.2),spec.model)
     assert np.linalg.norm(path.sample(8.)[0]-original.sample(8.)[0])>.2
     result=intent_prediction(spec,path,scene,0.)
-    assert result['intent_complete'] and result['effective_coverage']==1.
+    assert not result['intent_complete'] and result['effective_coverage']==1.
+    assert not result['terminal_frame']['pass_check'] or not result['motion_trend']['pass_check']
     assert path.return_s is None
 
 

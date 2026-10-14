@@ -15,6 +15,7 @@ from .planning import joint_margin, ExecutionWBC, TrackingOnlyWBC
 from .candidates import (SearchBudget, Approval, diagnose_bounded, build_candidates,
                          verify_candidate, installation_guard, path_hash, support_violation)
 from .perception import SubjectEvidence
+from .subject_state import compare_subject_evidence
 from .shot_preview_worker import initialize_worker
 from .whole_body_qp import Limits, whole_body_kinematics
 from .safety import solve_with_certificate
@@ -126,9 +127,14 @@ class CinematicEngine:
             reference_subject_position=self.original.subject.tolist(),
             active_modification=self.active is not self.original,
             difficulty=self.report['report'], subject_evidence=self.perception.snapshot(t),
+            subject_state_comparison=self._subject_comparison(t),
             active_plan=path_hash(self.active), execution_history=self.history[-4:],
             validation_feedback=self.pending_feedback[-3:], revision=self.revision,
             remaining_budget_s=max(0., self.original.duration-t))
+
+    def _subject_comparison(self,t):
+        return compare_subject_evidence(self.original,self.active,self.perception.snapshot(t),
+            self.subject_model,self.intrinsics,t,getattr(self,'actual_feedback',None))
 
     def _monitor_visual(self, t):
         snapshot = self.perception.snapshot(t)
@@ -153,6 +159,17 @@ class CinematicEngine:
                 cause='new_visibility_evidence_requires_review', acquisition_stamp_s=stamp,
                 subject_evidence=snapshot)
             self._feedback('new_visibility_evidence_requires_review', t, finish_pipeline=False)
+            return
+        if 'intent' in prediction:
+            comparison=self._subject_comparison(t)
+            measured=comparison['errors'].get('candidate',{})
+            center=measured.get('centroid_error');scale=measured.get('log_area_error')
+            mismatch=(center is not None and center>.05) or (scale is not None and scale>.10)
+            self.observed_visual_valid=self._last_visual_status='fail' if mismatch else 'unknown'
+            self._write('visual_feedback',t,observed_visual_valid=self.observed_visual_valid,
+                acquisition_stamp_s=stamp,subject_state_comparison=comparison,
+                cause='measured_subject_frame_mismatch' if mismatch else 'partial_frame_consistency')
+            if mismatch:self._feedback('measured_subject_frame_mismatch',t,finish_pipeline=False)
             return
         rows = prediction.get('samples', [])
         status, cause = 'unknown', snapshot['diagnosis']
@@ -196,6 +213,14 @@ class CinematicEngine:
         self.wbc.update_collision_map(scene)
         self.wbc.set_time(t)
         self._monitor_visual(t)
+        if self.planner_model=='floating_camera' and self.perception.snapshot(t)['geometry'].get('status')=='valid':
+            comparison=self._subject_comparison(t)
+            error=comparison['errors'].get('candidate',{})
+            if (error.get('valid') and (error.get('centroid_error',0.)>.05 or error.get('log_area_error',0.)>.10)
+                    and t-getattr(self,'last_subject_feedback_s',-float('inf'))>=.5):
+                self.last_subject_feedback_s=t
+                self._write('subject_state_feedback',t,comparison=comparison)
+                self._feedback('measured_subject_frame_mismatch',t,finish_pipeline=False)
         if self.mode == 'strict' or t >= self.original.duration:
             return
         if self.math_future is not None and self.math_future.done():

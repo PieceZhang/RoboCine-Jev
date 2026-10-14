@@ -208,9 +208,10 @@ def synthetic_view(run, t, overview=False, reference=False):
     if overview:
         center = .5*(run.reference.mean(axis=0)+np.array(run.scene['subject']['position']))
         eye = center+[-1.7,-2.0,1.35]; rotation = look_at(eye, center)
-    img = Image.new('RGB', (624,300), '#1c2b3f'); d = ImageDraw.Draw(img)
+    image_width=624 if overview else 400  # 4:3 camera gate, matching normalized intrinsics
+    img = Image.new('RGB', (image_width,300), '#1c2b3f'); d = ImageDraw.Draw(img)
     def line(points, color, width=1):
-        uv,z = project(points,eye,rotation)
+        uv,z = project(points,eye,rotation,width=image_width)
         if np.all(z>.05) and np.max(np.abs(uv))<10000:
             d.line([tuple(x) for x in uv],fill=color,width=width)
     for x in np.arange(-1,4,.5): line([[x,-2,0],[x,2,0]], '#35465a')
@@ -223,10 +224,10 @@ def synthetic_view(run, t, overview=False, reference=False):
     faces=[(np.array([lower[i],lower[i+1],upper[i+1],upper[i]]),'#397bd2') for i in range(24)]
     faces.append((upper,'#efd66d'))
     for face,color in sorted(faces,key=lambda f:-np.linalg.norm(f[0].mean(axis=0)-eye)):
-        uv,z=project(face,eye,rotation)
+        uv,z=project(face,eye,rotation,width=image_width)
         if np.all(z>.02): d.polygon([tuple(v) for v in uv],fill=color,outline='#284d78')
     for obj in run.runtime.obstacles(t):
-        c=np.asarray(obj['center']); uv,z=project([c],eye,rotation)
+        c=np.asarray(obj['center']); uv,z=project([c],eye,rotation,width=image_width)
         if z[0]>.1:
             rad=300*.5/np.tan(np.deg2rad(27.5))*obj['radius']/z[0]; x,y=uv[0]
             d.ellipse((x-rad,y-rad,x+rad,y+rad),fill='#df654f',outline='#ffad76',width=2)
@@ -247,6 +248,8 @@ def synthetic_view(run, t, overview=False, reference=False):
         for c in corners:line([p,c],GOLD,3)
         line(np.vstack([corners,corners[0]]),GOLD,3)
         line([p,p+rot[:,0]*.5], '#ffffff', 2)
+    if not overview:
+        canvas=Image.new('RGB',(624,300),'#101827');canvas.paste(img,((624-image_width)//2,0));return canvas
     return img
 
 
@@ -330,7 +333,7 @@ def draw_frame(run,t,cutoff=None,label='',end=False):
         im.paste(pic,(x,183))
     d.rectangle((16,454,1904,483),fill=BG)
     txt(d,(24,456),'意图原文：'+run.task['intent'],17,FG,width=1868)
-    txt(d,(20,484),'CPU：仅离线示意渲染，无 RGB 输入' if run.cpu else f'RGB 采集时刻 {captures[0]:.2f} s；事件页沿用最近已采集帧',17,MUTED)
+    txt(d,(20,484),'CPU：离线示意图；主体 LiDAR 数值进入决策，无 RGB 输入' if run.floating and 'observed_terminal_pass' in run.summary else 'CPU：仅离线示意渲染，无 RGB 输入' if run.cpu else f'RGB 采集时刻 {captures[0]:.2f} s；事件页沿用最近已采集帧',17,MUTED)
     txt(d,(760,484),('碰撞仅检测不干预；相机半径 '+fmt(run.summary.get('camera_radius_m'))+' m' if run.floating else
         '实际位姿播种相机预测；无整机预测；执行 WBC 避障开' if run.camera_planner else
         '规划 WBC 避障开启；执行关闭，碰撞仅检测' if run.split_avoidance else
@@ -363,7 +366,7 @@ def draw_frame(run,t,cutoff=None,label='',end=False):
             submitted=s['evidence'].get('candidates',cards)
             alias=next((f'c{k}' for k,v in enumerate(submitted) if v['id']==c['id']), '未送审')
             program=tr.get('program')
-            txt(d,(670,yy),f'{alias} {program["route"]} {program["amplitude_m"]:.2f}m +{program["extension_s"]:.1f}s' if program else
+            txt(d,(670,yy),f'{alias} {program["route"]} {program["amplitude_m"]:.2f}m {program["extension_s"]:+.1f}s' if program else
                 f'{alias} {c["id"][:8]}  [{vals[0]:+.2f}, {vals[1]:+.2f}, {vals[2]:+.2f}]',20,COLORS[j])
             txt(d,(685,yy+25),f'{tr["activation_s"]:.2f}→{tr["duration_s"]:.2f}s  碰撞 / 意图均通过' if program else
                 f'{tr["activation_s"]:.2f}→{tr["envelope"]["end_s"]:.2f}s  {tr["envelope"]["terminal"]}  物理预测：{c["physical_valid"]}',16,MUTED)
@@ -371,7 +374,8 @@ def draw_frame(run,t,cutoff=None,label='',end=False):
             txt(d,(1480,yy),f'{visual["effective_coverage"]:.1%} / {visual["visibility_min"]:.1%}' if program else
                 f'{fmt(visual.get("composition_error"))} / {fmt(visual.get("range_scale_error"))} / {fmt(visual.get("view_angle_error_rad"))}',19)
             txt(d,(1190,yy+25),f'下一阶段已检查：{pred.get("next_phase_checked",False)}',16,MUTED)
-            txt(d,(1480,yy+25),f'最长遮挡 {visual["longest_occlusion_s"]:.2f}s' if program else
+            txt(d,(1480,yy+25),f'终帧尺度误差 {visual.get("terminal_frame",{}).get("log_area_error",0.):.3f}' if program and 'terminal_frame' in visual else
+                f'最长遮挡 {visual["longest_occlusion_s"]:.2f}s' if program else
                 f'出画中心时长 {fmt(visual.get("center_out_of_frame_duration_s"))} s',16,MUTED)
     evidence=s['evidence'];diag=evidence.get('difficulty',s['diagnosis'].get('report',{}))
     txt(d,(668,778),'输入证据与搜索决策',22)
@@ -382,7 +386,13 @@ def draw_frame(run,t,cutoff=None,label='',end=False):
     txt(d,(668,902),f'预测风险时刻 {fmt(diag.get("first_risk_s"),2)} s  净距 {fmt(diag.get("min_clearance_m"))} m',18)
     nxt=evidence.get('next_phase') or {}
     row=run.rows[max(0,np.searchsorted(run.times,t,side='right')-1)];info=row['info']
-    txt(d,(668,931),f'当前执行误差 {fmt(info.get("position_error"))} m / {fmt(info.get("orientation_error"))} rad',18,MUTED)
+    observation=row.get('subject_observation',{})
+    measured=observation.get('state',{})
+    if measured.get('valid'):
+        txt(d,(668,931),f'LiDAR 主体占比 {measured["unoccluded_area"]:.3f}  质心 '+
+            ', '.join(f'{v:.3f}' for v in measured['centroid']),18,MUTED)
+    else:
+        txt(d,(668,931),f'主体实测状态 {observation.get("status","unknown")}',18,MUTED)
     txt(d,(668,958),f'独立真值净距 {fmt(row.get("truth_clearance_m"))} m | 阈值 0.025 m',18,RED if row.get('truth_clearance_m',1)<.025 else GREEN)
     txt(d,(1292,778),'模型输出 → 验证 → 执行',22)
     answer=s['answer']; response=answer.get('response',{}) if answer else {}

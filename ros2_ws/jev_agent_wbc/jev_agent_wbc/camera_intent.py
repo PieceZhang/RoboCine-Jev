@@ -5,6 +5,7 @@ physical time. The calibrated cylinder and sphere scene are explicit CPU fixture
 models; their measurements are not SAM masks or a continuous safety certificate.
 """
 from dataclasses import asdict, dataclass
+from copy import deepcopy
 from functools import lru_cache
 
 import numpy as np
@@ -16,7 +17,7 @@ from .contracts import native
 
 @dataclass(frozen=True)
 class IntentPolicy:
-    version: str = 'camera_intent/v1'
+    version: str = 'camera_intent/v2_subject_frame_trend'
     collision_margin_m: float = .025
     visibility_floor: float = .85
     effective_coverage_min: float = .95
@@ -26,9 +27,21 @@ class IntentPolicy:
     coverage_bins: int = 32
     minimum_bin_dwell_s: float = .025
     max_duration_factor: float = 1.75
+    min_duration_factor: float = .65
     max_speed_m_s: float = 1.5
     max_acceleration_m_s2: float = 4.
     max_angular_speed_rad_s: float = 3.
+    terminal_centroid_tolerance: float = .02
+    terminal_log_area_tolerance: float = .05
+    terminal_bbox_log_tolerance: float = .06
+    terminal_view_tolerance_rad: float = np.deg2rad(3.)
+    terminal_silhouette_axis_tolerance_rad: float = np.deg2rad(3.)
+    terminal_hold_s: float = .4
+    terminal_speed_m_s: float = .03
+    companion_displacement_max_m: float = .24
+    companion_travel_max_m: float = .52
+    process_view_error_max_rad: float = np.deg2rad(12.)
+    process_log_area_error_max: float = .28
 
 
 POLICY = IntentPolicy()
@@ -70,7 +83,7 @@ def projected_area(position, rotation, model, intrinsics):
 
 def obstacle_state(scene, t):
     centers = np.asarray(scene.get('centers', []), float).reshape(-1, 3)
-    velocities = np.asarray(scene.get('velocities', np.zeros_like(centers)), float)
+    velocities = np.asarray(scene.get('velocities', np.zeros_like(centers)), float).reshape(-1,3)
     age = t-float(scene.get('observation_stamp', t))
     radii = np.asarray(scene.get('radii', []), float)
     radii = radii+max(0., age)*np.asarray(scene.get('radius_rates', np.zeros(len(radii))))
@@ -152,8 +165,10 @@ def default_intrinsics():
 
 class IntentSpec:
     def __init__(self, original, model=None, intrinsics=None, policy=POLICY):
-        self.original, self.model, self.policy = original, model, policy
-        self.intrinsics = default_intrinsics() if intrinsics is None else intrinsics
+        self.original, self.model, self.policy = original, deepcopy(model), policy
+        self.intrinsics = list(default_intrinsics() if intrinsics is None else intrinsics)
+        if len(self.intrinsics)!=4 or not np.isfinite(self.intrinsics).all() or min(self.intrinsics[:2])<=0:
+            raise ValueError('finite positive normalized focal lengths are required')
         if model is not None:
             if model.get('id', original.task['subject']['id']) != original.task['subject']['id']:
                 raise ValueError('calibrated subject identity does not match task')
@@ -161,6 +176,7 @@ class IntentSpec:
                 raise ValueError('this intent model requires a stationary calibrated subject')
             if not all(np.isfinite(model[k]) and model[k] > 0 for k in ('radius','height')):
                 raise ValueError('invalid calibrated subject dimensions')
+        self._frame_cache = {}
         self.segments = []
         # Establish/develop/resolve landmarks belong to one monotone movement;
         # distinct motion types remain separate, ordered completion obligations.
@@ -207,7 +223,58 @@ class IntentSpec:
     def to_dict(self):
         return native(dict(reference_sha256=self.original.sha256, policy=asdict(self.policy),
             segments=self.segments, subject_model=self.model, intrinsics=self.intrinsics,
-            reference_role='directed_ranges_and_order_only', motion_clock='independent_of_scene_time'))
+            reference_role='directed_ranges_order_trend_and_immutable_terminal_frame',
+            terminal_target=self.reference_frame(self.original.duration), motion_clock='independent_of_scene_time'))
+
+    def reference_frame(self, progress):
+        from .subject_state import frame_state
+        key = float(np.clip(progress, 0., self.original.duration))
+        if key not in self._frame_cache:
+            p, r = self.original.translation(key), self.original.rotation(key).as_matrix()
+            self._frame_cache[key] = frame_state(p, r, self.model, self.intrinsics)
+        return self._frame_cache[key]
+
+    def frame_and_trend(self, times, positions, rotations, progress_times):
+        from .subject_state import frame_state, frame_error
+        states = [frame_state(p,r,self.model,self.intrinsics) for p,r in zip(positions,rotations)]
+        references = [self.reference_frame(t) for t in progress_times]
+        errors = [frame_error(a,b) for a,b in zip(states,references)]
+        if not errors or not all(e['valid'] for e in errors):
+            return dict(terminal=dict(pass_check=False,reason='unknown_subject_frame'),
+                        trend=dict(pass_check=False,reason='unknown_subject_frame'))
+        target = self.reference_frame(self.original.duration)
+        window = np.flatnonzero(times >= times[-1]-self.policy.terminal_hold_s-1e-7)
+        terminal_errors = [frame_error(states[i],target) for i in window]
+        terminal = {k:(max(e[k] for e in terminal_errors) if all(e[k] is not None for e in terminal_errors) else None)
+                    for k in errors[0] if k!='valid'}
+        speed = np.linalg.norm(np.diff(np.asarray(positions)[window],axis=0),axis=1)/np.maximum(np.diff(times[window]),1e-8)
+        terminal.update(confirmed_window_s=float(times[window[-1]]-times[window[0]]),
+            max_speed_m_s=float(max(speed,default=0.)),target=target,predicted_or_actual=states[-1],
+            source='pose_and_calibrated_shape_requires_independent_observation_confirmation')
+        p = self.policy
+        terminal['pass_check'] = bool(terminal['centroid_error']<=p.terminal_centroid_tolerance and
+            terminal['log_area_error']<=p.terminal_log_area_tolerance and
+            terminal['bbox_log_error']<=p.terminal_bbox_log_tolerance and
+            terminal['view_angle_error_rad']<=p.terminal_view_tolerance_rad and
+            (target.get('silhouette_axis_rad') is None or terminal['silhouette_axis_error_rad'] is not None
+             and terminal['silhouette_axis_error_rad']<=p.terminal_silhouette_axis_tolerance_rad) and
+            terminal['max_speed_m_s']<=p.terminal_speed_m_s and
+            terminal['confirmed_window_s']>=p.terminal_hold_s-.051)
+        nominal = self.original.translation(np.clip(progress_times,0.,self.original.duration))
+        residual = np.asarray(positions)-nominal
+        # Progress-aligned subject-relative companion displacement. Reference's
+        # own dolly/rise/orbit trends are retained; no equal-time tracking cost.
+        displacement = float(np.linalg.norm(residual,axis=1).max())
+        travel = float(np.linalg.norm(np.diff(residual,axis=0),axis=1).sum())
+        trend = dict(companion_displacement_max_m=displacement,companion_travel_m=travel,
+            view_angle_error_max_rad=max(e['view_angle_error_rad'] for e in errors),
+            log_area_error_max=max(e['log_area_error'] for e in errors),
+            centroid_error_max=max(e['centroid_error'] for e in errors),
+            comparison_clock='motion_progress_not_scene_time')
+        trend['pass_check'] = bool(displacement<=p.companion_displacement_max_m and
+            travel<=p.companion_travel_max_m and trend['view_angle_error_max_rad']<=p.process_view_error_max_rad and
+            trend['log_area_error_max']<=p.process_log_area_error_max)
+        return native(dict(terminal=terminal,trend=trend))
 
     def measure(self, times, positions, rotations, scenes, progress_times):
         """Evaluate an actual prefix plus proposed suffix without resetting credit."""
@@ -275,7 +342,12 @@ class IntentSpec:
         ordered = bool(np.all(np.diff(progress_times) >= -1e-7) and progress_times[0] <= 1e-6
                        and progress_times[-1] >= self.original.duration-1e-6)
         complete = bool(segments and all(s['complete'] for s in segments) and longest <= p.max_occlusion_s and ordered)
-        return native(dict(intent_complete=complete, geometric_complete=geometric, segments=segments,
+        framing = self.frame_and_trend(times, positions, rotations, progress_times)
+        range_complete = complete
+        complete = complete and framing['terminal']['pass_check'] and framing['trend']['pass_check']
+        return native(dict(intent_complete=complete, range_complete=range_complete,
+            terminal_frame=framing['terminal'], motion_trend=framing['trend'],
+            geometric_complete=geometric, segments=segments,
             effective_coverage=min((s['effective_coverage'] for s in segments), default=0.),
             visibility_mean=float(np.mean(vis)), visibility_p05=float(np.percentile(vis, 5)),
             visibility_min=float(vis.min()), longest_occlusion_s=longest,
@@ -293,4 +365,6 @@ def selection_key(metrics, smoothness_cost=0.):
     return (not metrics['intent_complete'], not metrics['geometric_complete'],
             -metrics['effective_coverage'], metrics['longest_occlusion_s'],
             -metrics['visibility_p05'], -metrics['visibility_mean'],
-            smoothness_cost, metrics['duration_s'])
+            round(metrics.get('motion_trend',{}).get('companion_travel_m',0.),3),
+            round(metrics.get('terminal_frame',{}).get('log_area_error',0.),4),
+            metrics['duration_s'], smoothness_cost)

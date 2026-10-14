@@ -10,10 +10,10 @@ from .reference import look_at, smoothstep
 
 
 STRATEGIES = {
-    'framing': 'Propose radial and height routes, preserve directed intent ranges; also test slower passage.',
-    'view': 'Propose both sides and height routes that preserve subject-relative motion; also test slower passage.',
-    'joint': 'Propose alternate sides, radii and heights together, with bounded time extensions.',
-    'timing': 'Propose bounded slower passage through the moving obstacle, plus spatial escape alternatives.',
+    'framing': 'Compare small radius/height adjustments and time allocation; preserve subject scale and the immutable final frame.',
+    'view': 'Compare small side/height adjustments and time allocation; preserve viewing direction, motion trend and final framing.',
+    'joint': 'Compare bounded time allocation and small returning side/radius/height changes; preserve the final frame.',
+    'timing': 'Keep the original shot trend; smoothly accelerate or slow passage while obstacles move, plus small local deformations.',
     'restore': 'Finish the remaining intent with a smooth continuation or a new visible route.',
 }
 
@@ -36,13 +36,18 @@ def positions_at(path, times):
 
 
 def pose_at(path, t):
-    return path.pose(t) if isinstance(path, IntentPath) else path.sample(t)[:2]
+    from .reference import OriginalReference
+    if isinstance(path,IntentPath):return path.pose(t)
+    if isinstance(path,OriginalReference):
+        at=float(np.clip(t,0.,path.duration))
+        return path.translation(at),path.rotation(at).as_matrix()
+    return path.sample(t)[:2]
 
 
 class IntentPath:
     """An immutable exact path with an unchanged executed/activation prefix.
 
-    Timing is a monotone quintic warp of the parent's remaining motion. Spatial
+    Timing uses monotone smooth speed pulses or a quintic warp of remaining motion. Spatial
     freedom lives on the shot's primary feature level sets. The nominal path is
     one seed, not the selection objective. No joint state or robot model is used.
     """
@@ -51,6 +56,10 @@ class IntentPath:
         self.original, self.previous = original, previous
         self.activation_s = float(activation_s)
         self.program = dict(program)
+        if self.program.get('timing_profile') in ('early_fast','early_slow'):
+            fast=self.program['timing_profile']=='early_fast'
+            self.program.setdefault('tempo_rate',2.5 if fast else .85)
+            self.program.setdefault('tempo_ramp_s',.4 if fast else .6)
         self.model = model
         self.intrinsics = default_intrinsics() if intrinsics is None else intrinsics
         self.extension_s = float(program.get('extension_s', 0.))
@@ -60,14 +69,16 @@ class IntentPath:
         self.values = np.zeros(6)  # Legacy diagnostics only; program is authoritative.
         self.envelope = SimpleNamespace(end_s=self.duration, decision_id='intent-program',
             blend_s=self.duration-self.activation_s, terminal='complete_intent', bounds={})
-        if self.duration <= self.activation_s or self.extension_s < 0:
+        if self.duration <= self.activation_s or (self.extension_s < 0 and program.get('timing_profile') != 'early_fast'):
             raise ValueError('invalid remaining motion duration')
+        if self.duration < POLICY.min_duration_factor*original.duration-1e-8:
+            raise ValueError('intent duration is too compressed')
         if self.duration > POLICY.max_duration_factor*original.duration+1e-8:
             raise ValueError('intent duration limit exceeded')
-        if self.extension_s/(self.duration-self.activation_s) > .52:
+        if program.get('timing_profile') != 'early_slow' and self.extension_s/(self.duration-self.activation_s) > .52:
             raise ValueError('time warp would reverse progress')
         if geometry is None:
-            times = np.linspace(self.activation_s, self.duration, 81)
+            times = np.linspace(self.activation_s, self.duration, 49)
             positions = np.array([self._construct_position(float(t)) for t in times])
             h = 1e-3
             p0, r0, v0 = previous.sample(self.activation_s)
@@ -87,6 +98,26 @@ class IntentPath:
             return float(t)
         elapsed = min(float(t), self.duration)-self.activation_s
         u = elapsed/(self.duration-self.activation_s)
+        if self.program.get('timing_profile') in ('early_slow','early_fast') and self.extension_s:
+            # Smooth speed pulses slow or advance progress. Scene time never pauses.
+            # Integral of quintic smoothstep makes clock velocity/acceleration
+            # continuous; source progress remains strictly positive.
+            rate = float(self.program.get('tempo_rate',2.5 if self.extension_s<0 else .85))
+            ramp = min(float(self.program.get('tempo_ramp_s',.4 if self.extension_s<0 else .6)),abs(self.extension_s)/rate)
+            plateau = max(0.,abs(self.extension_s)/rate-ramp)
+            def integral(x):
+                x=np.clip(x,0.,1.)
+                return 2.5*x**4-3*x**5+x**6
+            if elapsed<ramp:
+                delay=rate*ramp*integral(elapsed/ramp)
+            elif elapsed<ramp+plateau:
+                delay=rate*(ramp/2+elapsed-ramp)
+            elif elapsed<2*ramp+plateau:
+                x=(elapsed-ramp-plateau)/ramp
+                delay=rate*(ramp/2+plateau+ramp*(x-integral(x)))
+            else:
+                delay=abs(self.extension_s)
+            return min(self.previous.duration,self.activation_s+elapsed-np.sign(self.extension_s)*delay)
         return self.activation_s+elapsed-self.extension_s*smoothstep(u)
 
     def progress_time(self, t):
@@ -94,16 +125,20 @@ class IntentPath:
 
     def _construct_position(self, t):
         source_t = self.parent_time(t)
-        p, r, _ = self.previous.sample(source_t)
+        p, r = pose_at(self.previous,source_t)
         u = np.clip((t-self.activation_s)/(self.duration-self.activation_s), 0., 1.)
         bump = (smoothstep((t-self.activation_s)/self.program['rise_s'])
                 if self.program.get('profile') == 'hold' else 64*u**3*(1-u)**3)
+        if 'peak_s' in self.program:
+            peak=float(self.program['peak_s'])
+            bump=(smoothstep((t-self.activation_s)/(peak-self.activation_s)) if t<=peak else
+                  1.-smoothstep((t-peak)/(self.duration-peak)))
         amplitude = float(self.program.get('amplitude_m', 0.))*bump
         if not amplitude:
             return p
         ref_t = self.progress_time(t)
         motion = self.original.phase(ref_t)['motion'].lower()
-        nominal, nr, _ = self.original.sample(ref_t)
+        nominal, nr = pose_at(self.original,ref_t)
         radial = nominal-self.subject
         radial[2] = 0.
         radial /= max(np.linalg.norm(radial), 1e-8)
@@ -130,21 +165,21 @@ class IntentPath:
             framing = look_at(nominal, self.subject).T@nr
             # Compensate changed view-dependent cylinder silhouette, not visible
             # mask area. Fixed intrinsics: zoom cannot masquerade as a dolly.
-            for _ in range(5):
+            for _ in range(3):
                 pr = look_at(p, self.subject)@framing
                 area = projected_area(p, pr, self.model, self.intrinsics)
                 if area is None or target is None:
                     break
-                if abs(area/target-1.) < 1e-8:
+                if abs(area/target-1.) < 1e-6:
                     break
                 p = self.subject+(p-self.subject)*np.sqrt(area/target)
         return p
 
     def pose(self, t):
         if t <= self.activation_s or self.program['route'] == 'continuation':
-            return self.previous.sample(t)[:2]
+            return pose_at(self.previous,t)
         p = self.translation(np.clip(t, self.activation_s, self.duration))
-        base_p, base_r, _ = self.previous.sample(self.parent_time(t))
+        base_p, base_r = pose_at(self.previous,self.parent_time(t))
         r = look_at(p, self.subject)@look_at(base_p, self.subject).T@base_r
         return p, r
 
@@ -188,7 +223,7 @@ class IntentPath:
 
 
 def propose_intent_paths(original, active, strategy, t, budget, model=None, intrinsics=None,
-                         allow_time_extension=True):
+                         allow_time_extension=True, scene=None):
     activation = t+budget.activation_lead_s
     if activation >= active.duration-.3:
         return []
@@ -198,29 +233,41 @@ def propose_intent_paths(original, active, strategy, t, budget, model=None, intr
               ['outer', 'inner', 'above', 'below'] if 'truck' in motion else
               ['left', 'right', 'above', 'below'])
     programs = [dict(route='continuation', amplitude_m=0., extension_s=0.)]
-    # Distinct sides, radii/heights, and passage times. All complete the same
-    # feature interval; the agent's search family is a program, not permission
-    # to shrink the intended range.
-    for amplitude in (.35, .65):
-        programs += [dict(route=route, amplitude_m=amplitude, extension_s=0.,
-            profile='hold' if amplitude == .35 else 'arch',
-            rise_s=min(1.2,(active.duration-activation)/2.)) for route in routes]
     spare = POLICY.max_duration_factor*original.duration-active.duration if allow_time_extension else 0.
-    for extension in (2., 4.):
-        if extension <= spare+1e-8:
-            programs.append(dict(route='timing', amplitude_m=0., extension_s=extension))
-    if strategy == 'joint':
-        # Coupled routes augment the cardinal alternatives; they must not remove
-        # the inward route (especially when an outer detour hides the subject).
-        coupled = ['outer_above', 'left_above'] if 'pedestal' not in motion else ['left_above', 'right_above']
-        programs += [dict(route=route, amplitude_m=.5, extension_s=0.) for route in coupled]
-    if spare >= 2.:
-        programs += [dict(route=route, amplitude_m=.35, extension_s=2.) for route in routes]
-    if strategy == 'timing':
-        programs.sort(key=lambda v: (v['extension_s'] == 0., v['amplitude_m']))
+    # Time-first programs keep all subject-relative states on the original shot.
+    # Small returning spatial programs coexist with obstacles; large held offsets
+    # remain replayable historical programs but are not proposed as full success.
+    if allow_time_extension:
+        for advance in (1.6,2.4):
+            if active.duration-advance>=POLICY.min_duration_factor*original.duration and advance/2.5+.4 < active.duration-advance-activation:
+                programs.append(dict(route='timing',amplitude_m=0.,extension_s=-advance,timing_profile='early_fast'))
+    for extension in (1.6,):
+        if extension <= spare+1e-8 and extension/.85+.6 < active.duration+extension-activation:
+            programs.append(dict(route='timing',amplitude_m=0.,extension_s=extension,timing_profile='early_slow'))
+    for amplitude in (.12,.22):
+        programs += [dict(route=route,amplitude_m=amplitude,extension_s=0.,profile='arch') for route in routes]
+    fast=[v for v in programs if v.get('timing_profile')=='early_fast']
+    if fast:
+        advance=min(v['extension_s'] for v in fast)
+        programs += [dict(route=route,amplitude_m=.08,extension_s=advance,profile='arch',timing_profile='early_fast') for route in routes]
+    if strategy in ('view','framing'):
+        # The Agent's family affects the search order, never the numeric gates.
+        preferred = ('above','below') if strategy=='framing' else ('inner','outer')
+        programs.sort(key=lambda v:(v['route'] not in preferred,v['amplitude_m']))
+    encounter=None
+    if scene is not None and scene.get('valid') and len(scene.get('centers',[])):
+        times=np.linspace(activation,active.duration,81)
+        points=positions_at(active,times)
+        centers=np.asarray(scene['centers'])[None]+(times-scene['observation_stamp'])[:,None,None]*np.asarray(scene['velocities'])[None]
+        gap=np.min(np.linalg.norm(points[:,None]-centers,axis=2)-np.asarray(scene['radii'])[None],axis=1)
+        encounter=float(times[np.argmin(gap)])
     result = []
     for program in programs[:budget.max_proposals]:
-        if program['extension_s']/(active.duration+program['extension_s']-activation) > .52:
+        if program.get('timing_profile') != 'early_slow' and program['extension_s']/(active.duration+program['extension_s']-activation) > .52:
             continue
+        if encounter is not None and program['amplitude_m']:
+            duration=active.duration+program['extension_s']
+            program['peak_s']=float(np.clip(encounter,activation+min(.6,(duration-activation)/3),
+                                           duration-min(.6,(duration-activation)/3)))
         result.append(IntentPath(original, active, activation, program, model, intrinsics))
     return result
