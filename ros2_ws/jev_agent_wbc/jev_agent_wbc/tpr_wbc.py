@@ -129,7 +129,15 @@ def qp(H, g, A, lo, hi, warm=None):
     if (not converged or residual > 1e-6) and len(g) <= 16:
         # Older bundled OSQP versions can stall on nearly parallel faces.
         # A dense active-set refinement solves the IDENTICAL convex problem.
-        seed = result.x if valid else np.zeros(len(g)) if warm is None else Z.T@(warm-offset)
+        # OSQP's infeasibility certificate is finite but is NOT a primal
+        # iterate. Start refinement at a feasible point of the same polytope,
+        # and distinguish infeasibility from numerical non-convergence.
+        upper, lower = np.isfinite(hi), np.isfinite(lo)
+        feasibility=linprog(np.zeros(len(g)),A_ub=np.vstack([A[upper],-A[lower]]),
+            b_ub=np.r_[hi[upper],-lo[lower]],bounds=[(None,None)]*len(g),method='highs')
+        if feasibility.status == 2:
+            raise RuntimeError('TPR hard safety constraints infeasible (independent LP)')
+        seed = feasibility.x if feasibility.success else (np.zeros(len(g)) if warm is None else Z.T@(warm-offset))
         refined = minimize(lambda x: .5*x@H@x+g@x, seed, jac=lambda x:H@x+g,
                            constraints=LinearConstraint(A,lo,hi), method='SLSQP',
                            options=dict(ftol=1e-12,maxiter=300))
@@ -184,6 +192,7 @@ class ReconfigurationPreview:
             self.trajectory = trajectory
             self.updated = -np.inf
             self.times = self.controls = self.states = None
+            self.anchor = None
             self.info = dict(tpr_prediction_valid=False)
 
     def sample(self, t):
@@ -591,47 +600,96 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
     k = 2.
     lower_acc = -curvature-2*k*rate-k*k*h
     active = (distances < .35) | (rate < -.1)
-    R = rows[active]; low = R@measured+dt*lower_acc[active]
+    R = rows[active]
+    velocity_low = (-k*h-motion)[active]
+    low = np.maximum(R@measured+dt*lower_acc[active], velocity_low)
     sd, sG = c.self_collision.terms(state)
     sR = sG@integration_matrix(state[2])
     srate = sR@measured
     scurvature = (c.self_collision.distances(plus)-2*sd+c.self_collision.distances(minus))/eps**2
     smask = sd < .08
-    slow = sR[smask]@measured+dt*(-scurvature[smask]-2*k*srate[smask]-k*k*(sd[smask]-c.self_collision.margin-.002))
+    self_velocity_low = -k*(sd[smask]-c.self_collision.margin-.002)
+    slow = np.maximum(sR[smask]@measured+dt*(-scurvature[smask]-2*k*srate[smask]-k*k*(sd[smask]-c.self_collision.margin-.002)), self_velocity_low)
+    direct_low = np.r_[velocity_low,self_velocity_low]
     R, low = np.vstack([R, sR[smask]]), np.r_[low, slow]
     A, lo, hi = np.vstack([A, R]), np.r_[lo, low], np.r_[hi, np.full(len(R), np.inf)]
     preferred = measured.copy()
+    kinematic_preference_active=False
     if not brake and not preparing:
         preferred = c.reconfiguration.update(c, state, measured, trajectory_time, dt, base_z, base_rotation, commanded_q)
         if c.coordination_reference is not None:
             # Cross-phase allocation is only a subordinate configuration goal.
             preferred = c.coordination_reference
+        witness=getattr(c,'kinematic_reference',None)
+        if (witness and witness.get('feasible') and witness.get('trace') and
+                trajectory_time>=getattr(c.trajectory,'activation_s',0.) and
+                witness['trace'][0]['t']<=trajectory_time<=witness['trace'][-1]['t']):
+            trace=witness['trace'];knots=np.array([row['t'] for row in trace])
+            states=np.array([row['state'] for row in trace]);controls=np.array([row['control'] for row in trace])
+            expected=np.array([np.interp(trajectory_time,knots,states[:,j]) for j in range(9)])
+            delta=expected-state;delta[2]=(delta[2]+np.pi)%(2*np.pi)-np.pi
+            if np.linalg.norm(delta[:2])<=.25 and np.max(abs(delta[2:]))<=.5:
+                preferred=np.array([np.interp(trajectory_time+dt,knots,controls[:,j]) for j in range(8)])
+                correction=2.*np.r_[delta[:2]@np.array([np.cos(state[2]),np.sin(state[2])]),delta[2:]]
+                preferred+=np.clip(correction,-.25*c.limits.velocity,.25*c.limits.velocity)
+                kinematic_preference_active=True
     elif brake:
         preferred = np.zeros(8)
     W = np.array([1., 1., 1., .35, .35, .35])
     JW = W[:, None]*J
     # First try exact task equality; this is also an exact level-one solution.
     metric = np.array([1., .5, .2, .2, .2, .2, .2, .2])
+    if kinematic_preference_active:
+        # Track the validated redundant allocation within the exact task/safety
+        # set. Excessive blending with the old velocity accumulated posture
+        # drift and exhausted the very reserve the planner had checked.
+        metric=np.full(8,10.)
     if c.coordination_reference is not None:
         metric[:2] = 200.
     H = np.diag(metric+.1)
     g = -metric*preferred-.1*measured
-    try:
-        command, violation = qp(H, g, np.vstack([A, J]), np.r_[lo, desired], np.r_[hi, desired], previous)
-        task_feasible = True
-    except RuntimeError:
-        # No task slack penalty competes with posture: minimize task alone,
-        # then freeze its unique six-dimensional output in level two.
-        primary, _ = qp(JW.T@JW, -JW.T@(W*desired), A, lo, hi, previous)
-        fixed = J@primary
+    def hierarchy(bounds_lo):
         try:
-            command, violation = qp(H, g, np.vstack([A, J]), np.r_[lo, fixed], np.r_[hi, fixed], primary)
+            answer, residual = qp(H, g, np.vstack([A, J]), np.r_[bounds_lo, desired], np.r_[hi, desired], previous)
+            return answer, residual, True
         except RuntimeError:
-            # Level one's already checked solution is safe and task-optimal.
-            # Losing only a posture refinement must not become an escape mode.
-            command = primary
-            violation = max(0., float(np.max(lo-A@command)), float(np.max(A@command-hi)))
-        task_feasible = np.max(np.abs(fixed-desired)) <= 2e-6
+            # No task slack penalty competes with posture: minimize task alone,
+            # then freeze its unique six-dimensional output in level two.
+            primary, _ = qp(JW.T@JW, -JW.T@(W*desired), A, bounds_lo, hi, previous)
+            fixed = J@primary
+            try:
+                command, violation = qp(H, g, np.vstack([A, J]), np.r_[bounds_lo, fixed], np.r_[hi, fixed], primary)
+            except RuntimeError:
+                # Level one's already checked solution is safe and task-optimal.
+                # Losing only a posture refinement must not become an escape mode.
+                command = primary
+                violation = max(0., float(np.max(bounds_lo-A@command)), float(np.max(A@command-hi)))
+            return command, violation, np.max(np.abs(fixed-desired)) <= 2e-6
+    barrier_mode = 'acceleration_and_velocity'
+    try:
+        command, violation, task_feasible = hierarchy(lo)
+    except RuntimeError:
+        # A changed map or a mandatory terminal deceleration can invalidate
+        # the derivative assumption of the acceleration HOCBF even when the
+        # actual separation constraint remains viable. Re-solve against the
+        # direct relative-distance barrier, retaining EVERY actuator bound.
+        # The nonlinear swept/self certificates below remain mandatory.
+        low = direct_low
+        lo = np.r_[actuator_lo,low]
+        try:
+            command, violation, task_feasible = hierarchy(lo)
+        except RuntimeError as error:
+            au,al=np.isfinite(actuator_hi),np.isfinite(actuator_lo)
+            actuator=linprog(np.zeros(8),A_ub=np.vstack([actuator_A[au],-actuator_A[al]]),
+                b_ub=np.r_[actuator_hi[au],-actuator_lo[al]],bounds=[(None,None)]*8,method='highs')
+            error.diagnostics=dict(kind='control_constraints_infeasible',time_s=trajectory_time,
+                actuator_bounds_feasible=bool(actuator.success),
+                current_observed_clearance_m=float(distances.min()),
+                joint_margin_rad=float(np.min(np.minimum(state[3:]-JOINT_LOWER,JOINT_UPPER-state[3:]))),
+                deadline_s=c.limits.deadline_s,active_collision_rows=len(R),
+                map_age_s=max(0.,c.physical_time-c.collision.stamp),barriers_attempted=['acceleration_and_velocity','velocity'])
+            raise
+        barrier_mode = 'certified_velocity_barrier'
     # Task-conditioned JOINT margin, a single LP over all active rows.
     rho = None
     actuator_task_feasible = None
@@ -664,7 +722,11 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
         clearance = certify_control_ramp(c.collision.scene, state, measured, command, c.physical_time,
             dt, base_z, steps=8, constant_certificate=clearance, base_rotation=base_rotation)
     if clearance < c.collision.margin:
-        raise RuntimeError('TPR command fails swept clearance certificate; safe control not certified')
+        error=RuntimeError('TPR command fails swept clearance certificate; safe control not certified')
+        error.diagnostics=dict(kind='swept_collision_certificate_failed',time_s=trajectory_time,
+            current_observed_clearance_m=float(distances.min()),certified_lower_m=clearance,
+            required_clearance_m=c.collision.margin,map_age_s=max(0.,c.physical_time-c.collision.stamp))
+        raise error
     self_clearance = c.self_collision.sweep(state, measured, predicted_velocity, dt)
     if response_active:
         self_clearance-=2*dt*delta[2:]@c.self_collision.geometry.reach[1:]
@@ -674,13 +736,15 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
     c.last_predicted_actual_velocity=predicted_velocity.copy()
     reserve = np.where(measured[2:] >= 0., JOINT_UPPER-state[3:], state[3:]-JOINT_LOWER)-measured[2:]**2/(2*c.limits.acceleration[2:])
     prediction = c.reconfiguration.info
-    warning = (rho is not None and rho < .05) or bool(prediction.get('tpr_prediction_failure')) or reserve.min() < .08
+    warning = barrier_mode != 'acceleration_and_velocity' or (rho is not None and rho < .05) or bool(prediction.get('tpr_prediction_failure')) or reserve.min() < .08
     status = 'normal' if task_feasible and not warning else 'warning' if task_feasible else 'degraded'
     involved = [dict(link=c.collision.geometry.shapes[j][1], obstacle_id=int(c.collision.track_ids[indices[i]]),
                      clearance_m=float(distances[i, j])) for i, j in np.argwhere(active & (distances < .15))]
     report = dict(status=status, camera_task_feasible=bool(task_feasible), rho=rho,
                   camera_actuator_feasible=actuator_task_feasible,
-                  rho_definition='joint minimum normalized acceleration-barrier residual',
+                  rho_definition='joint minimum normalized active-barrier residual',
+                  barrier_mode=barrier_mode,
+                  kinematic_preference_active=kinematic_preference_active,
                   trajectory_id=getattr(c,'received_trajectory_id','received'),
                   first_predicted_conflict_s=prediction.get('tpr_first_conflict_s'), pairs=involved,
                   joint_braking_reserve_rad=reserve.tolist(),

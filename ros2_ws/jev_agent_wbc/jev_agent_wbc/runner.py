@@ -18,6 +18,7 @@ from .kc_svsdf import advance
 from .dynamic_collision import DynamicCollision
 from .whole_body_qp import whole_body_kinematics, Limits
 from .provenance import source_manifest
+from .camera_intent import POLICY,IntentSpec
 
 
 def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, budget=None, model='perplexity', disable_wbc_avoidance=False, target_replay=None, planning_wbc_avoidance=False, planner_model="floating_camera"):
@@ -60,11 +61,11 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
             schedule.append((event['time_s'],path,card))
         engine._write('target_replay_loaded',0.,source=str(source.resolve()),
             schedule=[dict(t=t,candidate_id=c['id']) for t,_,c in schedule],new_model_decisions=False)
-    rows, failure = [], ''
+    rows, failure, failure_diagnostics = [], '', None
     begin = time.monotonic()
     dt = .02
     try:
-        for i in range(round(original.duration/dt)+1):
+        for i in range(round((original.duration+POLICY.terminal_hold_s)/dt)+1):
             t = i*dt
             if i % 5 == 0:
                 observed = lidar.synthetic_scan(scene, state, z, t)
@@ -79,7 +80,9 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
                 engine._write('target_replayed',t,source=str(Path(target_replay).resolve()),
                     candidate_id=card['id'],cards=[card],new_model_decision=False,
                     source_installed_at=installed_at,revalidation='not performed: fixed-target CPU ablation')
-            command, info = engine.step(state, observed, t, dt, base_z=z, commanded_q=state[3:])
+            # Exact velocity of this CPU constant-control integration model.
+            command, info = engine.step(state, observed, t, dt, base_z=z, commanded_q=state[3:],
+                                        measured_control=engine.wbc.previous.copy())
             p, r, _ = whole_body_kinematics(state, z)
             truth = DynamicCollision(scene.truth_collision(t), t, uncertainty_rate=0.)
             clearance = float(truth.clearance(state, z).min())
@@ -90,7 +93,7 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
             if i % 50 == 0:
                 print(json.dumps(dict(case=runtime['name'], mode=mode, t=t, clearance=clearance,
                     jev_calls=engine.jev.decider.client.calls, installed=engine.installed_plans, tracks=len(observed.get('tracks', [])))), flush=True)
-            if t < original.duration:
+            if t < original.duration+POLICY.terminal_hold_s:
                 state = advance(state, command, dt)
             if pace > 0:
                 remaining = (i+1)*dt/pace-(time.monotonic()-begin)
@@ -98,9 +101,20 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
                     time.sleep(remaining)
     except Exception as error:
         failure = f'{type(error).__name__}: {error}'
-        engine._write('run_failed', len(rows)*dt, failure=failure)
+        failure_diagnostics=getattr(error,'diagnostics',None)
+        engine._write('run_failed', len(rows)*dt, failure=failure,diagnostics=failure_diagnostics)
     finally:
         summary = trajectory_summary(rows, original, engine.summary(), failure)
+        summary['failure_diagnostics']=failure_diagnostics
+        if engine.camera_history:
+            history=engine.camera_history
+            measured_intent=IntentSpec(original,runtime['subject'],engine.intrinsics).score(
+                np.array([r['t'] for r in history]),[r['camera_position'] for r in history],
+                [Rotation.from_quat(r['camera_quaternion_xyzw']).as_matrix() for r in history],
+                [r['visual'] for r in history],[r['progress_s'] for r in history])
+            summary.update(executed_camera_intent=measured_intent,
+                terminal_confirmation_observed_s=max(0.,rows[-1]['t']-original.duration) if rows else 0.,
+                intent_success=bool(not failure and summary['safety_pass'] and measured_intent['intent_complete']))
         summary.update(backend='kinematic_integration', obstacle_avoidance_enabled=not disable_wbc_avoidance, wall_s=time.monotonic()-begin,
                        observation_source='synthetic_sparse_lidar_raycast', measured_physical_constraints=False,
                        camera_model='configured 384x288 pinhole, 55deg vertical FOV; no RGB observations')
@@ -129,7 +143,7 @@ def main():
     parser.add_argument('--target-replay-root', type=Path, help='replay exact case_jev installed targets, using mode=strict; no new Jev calls')
     parser.add_argument('--disable-wbc-avoidance', action='store_true', help='CPU only: tracking QP with collision observer; no avoidance/brake/escape')
     parser.add_argument('--planning-wbc-avoidance', action='store_true', help='enable avoidance in Agent diagnosis, candidate rollouts and revalidation independently of execution')
-    parser.add_argument('--planner-model', choices=['wbc','floating_camera'], default='floating_camera', help='camera intent planning by default; wbc is a legacy comparison only; robot execution is separate')
+    parser.add_argument('--planner-model', choices=['wbc','floating_camera'], default='floating_camera', help='camera intent planning with FK/actuator gates by default; wbc is a legacy comparison; execution is separate')
     parser.add_argument('--model', default='perplexity', help='explicit backend model ID')
     parser.add_argument('--api-url', default='http://127.0.0.1:8000/v1/systemone')
     parser.add_argument('--pace', type=float, default=1., help='maximum sim/wall ratio; 0 unpaced for strict tests')
@@ -145,7 +159,7 @@ def main():
         parser.error("--target-replay-root requires --mode strict")
     if args.disable_wbc_avoidance and args.allocation_preview:
         parser.error("tracking-only WBC cannot enable allocation preview")
-    budget = SearchBudget(decision_period_s=args.agent_period, activation_lead_s=args.activation_lead,
+    budget = SearchBudget(max_proposals=16,decision_period_s=args.agent_period, activation_lead_s=args.activation_lead,
                           max_rollouts=args.candidate_budget, max_horizon_s=args.prediction_horizon,
                           prediction_step_s=args.prediction_step)
     args.output.mkdir(parents=True, exist_ok=True)

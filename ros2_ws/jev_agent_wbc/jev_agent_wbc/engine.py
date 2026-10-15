@@ -68,6 +68,10 @@ class CinematicEngine:
         self.last_report_s = self.last_attempt_s = self.last_install_s = -float('inf')
         self.report, self.context, self.pipeline_parent = None, None, None
         self.pending_candidates = {}
+        self.search_feedback = []
+        from .configuration_preparation import ConfigurationMonitor
+        self.configuration_monitor = ConfigurationMonitor()
+        self.last_configuration_status = None
         self.active_candidate = None
         self.history, self.pending_feedback = [], []
         self.wbc_degraded_samples = 0
@@ -80,6 +84,7 @@ class CinematicEngine:
         self._write('initialized', 0., mode=mode, original_sha256=original.sha256,
             original_budget_s=original.duration, upstream_fields=list(original.task),
             architecture='exact_counterfactual/v2', budget=asdict(self.budget), planner_model=self.planner_model,
+            kinematic_gate='fk_constrained_continuous_lift/v1' if planner_model=='floating_camera' else None,
             obstacle_avoidance_enabled=self.limits.obstacle_avoidance,
             wbc_algorithm='TPR-WBC' if self.limits.obstacle_avoidance else 'tracking-only',
             legacy_allocation_preview_ignored=bool(preview and self.limits.obstacle_avoidance),
@@ -107,8 +112,13 @@ class CinematicEngine:
             function = {'diagnose': task_space_planning.diagnose,
                         'candidates': task_space_planning.build, 'verify': task_space_planning.verify}[kind]
             if kind == 'diagnose':
-                kwargs.update(active=self.active, budget=self.budget)
+                kwargs.update(active=self.active, budget=self.budget,
+                    accepted_intent=None if self.active_candidate is None else self.active_candidate.consequences.get('intent'))
             kwargs['history'] = self.camera_history.copy()
+            velocity = getattr(self.wbc, 'measured_control', None)
+            kwargs['measured_control'] = None if velocity is None else np.asarray(velocity).copy()
+            rotation = getattr(self, 'planning_base_rotation', None)
+            kwargs['base_rotation'] = None if rotation is None else np.asarray(rotation).copy()
         self.math_kind = kind
         self.math_future = self.pool.submit(function, *args, **kwargs)
 
@@ -118,7 +128,7 @@ class CinematicEngine:
         recovery = self.active is not self.original and not self.report['report']['issues'] and t-self.last_install_s > 1.5
         return dict(planner_model=self.planner_model, actual_robot_feedback=self.actual_feedback,
             objective='visible_intent_completion' if self.planner_model == 'floating_camera' else 'legacy_reference_tracking',
-            prediction_scope=("ideal camera sphere; measured pose seed; no WBC rollout or whole-body feasibility"
+            prediction_scope=("state-seeded FK with observed whole-body/self-collision swept checks; no dynamics or future truth"
                 if self.planner_model == "floating_camera" else "whole-body WBC rollout"),
             time_s=t, duration_s=self.original.duration, phase=phase,
             next_phase=following[0] if following else None,
@@ -127,6 +137,7 @@ class CinematicEngine:
             reference_subject_position=self.original.subject.tolist(),
             active_modification=self.active is not self.original,
             difficulty=self.report['report'], subject_evidence=self.perception.snapshot(t),
+            robot_capability=self.report.get('robot_capability'),
             subject_state_comparison=self._subject_comparison(t),
             active_plan=path_hash(self.active), execution_history=self.history[-4:],
             validation_feedback=self.pending_feedback[-3:], revision=self.revision,
@@ -198,7 +209,7 @@ class CinematicEngine:
             scene = dict(scene, subject_model=self.subject_model or scene.get('subject_model'),
                          intrinsics=self.intrinsics)
         self.revision += 1
-        p,r,_ = whole_body_kinematics(state,base_z)
+        p,r,_ = whole_body_kinematics(state,base_z,getattr(self,'planning_base_rotation',None))
         self.actual_feedback = dict(time_s=t,state=np.asarray(state).tolist(),camera_position=p.tolist(),
             camera_quaternion_xyzw=Rotation.from_matrix(r).as_quat().tolist(),
             target_position=self.active.sample(t)[0].tolist(),observation_stamp=scene['observation_stamp'])
@@ -233,19 +244,30 @@ class CinematicEngine:
             if kind == 'candidates':
                 self.validation_attempts += 1
             if result.get('error'):
+                if kind == 'candidates':
+                    from collections import Counter
+                    evaluations=result.get('evaluations',[])
+                    self.search_feedback.append(dict(time_s=t,
+                        reasons=dict(Counter(e.get('rejected','passed') for e in evaluations)),
+                        untested_proposals=result.get('untested_proposals'), search_exhausted=result.get('search_exhausted'),
+                        failures=[dict(program=e.get('program'),reason=e.get('rejected'),
+                            first_failure_s=e.get('kinematics',{}).get('first_failure_s')) for e in evaluations[:6]]))
+                    self.search_feedback=self.search_feedback[-3:]
                 if kind == 'verify':
                     self.rejected_stale += 1
                 self._feedback(result['error'], t)
                 self._write('math_failure', t, kind=kind,
                             checks=result.get('checks'), visual_checks=result.get('visual_checks'),
                             common_prefix=result.get('common_prefix'),
+                            kinematics=result.get('kinematics'),kinematic_prior=result.get('kinematic_prior'),
+                            untested_proposals=result.get('untested_proposals'),search_exhausted=result.get('search_exhausted'),
                             evaluations=result.get('evaluations'))
             elif kind == 'diagnose':
                 self.report = result
                 self._write('whole_body_difficulty', t, **result)
                 if t-result['snapshot_time_s'] > self.budget.max_prediction_age_s:
                     self._feedback('diagnosis_expired', t)
-                elif (result['report']['issues'] or self.pending_feedback or self.active is not self.original):
+                elif (result['report']['issues'] or self.pending_feedback):
                     self.context = self._evidence(t)
                     signature = (self.context['event'], self.context['phase']['name'],
                         tuple(result['report']['issues']), path_hash(self.active),
@@ -263,7 +285,9 @@ class CinematicEngine:
                 self.feasible_plans += bool(candidates)
                 self.pending_candidates = {c.id: c for c in candidates if t < c.path.activation_s}
                 self._write('candidate_set', t, cards=[c.card() for c in candidates],
-                    evaluations=result['evaluations'], planner_wall_s=result['wall_s'])
+                    evaluations=result['evaluations'], planner_wall_s=result['wall_s'],
+                    untested_proposals=result.get('untested_proposals'), search_exhausted=result.get('search_exhausted'),
+                    kinematic_prior=result.get('kinematic_prior'))
                 if not self.pending_candidates:
                     self.rejected_stale += 1
                     self._feedback('all_candidates_expired_before_selection', t)
@@ -274,7 +298,9 @@ class CinematicEngine:
                     self.jev.submit(evidence)
                     self._write('selection_requested', t, evidence=evidence)
             elif kind == 'verify':
-                error = installation_guard(result, self.active, scene, state, t, self.budget)
+                error = installation_guard(result, self.active, scene, state, t, self.budget,
+                    measured_control=getattr(self.wbc,'measured_control',None),previous=self.wbc.previous,
+                    commanded_q=commanded_q,base_rotation=getattr(self,'planning_base_rotation',None),base_z=base_z)
                 error = error or support_violation(result['approval'], self.perception.snapshot(t))
                 if error:
                     self.rejected_stale += 1
@@ -286,6 +312,8 @@ class CinematicEngine:
                     self.active = candidate.path
                     self.active_candidate = candidate
                     self.wbc.set_trajectory(self.active)
+                    self.wbc.kinematic_reference=result.get('kinematics')
+                    self.configuration_monitor.reset(candidate.id,result.get('kinematics'))
                     self.wbc.input_generation = getattr(self.wbc, 'input_generation', 0)+1
                     self.wbc.route, self.wbc.route_map_time = None, -np.inf
                     self.wbc.comfort_cache.clear()
@@ -307,6 +335,9 @@ class CinematicEngine:
                         checks=result['checks'], visual_checks=result['visual_checks'],
                         installation_diagnostics=result.get('installation_diagnostics'),
                         latest_state_check=check, end_to_end_wall_s=latency)
+                    self._write('configuration_preparation_planned',t,candidate_id=candidate.id,
+                        preparation=result.get('kinematics',{}).get('preparation'),
+                        accepted_intent_violations=result.get('intent',{}).get('intent_violations',[]))
         semantic = self.jev.poll()
         if semantic is not None:
             if 'error' in semantic:
@@ -315,6 +346,12 @@ class CinematicEngine:
                 self._write('search_strategy', t, **semantic)
                 if semantic['strategy'] == 'refuse':
                     self._feedback('search_refused', t)
+                elif self.planner_model=='floating_camera':
+                    from .search_configuration import offers
+                    options=offers(semantic['strategy'],self.report.get('robot_capability'),self.search_feedback)
+                    evidence=dict(self._evidence(t),stage='configuration',search_options=options)
+                    self.jev.submit(evidence)
+                    self._write('search_configuration_requested',t,evidence=evidence)
                 else:
                     self.pipeline_parent = path_hash(self.active)
                     self._submit_math('candidates', build_candidates, self.original, self.active,
@@ -322,6 +359,14 @@ class CinematicEngine:
                         t, base_z, self.planning_limits, evidence=self.perception.snapshot(t),
                         intrinsics=self.intrinsics, budget=self.budget,
                         commanded_q=None if commanded_q is None else np.asarray(commanded_q).copy())
+            elif semantic['stage']=='configuration':
+                self._write('search_configuration',t,**semantic)
+                self.pipeline_parent=path_hash(self.active)
+                self._submit_math('candidates',build_candidates,self.original,self.active,
+                    semantic['strategy'],scene,np.asarray(state).copy(),self.wbc.previous.copy(),
+                    t,base_z,self.planning_limits,evidence=self.perception.snapshot(t),
+                    intrinsics=self.intrinsics,budget=self.budget,search_config=semantic['search_config'],
+                    commanded_q=None if commanded_q is None else np.asarray(commanded_q).copy())
             elif semantic['stage'] == 'selection':
                 candidate = self.pending_candidates.get(semantic['candidate_id'])
                 if candidate is None:
@@ -356,6 +401,7 @@ class CinematicEngine:
              measured_base_twist=None):
         started = time.monotonic()
         self.wbc.measured_control = None if measured_control is None else np.asarray(measured_control, float).copy()
+        self.planning_base_rotation = None if base_rotation is None else np.asarray(base_rotation,float).copy()
         self.wbc.measured_base_twist = None if measured_base_twist is None else np.asarray(measured_base_twist, float).copy()
         self.update(state, scene, t, base_z, commanded_q)
         target, rotation, feedforward = self.active.sample(t)
@@ -372,6 +418,12 @@ class CinematicEngine:
                         safety_guaranteed=False,command_published=False)
             raise
         self.wbc_degraded_samples += int(info.get('tpr_status') == 'degraded')
+        preparation=self.configuration_monitor.update(state,
+            measured_control if measured_control is not None else self.wbc.previous,t,info,self.wbc.limits)
+        info['configuration_preparation']=preparation
+        if preparation['status']!=self.last_configuration_status:
+            self._write('configuration_preparation_state',t,**preparation)
+            self.last_configuration_status=preparation['status']
         if info.get('tpr_status') in ('warning', 'degraded'):
             if not self.pending_feedback or t-self.pending_feedback[-1].get('time_s', -1.) >= .5:
                 report = info['tpr_report']
@@ -424,6 +476,7 @@ class CinematicEngine:
 
     def summary(self):
         return dict(mode=self.mode, planner_model=self.planner_model, semantic_model=self.semantic_model, jev_calls=self.jev.decider.client.calls,
+            kinematic_gate='fk_constrained_continuous_lift/v1' if self.planner_model=='floating_camera' else None,
             wbc_algorithm='TPR-WBC' if self.limits.obstacle_avoidance else 'tracking-only',
             wbc_degraded_samples=self.wbc_degraded_samples,
             validation_attempts=self.validation_attempts, feasible_plans=self.feasible_plans,

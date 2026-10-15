@@ -148,7 +148,12 @@ def visibility(position, rotation, scene, t, model, intrinsics):
     delta = targets-position
     blocked = np.zeros(len(targets), bool)
     centers, radii = obstacle_state(scene, t)
-    for center, radius in zip(centers, radii):
+    # A sphere outside the ray segment AABB cannot occlude any target ray.
+    # Most observed wall surfels lie beyond the subject; culling them is exact.
+    ray_low = np.minimum(position,targets.min(axis=0))
+    ray_high = np.maximum(position,targets.max(axis=0))
+    possible = np.all(centers+radii[:,None] >= ray_low,axis=1) & np.all(centers-radii[:,None] <= ray_high,axis=1)
+    for center, radius in zip(centers[possible], radii[possible]):
         u = np.clip((delta@(center-position))/np.maximum((delta*delta).sum(axis=1), 1e-12), 0., 1.)
         blocked |= np.linalg.norm(position+u[:, None]*delta-center, axis=1) < radius
     pixels = pixels[valid]
@@ -345,7 +350,24 @@ class IntentSpec:
         framing = self.frame_and_trend(times, positions, rotations, progress_times)
         range_complete = complete
         complete = complete and framing['terminal']['pass_check'] and framing['trend']['pass_check']
+        violations = []
+        if not range_complete:
+            violations.append(dict(kind='incomplete_visible_intent',
+                effective_coverage=min((s['effective_coverage'] for s in segments), default=0.),
+                required_coverage=p.effective_coverage_min, longest_occlusion_s=longest,
+                interval_s=[float(times[0]),float(times[-1])],
+                consequence='missing filmed coverage; previous occluded travel cannot be credited',
+                recovery='not_verified'))
+        for name, value in (('terminal_frame_mismatch',framing['terminal']),
+                            ('motion_trend_violation',framing['trend'])):
+            if not value['pass_check']:
+                violations.append(dict(kind=name, measurements=value,
+                    interval_s=([float(times[-1]-p.terminal_hold_s),float(times[-1])]
+                        if name=='terminal_frame_mismatch' else [float(times[0]),float(times[-1])]),
+                    consequence='terminal composition mismatch' if name=='terminal_frame_mismatch' else 'process deviates from original shot',
+                    recovery='not_verified'))
         return native(dict(intent_complete=complete, range_complete=range_complete,
+            intent_violations=violations,
             terminal_frame=framing['terminal'], motion_trend=framing['trend'],
             geometric_complete=geometric, segments=segments,
             effective_coverage=min((s['effective_coverage'] for s in segments), default=0.),

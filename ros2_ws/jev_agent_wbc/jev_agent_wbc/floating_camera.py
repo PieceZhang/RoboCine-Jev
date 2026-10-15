@@ -142,7 +142,8 @@ def intent_prediction(spec, path, scene, t, history=(), step=.05):
     return result
 
 
-def camera_candidates(original, active, strategy, scene, t, budget, radius, history=(), allow_time_extension=True):
+def camera_candidates(original, active, strategy, scene, t, budget, radius, history=(), allow_time_extension=True,
+                      kinematic_search=None, numerical_gate=None, search_config=None, proposal_transform=None):
     start = time.monotonic()
     if active.duration-t-budget.activation_lead_s < .3:
         return dict(error='insufficient_time_for_exact_plan_activation')
@@ -150,29 +151,64 @@ def camera_candidates(original, active, strategy, scene, t, budget, radius, hist
     observation_error=subject_observation_error(observation,original,t)
     if observation_error:return dict(error=observation_error)
     spec = IntentSpec(original, scene.get('subject_model'), scene.get('intrinsics'))
-    paths = propose_intent_paths(original,active,strategy,t,budget,spec.model,spec.intrinsics,allow_time_extension,scene)
+    paths = propose_intent_paths(original,active,strategy,t,budget,spec.model,spec.intrinsics,
+                                 allow_time_extension,scene,kinematic_search,search_config)
     ranked, evaluations = [], []
     for path in paths:
+        if numerical_gate is not None and evaluations and time.monotonic()-start>=budget.candidate_wall_budget_s:
+            break
+        if proposal_transform is not None:
+            proposal=proposal_transform(path)
+            if proposal.get('error'):
+                evaluations.append(dict(id=path_hash(path),program=path.program,
+                    physical=Validation(False,'projection_not_verified').to_dict(),
+                    rejected=proposal['error'],failure_class='unverified_numerical_search',
+                    kinematics=proposal.get('summary')))
+                continue
+            path=proposal['path']
         value, _ = evaluate_path(path,scene,t,path.duration+POLICY.terminal_hold_s,radius)
         detail = dict(id=path_hash(path), program=path.program, physical=value.to_dict())
         if value.feasible:
             metrics = intent_prediction(spec,path,scene,t,history)
             detail['intent'] = metrics
-            if metrics['camera_limits_pass'] and metrics['intent_complete']:
+            if metrics['camera_limits_pass']:
+                gate = None if numerical_gate is None else numerical_gate(path)
+                if gate is not None:
+                    detail['kinematics'] = gate['summary']
+                    if gate.get('error'):
+                        detail['rejected'] = gate['error']
+                        detail['failure_class'] = gate['kinematics'].get('failure_class','unverified_numerical_search')
+                        evaluations.append(detail)
+                        continue
+                    value, metrics = gate['value'], gate['metrics']
+                    detail.update(physical=value.to_dict(), intent=metrics)
+                detail['intent_violations'] = metrics.get('intent_violations', [])
                 consequences = dict(intent=metrics, source='floating_camera_calibrated_geometry_no_wbc',
-                    summary=metrics, prediction_interval_s=[t,path.duration])
+                    summary=metrics, prediction_interval_s=[t,path.duration],search_config=search_config)
+                if gate is not None:
+                    consequences['source'] = 'measured_seed_camera_with_sampled_kinematic_gate_no_wbc'
                 candidate = Candidate(path,value,consequences,t,strategy)
+                if gate is not None:
+                    candidate.kinematics = gate['kinematics']
                 ranked.append((selection_key(metrics,value.cost),candidate))
             else:
                 detail['rejected'] = ('camera_limits' if not metrics['camera_limits_pass'] else
                     'terminal_frame_mismatch' if not metrics['terminal_frame']['pass_check'] else
                     'motion_trend_violation' if not metrics['motion_trend']['pass_check'] else 'incomplete_visible_intent')
+                detail['failure_class'] = 'physical_limit'
         else:
             detail['rejected'] = 'camera_collision'
+            detail['failure_class'] = 'physical_collision' if scene.get('valid') else 'unverified_observation'
         evaluations.append(detail)
+        if numerical_gate is not None and ranked and time.monotonic()-start>=budget.candidate_wall_budget_s:
+            # Publish an already certified candidate before its exact
+            # activation expires. Additional posture branches must not hold
+            # a usable result hostage. Latest-state verification still runs.
+            break
     candidates = [c for _,c in sorted(ranked,key=lambda pair:pair[0])[:budget.max_rollouts]]
     return dict(candidates=candidates,evaluations=evaluations,wall_s=time.monotonic()-start,
-                error='' if candidates else 'no_safe_candidate_completes_visible_intent')
+                search_exhausted=len(evaluations)==len(paths), untested_proposals=len(paths)-len(evaluations),
+                error='' if candidates else 'no_verified_executable_candidate')
 
 
 class FloatingAgent:
@@ -281,8 +317,8 @@ class FloatingAgent:
                     elif not scene['valid'] or t-scene['observation_stamp']>.3:self.reject('camera_observation_stale',t)
                     elif subject_observation_error(scene.get('subject_observation'),self.original,t):
                         self.reject(subject_observation_error(scene.get('subject_observation'),self.original,t),t)
-                    elif not current_intent['intent_complete'] or not current_intent['camera_limits_pass']:
-                        self.reject('latest_visible_intent_incomplete',t)
+                    elif not current_intent['camera_limits_pass']:
+                        self.reject('latest_camera_motion_limits',t)
                     else:
                         self.active=candidate.path;self.installed+=1;self.last_attempt=t
                         latency=time.monotonic()-self.started
@@ -290,7 +326,7 @@ class FloatingAgent:
                         self.write('plan_installed',t,candidate_id=candidate.id,approval=approval,
                             program=self.active.program,actual_parameters=self.active.values.tolist(),
                             checks=dict(physical_valid='pass',state_fresh='pass',target_authorized='pass',
-                            predicted_visual_valid='pass_calibrated_geometry',observed_visual_valid='unknown_RGB'),
+                            predicted_visual_valid='pass_calibrated_geometry' if current_intent['intent_complete'] else 'accepted_intent_violation',observed_visual_valid='unknown_RGB'),
                             end_to_end_wall_s=latency,latest_state_check=refreshed.to_dict(),intent=current_intent)
         if (self.future is None and self.jev.future is None and t-self.last_attempt>=self.budget.decision_period_s
                 and self.active.duration-t>self.budget.activation_lead_s+.3):

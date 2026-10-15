@@ -98,6 +98,9 @@ class LidarCollisionMap:
             for center, radius in (([-.085, 0., .235], .065), ([.190, 0., .274], .065)):
                 keep &= np.linalg.norm(local - center, axis=1) > radius
             world = world[keep]
+        # Preserve filtered measured coordinates for dynamic shape/velocity
+        # estimation. Voxel centers are collision envelopes, not measurements.
+        self.filtered_points = world.copy()
         keys, _ = voxel_keys(world, self.voxel_size)
         if len(world):
             centers = (keys + .5) * self.voxel_size
