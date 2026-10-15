@@ -21,7 +21,7 @@ from .provenance import source_manifest
 from .camera_intent import POLICY,IntentSpec
 
 
-def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, budget=None, model='perplexity', disable_wbc_avoidance=False, target_replay=None, planning_wbc_avoidance=False, planner_model="floating_camera"):
+def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, budget=None, model='perplexity', disable_wbc_avoidance=False, target_replay=None, planning_wbc_avoidance=False, planner_model="floating_camera", representation_boxes=3, geometry_preferences=True):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     scene = RuntimeScene(Path(case)/'runtime_scene.json')
@@ -39,7 +39,7 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
     # This enables geometric projection, not synthetic SAM/visibility evidence.
     fy = .5/np.tan(np.deg2rad(27.5))
     engine = CinematicEngine(original, observed, output, mode=mode, api_url=api_url, model=model,
-        subject_model=runtime['subject'],
+        subject_model=runtime['subject'],representation_boxes=representation_boxes,geometry_preferences=geometry_preferences,
         planner_model=planner_model, planning_obstacle_avoidance=True if planning_wbc_avoidance else None,
         preview=preview, budget=budget, limits=Limits(obstacle_avoidance=not disable_wbc_avoidance), intrinsics=[fy*288/384, fy, .5, .5])
     schedule, replayed = [], []
@@ -144,12 +144,15 @@ def main():
     parser.add_argument('--disable-wbc-avoidance', action='store_true', help='CPU only: tracking QP with collision observer; no avoidance/brake/escape')
     parser.add_argument('--planning-wbc-avoidance', action='store_true', help='enable avoidance in Agent diagnosis, candidate rollouts and revalidation independently of execution')
     parser.add_argument('--planner-model', choices=['wbc','floating_camera'], default='floating_camera', help='camera intent planning with FK/actuator gates by default; wbc is a legacy comparison; execution is separate')
+    parser.add_argument('--representation-boxes',type=int,choices=(1,3,6),default=3)
+    parser.add_argument('--geometry-preferences',choices=('on','off'),default='on')
     parser.add_argument('--model', default='perplexity', help='explicit backend model ID')
     parser.add_argument('--api-url', default='http://127.0.0.1:8000/v1/systemone')
     parser.add_argument('--pace', type=float, default=1., help='maximum sim/wall ratio; 0 unpaced for strict tests')
     parser.add_argument('--agent-period', type=float, default=.5, help='minimum event spacing, independent of WBC')
     parser.add_argument('--activation-lead', type=float, default=4., help='exact candidate activation lead; never rebased')
     parser.add_argument('--candidate-budget', type=int, default=3, help='maximum full counterfactual branches')
+    parser.add_argument('--candidate-wall-budget',type=float,default=2.,help='cooperative candidate search budget in wall seconds')
     parser.add_argument('--prediction-horizon', type=float, default=8., help='bounded prediction lease in seconds')
     parser.add_argument('--prediction-step', type=float, default=.1, help='far prediction step, .04 to .1 seconds')
     parser.add_argument('--no-preview', action='store_true', help='ablate the inherited allocation MPC; retain dynamic safety and bounded task planner')
@@ -161,7 +164,7 @@ def main():
         parser.error("tracking-only WBC cannot enable allocation preview")
     budget = SearchBudget(max_proposals=16,decision_period_s=args.agent_period, activation_lead_s=args.activation_lead,
                           max_rollouts=args.candidate_budget, max_horizon_s=args.prediction_horizon,
-                          prediction_step_s=args.prediction_step)
+                          prediction_step_s=args.prediction_step,candidate_wall_budget_s=args.candidate_wall_budget)
     args.output.mkdir(parents=True, exist_ok=True)
     save_json(args.output/'provenance.json', source_manifest(root,
         {key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()}))
@@ -176,7 +179,8 @@ def main():
             result = run_case(args.scenarios/name, args.output/f'{name}_{mode}', mode, args.api_url, args.pace,
                               args.allocation_preview and not args.no_preview, budget, args.model, args.disable_wbc_avoidance,
                               None if args.target_replay_root is None else args.target_replay_root/f"{name}_jev",
-                              planning_wbc_avoidance=args.planning_wbc_avoidance, planner_model=args.planner_model)
+                              planning_wbc_avoidance=args.planning_wbc_avoidance, planner_model=args.planner_model,
+                              representation_boxes=args.representation_boxes,geometry_preferences=args.geometry_preferences=='on')
             results.append(dict(case=name, **result))
             save_json(args.output/'runs.json', results)
     return 0 if all(r['completed'] for r in results) else 2

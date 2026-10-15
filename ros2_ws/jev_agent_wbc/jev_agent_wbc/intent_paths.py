@@ -72,7 +72,12 @@ class IntentPath:
         self.intrinsics = default_intrinsics() if intrinsics is None else intrinsics
         self.extension_s = float(program.get('extension_s', 0.))
         self.duration = previous.duration+self.extension_s
-        if not np.isfinite(self.program.get('phase_rate',0.)) or abs(self.program.get('phase_rate',0.)) >= 1.:
+        rate=float(self.program.get('phase_rate',0.));split=float(self.program.get('phase_split',.5))
+        span=self.duration-self.activation_s
+        first,second=span*split,span*(1.-split)
+        ratio=(first-min(.5,first/4))/max(second-min(.5,second/4),1e-12)
+        if (not np.isfinite([rate,split]).all() or not 0.<split<1. or
+                rate<=-1. or rate*ratio>=1.):
             raise ValueError('fixed-deadline clock must remain monotone')
         if not 0.<=self.program.get('up_fraction',.5)<=1.:
             raise ValueError('invalid spatial direction mixture')
@@ -111,23 +116,28 @@ class IntentPath:
         elapsed = min(float(t), self.duration)-self.activation_s
         u = elapsed/(self.duration-self.activation_s)
         if self.program.get('phase_rate'):
-            half = (self.duration-self.activation_s)/2
-            ramp = min(.5, half/4)
-            def pulse_integral(x):
-                x = max(0.,min(x,half))
+            total=self.duration-self.activation_s
+            first=total*self.program.get('phase_split',.5)
+            second=total-first
+            def pulse_integral(x,length):
+                ramp=min(.5,length/4)
+                x = max(0.,min(x,length))
                 def si(v):
                     return 2.5*v**4-3*v**5+v**6
                 if x < ramp:
                     return ramp*si(x/ramp)
-                if x <= half-ramp:
+                if x <= length-ramp:
                     return x-ramp/2
-                v=(x-half+ramp)/ramp
-                return half-1.5*ramp+ramp*(v-si(v))
+                v=(x-length+ramp)/ramp
+                return length-1.5*ramp+ramp*(v-si(v))
             # Equal opposite speed pulses redistribute progress while keeping
             # the original endpoint time. Clock speed is in [1-|a|,1+|a|]
             # and clock acceleration vanishes at the unchanged prefix.
+            # Equal pulse areas preserve the endpoint even with an asymmetric
+            # encounter time. Account for both smooth ramp areas exactly.
+            ratio=pulse_integral(first,first)/pulse_integral(second,second)
             return self.activation_s+elapsed+self.program['phase_rate']*(
-                pulse_integral(elapsed)-pulse_integral(elapsed-half))
+                pulse_integral(elapsed,first)-ratio*pulse_integral(elapsed-first,second))
         if self.program.get('timing_profile') in ('early_slow','early_fast') and self.extension_s:
             # Smooth speed pulses slow or advance progress. Scene time never pauses.
             # Integral of quintic smoothstep makes clock velocity/acceleration
@@ -157,6 +167,9 @@ class IntentPath:
         source_t = self.parent_time(t)
         p, r = pose_at(self.previous,source_t)
         u = max(0.,min((t-self.activation_s)/(self.duration-self.activation_s), 1.))
+        if self.program.get('restore_original'):
+            target,_=pose_at(self.original,progress_at(self.previous,source_t))
+            p=p+smoothstep(u)*(target-p)
         bump = (smoothstep((t-self.activation_s)/self.program['rise_s'])
                 if self.program.get('profile') == 'hold' else 64*u**3*(1-u)**3)
         if 'peak_s' in self.program:
@@ -205,21 +218,29 @@ class IntentPath:
         elif 'pedestal' in motion:
             offset[2] = 0.
         p = p+amplitude*offset
-        if motion in ('movein', 'moveout') and self.model is not None:
+        if (motion in ('movein', 'moveout') or self.program.get('preserve_projected_area')) and self.model is not None:
             if ref_t not in self.seed_cache:
                 self.seed_cache[ref_t]=(projected_area(nominal,nr,self.model,self.intrinsics),
                                         look_at(nominal,self.subject).T@nr)
             target,framing=self.seed_cache[ref_t]
             # Compensate changed view-dependent cylinder silhouette, not visible
             # mask area. Fixed intrinsics: zoom cannot masquerade as a dolly.
-            for _ in range(3):
+            for _ in range(6):
                 pr = look_at(p, self.subject)@framing
                 area = projected_area(p, pr, self.model, self.intrinsics)
                 if area is None or target is None:
                     break
                 if abs(area/target-1.) < 1e-6:
                     break
-                p = self.subject+(p-self.subject)*np.sqrt(area/target)
+                correction=p-self.subject
+                # Preserve the directed filming coordinate while compensating
+                # view-dependent scale. Dolly/orbit admit radial correction;
+                # truck and pedestal must keep their lateral/vertical feature.
+                if 'pedestal' in motion:
+                    correction=correction.copy();correction[2]=0.
+                elif 'truck' in motion:
+                    correction=correction-(correction@axis)*axis
+                p = p+correction*(np.sqrt(area/target)-1.)
         return p
 
     def pose(self, t):
@@ -227,6 +248,11 @@ class IntentPath:
             return pose_at(self.previous,t)
         p = self.translation(np.clip(t, self.activation_s, self.duration))
         base_p, base_r = pose_at(self.previous,self.parent_time(t))
+        if self.program.get('restore_original'):
+            target_p,target_r=pose_at(self.original,self.progress_time(t))
+            blend=smoothstep(np.clip((t-self.activation_s)/(self.duration-self.activation_s),0.,1.))
+            base_p=base_p+blend*(target_p-base_p)
+            base_r=Rotation.from_rotvec(blend*Rotation.from_matrix(target_r@base_r.T).as_rotvec()).as_matrix()@base_r
         r = look_at(p, self.subject)@look_at(base_p, self.subject).T@base_r
         return p, r
 
@@ -286,11 +312,18 @@ def propose_intent_paths(original, active, strategy, t, budget, model=None, intr
                    ['outer_above','inner_above','outer_below','inner_below'] if motion == 'orbit' or 'truck' in motion else
                    ['left_above','right_above'])
     programs = [dict(route='continuation', amplitude_m=0., extension_s=0.)]
+    if active is not original:
+        # Recovery targets the immutable original. Repeatedly deforming an
+        # already projected path cannot remove its terminal framing error.
+        programs += [dict(route='timing',amplitude_m=0.,extension_s=0.,
+                          restore_original=True,phase_rate=rate) for rate in (0.,.45,-.45)]
     if not allow_time_extension:
         # A fixed shot deadline forbids duration changes, not redistribution
         # of progress within the remaining interval.
         programs += [dict(route='timing', amplitude_m=0., extension_s=0.,
                           phase_rate=sign*.9) for sign in (1., -1.)]
+        programs += [dict(route='timing',amplitude_m=0.,extension_s=0.,phase_rate=rate,phase_split=split)
+                     for rate,split in ((1.8,.25),(.9,.35),(-.9,.65),(-.9,.75))]
     spare = POLICY.max_duration_factor*original.duration-active.duration if allow_time_extension else 0.
     # Time-first programs keep all subject-relative states on the original shot.
     # Small returning spatial programs coexist with obstacles; large held offsets
@@ -315,6 +348,10 @@ def propose_intent_paths(original, active, strategy, t, budget, model=None, intr
         programs += [dict(route=route,amplitude_m=amplitude,extension_s=0.,profile='arch',
                           phase_rate=rate) for rate in (.45,-.45,.7,-.7,.9,-.9)
                      for amplitude in amplitudes for route in routes]
+        programs += [dict(route=route,amplitude_m=amplitude,extension_s=0.,profile='arch',
+                          phase_rate=rate,phase_split=split)
+                     for rate,split in ((1.8,.25),(-.9,.75))
+                     for amplitude in amplitudes[:2] for route in routes]
     if strategy in ('view','framing'):
         # The Agent's family affects the search order, never the numeric gates.
         preferred = ('above','below') if strategy=='framing' else ('inner','outer')
@@ -352,14 +389,26 @@ def propose_intent_paths(original, active, strategy, t, budget, model=None, intr
         # and FK checks. Small budgets must not silently omit the opposite
         # timing sign or all diagonal routes. These scores are NOT certificates.
         from .floating_camera import predicted_clearances
-        from .camera_intent import visibility
+        from .camera_intent import visibility,nominal_visibility_scene
         from .subject_state import frame_state,frame_error
         times=np.linspace(t,active.duration+POLICY.terminal_hold_s,49)
+        view_scene=nominal_visibility_scene(scene)
         def score(path):
             points=positions_at(path,times)
             clear=predicted_clearances(points,times,scene,.06)
             at_risk=np.argsort(clear)[:5]
-            seen=[visibility(*pose_at(path,float(times[i])),scene,float(times[i]),model,
+            if len(scene['centers']):
+                centers=np.asarray(scene['centers'])[None]+(times-scene['observation_stamp'])[:,None,None]*np.asarray(scene['velocities'])[None]
+                ray=np.asarray(original.subject)-points
+                relative=centers-points[:,None]
+                fraction=np.sum(relative*ray[:,None],axis=2)/np.maximum(np.sum(ray*ray,axis=1)[:,None],1e-8)
+                closest=relative-np.clip(fraction,0.,1.)[:,:,None]*ray[:,None]
+                radii=np.asarray(scene['radii'])[None]+np.maximum(0.,times-scene['observation_stamp'])[:,None]*np.asarray(scene.get('radius_rates',np.zeros(len(scene['radii']))))[None]
+                sight_gap=np.where((fraction>0.)&(fraction<1.),np.linalg.norm(closest,axis=2)-radii,np.inf).min(axis=1)
+                # View occlusion can occur far from the camera's collision risk.
+                # Sample both kinds of critical times before expensive FK search.
+                at_risk=np.unique(np.r_[np.argsort(clear)[:3],np.argsort(sight_gap)[:5]])
+            seen=[visibility(*pose_at(path,float(times[i])),view_scene,float(times[i]),model,
                              default_intrinsics() if intrinsics is None else intrinsics)['visibility'] for i in at_risk]
             visible=min(0. if v is None else v for v in seen)
             gap=float(clear.min())
@@ -388,7 +437,33 @@ def propose_intent_paths(original, active, strategy, t, budget, model=None, intr
                     path.program['amplitude_m'] if gap>=.028 else -gap,
                     round(support_penalty,1),abs(path.program.get('phase_rate',0.)),-min(gap,.08))
         result.sort(key=score)
+    if not allow_time_extension and len(result)>budget.max_proposals:
+        # Keep the best seed and diverse route/timing families. Previously a
+        # shortlist could consist solely of near-identical diagonal variants.
+        diverse=[];seen=set()
+        for path in result:
+            program=path.program
+            key=(program['route'],np.sign(program.get('phase_rate',0.)),bool(program.get('restore_original')))
+            if key not in seen:
+                diverse.append(path);seen.add(key)
+            if len(diverse)>=budget.max_proposals//2:
+                break
+        result=diverse+[p for p in result if p not in diverse]
     result=result[:budget.max_proposals]
+    if not allow_time_extension and model is not None:
+        # Reserve a few alternatives for the same directed movement with
+        # scale compensation. Do not replace all original routes: compensation
+        # can remove useful radial clearance and is not always preferable.
+        compensated=[];directions=set()
+        for path in result:
+            route=path.program['route']
+            if (path.program.get('amplitude_m') and route not in ('inner','outer') and
+                    route not in directions):
+                compensated.append(IntentPath(original,active,activation,
+                    dict(path.program,preserve_projected_area=True),model,intrinsics,seed_cache=seed_cache))
+                directions.add(route)
+            if len(compensated)>=min(4,budget.max_proposals//3):break
+        if compensated:result=result[:budget.max_proposals-len(compensated)]+compensated
     for path in result:
         path.seed_cache={}  # construction-only cache must not cross workers
     return result

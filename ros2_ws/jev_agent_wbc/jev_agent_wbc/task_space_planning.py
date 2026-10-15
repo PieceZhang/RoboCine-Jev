@@ -110,6 +110,8 @@ def diagnose(original,scene,state,previous,t,base_z,limits,commanded_q=None,acti
             metrics['terminal_frame'].get('log_area_error',float('inf'))<=
                 accepted_intent['terminal_frame'].get('log_area_error',0.)+.04)
         if not accepted_degradation:issues.append('incomplete_visible_intent')
+        elif active is not original:
+            issues.append('intent_recovery_required')
     if not kinematics['feasible']:issues.append('numerical_kinematic_gate_failed')
     return dict(snapshot_time_s=t,physical_caps=CAPS,kinematic_prior=search.prior(),robot_capability=robot_capability,
         kinematics=summary(kinematics),report=dict(issues=issues,first_risk_s=risk,
@@ -148,7 +150,7 @@ def screen(path,search,spec,observed,budget,history):
 
 def build(original,active,strategy,scene,state,previous,t,base_z,limits,
           evidence=None,intrinsics=None,budget=None,commanded_q=None,history=(),
-          measured_control=None,base_rotation=None,search_config=None):
+          measured_control=None,base_rotation=None,search_config=None,representation_boxes=3,geometry_preferences=True):
     budget=budget or SearchBudget();start=time.monotonic()
     observed=camera_scene(scene,t,active.duration)
     observed['intrinsics']=intrinsics or observed.get('intrinsics')
@@ -159,7 +161,8 @@ def build(original,active,strategy,scene,state,previous,t,base_z,limits,
         from .fk_camera_path import FKCameraPath
         virtual=MeasuredCameraPrediction(path,search.state,search.base_z,search.t,budget.activation_lead_s,base_rotation)
         report=None
-        for allocation in search.config['allocations'][:2]:
+        allocations=list(dict.fromkeys(('path_heading',*search.config['allocations'])))[:2]
+        for allocation in allocations:
             report=search._lift(virtual,path.duration+POLICY.terminal_hold_s,allocation,project_camera=True)
             if report['feasible']:
                 return dict(path=FKCameraPath.from_lift(path,report),summary=summary(report))
@@ -169,8 +172,19 @@ def build(original,active,strategy,scene,state,previous,t,base_z,limits,
     result=camera_candidates(original,active,strategy,observed,t,budget,RADIUS,history,
         allow_time_extension=False,kinematic_search=search,
         numerical_gate=lambda path:screen(path,search,spec,observed,budget,history),search_config=search_config,
-        proposal_transform=project if search_config=='executable' else None)
-    result.update(wall_s=time.monotonic()-start,snapshot_time_s=t,kinematic_prior=search.prior(),search_config=search_config)
+        # Functional geometry preferences must not disable the backend's
+        # ability to generate a realizable camera proposal. The final exact
+        # path (including every deviation) still requires Agent selection.
+        proposal_transform=project if search_config is not None else None)
+    from .representation_jvs import JVSGeometryBackend, candidate_geometry
+    backend = JVSGeometryBackend(representation_boxes)
+    observation = backend.observe(state,t,base_z=base_z,base_rotation=base_rotation)
+    for candidate in result.get('candidates', []):
+        geometry = candidate_geometry(candidate,backend,observation,base_z,base_rotation,geometry_preferences)
+        geometry['box_budget'] = representation_boxes
+        candidate.consequences['geometry'] = geometry
+    result.update(wall_s=time.monotonic()-start,snapshot_time_s=t,kinematic_prior=search.prior(),search_config=search_config,
+                  activation_s=t+budget.activation_lead_s)
     return result
 
 
@@ -184,6 +198,16 @@ def verify(candidate,approval,original,scene,state,previous,t,base_z,limits,
     if (candidate.id!=approval.candidate_id or path_hash(candidate.path)!=approval.candidate_id or
         digest(candidate.card())!=approval.card_sha256 or original.sha256!=approval.reference_sha256):
         return dict(error='approval_binding_mismatch',checks=checks)
+    guidance = None
+    geometry = candidate.consequences.get('geometry')
+    if geometry is not None:
+        from .representation import Request, Observation
+        from .representation_jvs import JVSGeometryBackend
+        try:
+            guidance = JVSGeometryBackend(geometry['box_budget']).compile(
+                Request.from_dict(geometry['request']),Observation.from_dict(geometry['observation']),candidate.path)
+        except (ValueError, KeyError, TypeError) as error:
+            return dict(error='geometry_request_invalid:'+str(error),checks=checks)
     checks['target_authorized']='pass'
     error=support_violation(approval,evidence)
     if error:return dict(error=error,checks=checks)
@@ -208,4 +232,4 @@ def verify(candidate,approval,original,scene,state,previous,t,base_z,limits,
         candidate=candidate,approval=approval,checks=checks,visual_checks=dict(intent=checks['predicted_visual_valid']),
         validation=full,snapshot_time_s=t,scene=scene,wall_s=time.monotonic()-start,
         prediction_model='floating_camera',base_z=base_z,intent=metrics,
-        kinematics=screened['kinematics'],kinematic_limits=limits)
+        kinematics=screened['kinematics'],kinematic_limits=limits,geometry_guidance=guidance)

@@ -1,0 +1,205 @@
+Jev 双部分几何中间件 v1（2026-10-15）
+
+实现范围
+========
+公共表示只包含 mobile_platform、camera_manipulator 两个功能实体。
+相机是任务坐标系；mount 是两部分之间的安装接口。机器人内部关节、
+逐 link 身份、支撑接触、摩擦、执行器与动力学均留在机器人后端。
+现阶段实现差速底盘 + 六轴相机机械臂适配器；四足、人形、空中平台只有
+合成 FK 合约测试，不声称已经实现这些机器人的 WBC 或实机适配。
+
+保留现有流程：搜索族 Choice -> 搜索配置 Choice -> 数值候选 -> 候选 Choice
+-> 最新状态复核 -> 原 WBC。没有增加模型调用阶段，没有开发 Memory。
+现有四字段拍摄 task.json 不变。新的中间件接口是运行时接口。
+
+文件
+====
+jev_agent_wbc/representation.py       通用位姿、盒子、Observation、Request、几何残差
+jev_agent_wbc/representation_jvs.py   当前机器人 FK/碰撞模型的私有适配器
+jev_agent_wbc/representation_agent.py 模型文本视图与有限语义选项
+schemas/geometry-v1.schema.json       JSON Schema 2020-12
+scripts/evaluate_representation.py   1/3/6 盒几何消融
+scripts/debug_representation.py      几何请求安装与真实 CPU WBC 验证
+结果与边界见 REPRESENTATION_VALIDATION.txt。
+
+输入：Observation
+=================
+数值核心为 {T_world_mount, T_mount_camera, G_platform^mount, G_manipulator^mount}。
+所有变换都满足 p_parent = R_parent_child * p_child + translation_m。
+使用米、秒、弧度，右手系；相机 link 为 X 前、Y 左、Z 上，四元数顺序 XYZW。
+禁止把 OpenCV 光学系（Z 前）直接传进来。适配器必须先做固定标定变换。
+world 是本次运行的统一惯性参考；两部分包络均在同一 mount 系中。
+
+每个占用元素是一个闭合长方体（六个面的凸多面体），以中心和半长表示。
+默认每部分最多 3 个盒子，可配置 1 或 6；v1 合约上限是 8。
+组件没有 link 名称、拓扑或稳定 ID；其顺序和合并方式可以随状态变化。
+移动平台不允许为空。刚性安装的相机允许 camera_manipulator 为空；其相机
+与支架实体应由该机器人的适配器计入平台占用，不能丢失真实几何。
+
+JVS 适配器内部读取现有 CollisionGeometry，按功能归属生成解析外包盒，
+再按增量体积贪心合并。盒、球、圆柱和底盘截锥都被完整包含；不是用有限
+表面点近似外包络。平台的固定碰撞几何属于 mobile_platform，活动相机机构
+与相机实体属于 camera_manipulator。mount 位于第一活动轴原点，方向与平台
+参考一致。对倾斜基体使用完整 3D Rotation，而不是强制压成平面。
+
+重要边界：保守包含的是仓库已有的碰撞代理模型，不能据此声称包含未建模的
+电缆、负载或真实外壳。包络是推理与软引导工具，不能替代原碰撞检查。
+
+Observation.from_fk 接收任意后端提供的世界系 mount、camera 位姿和两部分
+mount 系几何；协议不规定关节数、底盘自由度或运动求解器。
+JVSGeometryBackend.observe 则是当前 joint-space state -> FK -> Observation 的
+具体实现。新机器人实现相同 GeometryBackend 接口即可复用公共类型与模型词汇；
+其候选生成、最新状态核验、IK/WBC 和传感器接入仍需各自的数值后端。
+
+Observation 中有 schema、stamp_s、source 与明确坐标约定。source 区分
+measured_fk / predicted_fk / synthetic_fk。序列化后计算 observation_id；
+没有将冗余构型压缩成“只剩相机位姿”，因为占用几何也进入该标识。
+同一相机位姿的不同中间机构形状可以具有不同表示。
+
+文本视图
+========
+模型接收 robot_geometry：两个变换、每部分整体范围/少量盒子、相对于 mount
+的近障碍方向、中心/半径/速度和 proxy_clearance_m。只报告每部分最近的少量
+观测表面，不把点云全部塞入上下文。track ID 与 surface ID 是观测索引，不是
+虚构的物体语义。方向描述以 mount 为原点；精确中心与距离同时保留。
+
+障碍预测按观测时刻和同一物理时间推进，并使用当前后端相同的不确定性增长。
+空地图、未来时间戳或超过 0.6 s 的观测明确报告 unknown，不能解释为自由空间。
+正的代理间隙只针对这些已观测表面；负值可能是保守包络造成的误占。
+完整数值 Observation 保存到事件日志，文本视图只做测量精度压缩。
+精确动作 Request 不舍入，避免模型授权的目标悄悄变化。
+
+SystemOneClient 在公共边界过滤原始 state、逐 link 对、关节余量、制动余量和
+执行器指标。旧数值日志继续保留完整证据。当前默认整机规划路径会在候选卡中
+提供同类几何预测；独立无机器人 floating_camera 实验保持原接口。
+
+输出：Request
+=============
+Request 指定 observation_id、camera_path_id、[start_s,end_s]，以及两类可选软偏好：
+
+1. pose_preferences：part、frame、target（完整 6D Pose）、逐轴位置容差、
+   姿态角容差和权重。mobile_platform 的功能参考是 mount；
+   camera_manipulator 的功能端点是 camera。它不把整个多 link 机构当成刚体。
+   位置容差沿目标姿态的三个轴解释；姿态容差是 SO(3) 旋转角死区。
+2. occupancy_preferences：part、frame、relation、region（Box）、margin_m、weight。
+   stay_in_region 表达希望整部分占用留在区域内；avoid_region 表达希望整部分
+   远离区域。占用偏好计算整个包络，而非只检查某个参考点。
+
+frame 必须显式选择：
+  world            固定世界系
+  mount_snapshot   observation_id 对应时刻的固定 mount 系
+  camera_snapshot  observation_id 对应时刻的固定 camera 系
+  mount            当前 FK 的移动 mount 系
+  camera           当前 FK 的移动 camera 系
+
+区分固定快照和随动坐标，避免“移动平台时目标也被意外移动”的歧义。例如
+platform_follow 在当前 camera 系中偏好原 camera->mount 关系；compact 在当前
+mount 系中偏好机构保持紧凑。请求只在自己的时间区间有效，不延长镜头截止时间。
+
+相机轨迹仍由原有路径对象精确保存；公共 Request 用不透明 camera_path_id 引用。
+这是当前候选 Choice 流程下的最小接入方式：Agent 选择完整候选，即选择它的相机
+修改程序、时间安排及几何偏好；不要求模型输出长串浮点轨迹或任意约束代码。
+适配器验证 path_hash 一致，并把原路径对象交给已有 WBC 相机主任务。
+独立调用者也可通过 Request.from_dict 输入同样的显式几何偏好后编译给 IK/WBC。
+
+现有搜索配置 Choice 在模型侧使用构型无关别名：
+  compact           小幅相机修复；机构偏好留在当前 mount 包络外扩 0.12 m 内
+  platform_follow   平台跟随相机，保留 0.12 m / 0.3 rad 关系死区，并偏好紧凑
+  timing            调整相机时间分配，不额外施加身体偏好
+  wider_search      扩大相机搜索，不额外施加身体偏好
+  backend_realizable 后端生成可实现的相机候选，明确给出镜头偏差
+底层配置名称和分配顺序仍属于当前机器人后端；模型不接收它们。
+
+编译与执行
+==========
+CompiledGuidance 将 Pose/Box 请求变为任务空间残差。姿态残差采用 0.35 m 的
+特征长度转换量纲；位置/旋转都设死区。空间 containment 使用所有盒子的角点；
+avoid_region 使用区域系中的保守 AABB 分离量（重叠深度仅是软代价近似）。
+其他 IK/WBC 后端可直接最小化 residual，也可用自己的解析雅可比和代价形式。
+
+JVS 后端用差分线性化生成现有 8 维控制变量的二次代价，只加到 TPR-WBC 的
+次级目标。相机等式/最优主任务、底层硬界、障碍与自碰撞证书都仍由 WBC 决定。
+矛盾或不可达的软偏好允许不满足，不能放宽主任务或安全界。本阶段没有硬空间
+约束语法，也没有把几何偏好当成碰撞认证或新规划器。
+
+候选卡包含 Request 和原始 Observation，原 Approval 的 card_sha256 一并绑定
+它们。数值复核检查观察绑定、路径绑定、版本、有限数、合法尺寸/容差/坐标系、
+生效时间和原截止时间，再走已有最新状态与场景门禁。不能更改已批准偏好后
+仍使用旧 Approval。未知字段和版本拒绝，不静默丢弃。
+
+结果与后续 Memory
+=================
+Result 复用相同两部分几何，带 evidence_kind=predicted/measured、时间、路径标识、
+观察标识、完整 Request 的 request_id、几何偏好残差和 backend_status。预测候选只给最多五个带时间的几何
+快照；不会把所有时刻压成一个静态占用体，也不宣称连续时间验证。
+这些预测来自现有运动学见证，并非新软偏好作用后的 WBC 闭环预测；真实机构分配
+可能不同，必须以独立 WBC 和测量反馈为准。模型文本最多显示其中三个时刻；
+超过文本预算时先显示终态，必要时省略可选预测预览并明确标注；所有候选与精确 Request 保留，完整时间序列仍保留在日志中。
+backend_status=unknown 是合法且有意义的结果；几何残差很小不代表执行成功。
+日志保留数值证据、模型选择与实际反馈，便于后续建立前态->请求->后态记录。
+本阶段不实现存储、嵌入、检索或自动迁移。
+
+研究借鉴（来自用户提供的调研材料）
+==================================
+eTaSL/eTC：任务描述、机器人相关编译、底层求解分离。
+https://lirias.kuleuven.be/retrieve/37a9c3cc-7ffd-476c-a626-b777138fe59c
+TSR / RangedIK：参考坐标、可接受范围与范围内偏好分离；本实现只是小型几何
+死区目标，不复现 TSR 采样器，也不声称等价于这些论文的优化器。
+https://arxiv.org/abs/2302.13935
+FCL：形状与变换分开；本阶段只用 boxes，不新增 FCL 运行依赖。
+https://github.com/flexible-collision-library/fcl
+SEAM：有限语义词汇与可检查类型；本实现保留原 Choice 协议。
+https://arxiv.org/html/2511.19315v1
+UMI / PDDLStream：相对任务空间与机器人私有数值后端；不透明候选路径引用。
+https://arxiv.org/abs/2402.10329
+https://arxiv.org/abs/1802.08705
+这些是设计借鉴，不是某篇论文现成的双部分整机标准或跨机器人验证结果。
+
+运行
+====
+在仓库根目录，使用已有 Python 环境：
+
+PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  /usr/bin/python3 -m pytest -q ros2_ws/jev_agent_wbc/test
+
+PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 \
+  /usr/bin/python3 ros2_ws/jev_agent_wbc/scripts/evaluate_representation.py \
+  --output <新几何审计目录>
+
+PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  /usr/bin/python3 -m jev_agent_wbc.runner --case all --mode jev \
+  --pace .1 --activation-lead 2.5 --representation-boxes 3 \
+  --geometry-preferences on --output <新执行结果目录>
+
+--representation-boxes {1,3,6} 比较表示粒度；--geometry-preferences off 保留几何
+输入和候选卡但禁用附加软偏好，用于消融。WBC 避障保持默认开启。
+CPU 调试时钟放慢不代表墙钟实时性能；这里不声称 ROS/PhysX/实机验收。
+
+2026-10-15 后续优化：任务时间与后端反馈
+====================================
+公共 Schema 额外支持 kind=task_context，仍为 jev_geometry/v1。
+字段为 reference_id、stamp_s、deadline_s、earliest_change_s、
+first_predicted_failure_s（可为 null）、unchanged_prefix_at_risk、recovery_required。
+目标始终是原镜头完整意图与原终帧；past_coverage=immutable_measured_history。
+候选选择阶段的 earliest_change_s 来自当前仍有效候选的精确激活时间；新搜索阶段
+才使用当前时间加激活提前量。因此不会把选项中即将生效的候选误说成要再等一个提前量。
+这一上下文不增加关节、link 或执行器数据，不是另一个机器人运动模型。
+
+搜索反馈保留已检查结果、未检查数量、是否耗尽、首个失败时刻以及失败是否发生在
+不能修改的前缀内；底层原因映射成 camera_path_not_realized、camera_motion_freedom_low、
+backend_motion_conflict 等有限类别。数值局部失败不等于全局不可达。
+功能偏好与求解算法解耦：选择平台跟随、紧凑、时间或探索偏好，都允许后端生成
+并复核显式相机替代轨迹。最终选择依然绑定完整的精确候选和 Request。
+
+恢复是显式、连续、可序列化的相机路径，目标取不可变 original；相机修改前缀保持
+原样。已批准且验证过的整机冗余准备可在相机修改开始前执行，仍受相机主任务和
+原硬约束限制。只有占用/位姿偏好发生变化的选项也不会被误当作无动作 continuation。
+
+预测遮挡与碰撞不确定性分开：规划器的 visibility_forecast 是名义观测几何和速度
+外推，guarantee=false；未来位置不确定性不被当作真实不透明物体。物理验证仍使用
+完整的时间增长碰撞包络。历史与最终镜头验收继续使用原实测判据，预测通过不等于
+完整镜头验收通过。此预测语义在候选文本和日志中显式标注。
+
+复现实验时应明确设置 --candidate-wall-budget；默认 2 秒是旧预算，完整分支可能
+超时。本文后续迭代采用 --pace .03 --activation-lead 1.2 --candidate-wall-budget 20，
+不是实时性能或等计算量优势证明。完整结果与限制见 REPRESENTATION_OPTIMIZATION.txt。

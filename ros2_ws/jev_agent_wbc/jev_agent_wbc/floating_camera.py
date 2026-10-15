@@ -115,6 +115,7 @@ def evaluate_path(path, scene, t, end, radius, step=.02, visual=False):
 
 
 def intent_prediction(spec, path, scene, t, history=(), step=.05):
+    from .camera_intent import nominal_visibility_scene
     prediction_end = path.duration+POLICY.terminal_hold_s
     # Include both confirmation-window boundaries explicitly. A monitoring
     # grid offset (e.g. t=2.78, step=.1) must not turn a full .4 s hold into .32 s.
@@ -125,10 +126,15 @@ def intent_prediction(spec, path, scene, t, history=(), step=.05):
     positions = [row['camera_position'] for row in previous]+[pose[0] for pose in poses]
     rotations = [Rotation.from_quat(row['camera_quaternion_xyzw']).as_matrix() for row in previous]+[pose[1] for pose in poses]
     progress = [row['progress_s'] for row in previous]+[progress_at(path, at) for at in times]
+    view_scene=nominal_visibility_scene(scene)
     measurements = [row['visual'] for row in previous]+[
-        visibility(pose[0], pose[1], scene, float(at), spec.model, spec.intrinsics) for at, pose in zip(times, poses)]
+        visibility(pose[0], pose[1], view_scene, float(at), spec.model, spec.intrinsics) for at, pose in zip(times, poses)]
     all_times = np.r_[[row['t'] for row in previous], times]
     result = spec.score(all_times, positions, rotations, measurements, progress)
+    result['visibility_forecast']=dict(mode='nominal_observed_geometry_and_velocity',
+        guarantee=False,physical_uncertainty_envelope_retained=True,
+        max_future_radius_growth_m=float(max(0.,prediction_end-scene['observation_stamp'])*
+            np.max(scene.get('radius_rates',[0.]),initial=0.)))
     velocity = np.gradient(np.array([pose[0] for pose in poses]), times, axis=0)
     acceleration = np.gradient(velocity, times, axis=0)
     angular = [(Rotation.from_matrix(b[1]@a[1].T).magnitude()/(tb-ta))
@@ -153,6 +159,28 @@ def camera_candidates(original, active, strategy, scene, t, budget, radius, hist
     spec = IntentSpec(original, scene.get('subject_model'), scene.get('intrinsics'))
     paths = propose_intent_paths(original,active,strategy,t,budget,spec.model,spec.intrinsics,
                                  allow_time_extension,scene,kinematic_search,search_config)
+    if numerical_gate is not None:
+        # Spend expensive continuous robot checks on camera programs that meet
+        # the task first, rather than on the first nearly identical box-clear
+        # detour. These are only ordering scores, never an execution approval.
+        preflight=[]
+        free_search=None
+        if kinematic_search is not None:
+            from copy import copy
+            free_search=copy(kinematic_search)
+            free_search.collision=free_search.self_collision=None
+        for path in paths:
+            value,_=evaluate_path(path,scene,t,path.duration+POLICY.terminal_hold_s,radius)
+            metrics=intent_prediction(spec,path,scene,t,history)
+            # A fast timing program can exhaust motion capability even before
+            # encountering anything. Use an obstacle-free realization only as
+            # an ordering prior; never as a safety gate or reachability proof.
+            realizable=True if free_search is None else free_search._lift(
+                path,path.duration+POLICY.terminal_hold_s,'path_heading')['feasible']
+            preflight.append(((not value.feasible,not metrics['camera_limits_pass'],
+                               not realizable,*selection_key(metrics,value.cost)),path))
+        paths=[path for _,path in sorted(preflight,key=lambda item:item[0])]
+    seed_wall_s=time.monotonic()-start
     ranked, evaluations = [], []
     for path in paths:
         if numerical_gate is not None and evaluations and time.monotonic()-start>=budget.candidate_wall_budget_s:
@@ -206,7 +234,7 @@ def camera_candidates(original, active, strategy, scene, t, budget, radius, hist
             # a usable result hostage. Latest-state verification still runs.
             break
     candidates = [c for _,c in sorted(ranked,key=lambda pair:pair[0])[:budget.max_rollouts]]
-    return dict(candidates=candidates,evaluations=evaluations,wall_s=time.monotonic()-start,
+    return dict(candidates=candidates,evaluations=evaluations,wall_s=time.monotonic()-start,seed_wall_s=seed_wall_s,
                 search_exhausted=len(evaluations)==len(paths), untested_proposals=len(paths)-len(evaluations),
                 error='' if candidates else 'no_verified_executable_candidate')
 

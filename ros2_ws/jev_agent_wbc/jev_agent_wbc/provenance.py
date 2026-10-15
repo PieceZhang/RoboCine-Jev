@@ -13,7 +13,7 @@ from .jev import POLICY, CANDIDATE_POLICY, SELECTION_POLICY, INTENT_POLICY
 def source_manifest(root, configuration=None):
     root = Path(root)
     hashes = {}
-    for folder in ('jev_agent_wbc', 'scripts', 'urdf', 'meshes', 'config', 'scenarios', 'launch'):
+    for folder in ('jev_agent_wbc', 'scripts', 'urdf', 'meshes', 'config', 'scenarios', 'launch', 'schemas'):
         for path in sorted((root/folder).rglob('*')):
             if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc':
                 hashes[str(path.relative_to(root))] = hashlib.sha256(path.read_bytes()).hexdigest()

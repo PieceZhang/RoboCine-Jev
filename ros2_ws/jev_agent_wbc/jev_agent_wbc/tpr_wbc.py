@@ -622,8 +622,10 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
             preferred = c.coordination_reference
         witness=getattr(c,'kinematic_reference',None)
         if (witness and witness.get('feasible') and witness.get('trace') and
-                trajectory_time>=getattr(c.trajectory,'activation_s',0.) and
                 witness['trace'][0]['t']<=trajectory_time<=witness['trace'][-1]['t']):
+            # Installation authorizes the verified redundant preparation too.
+            # The camera prefix stays unchanged until its exact activation;
+            # delaying body preparation until then wastes the verified lead.
             trace=witness['trace'];knots=np.array([row['t'] for row in trace])
             states=np.array([row['state'] for row in trace]);controls=np.array([row['control'] for row in trace])
             expected=np.array([np.interp(trajectory_time,knots,states[:,j]) for j in range(9)])
@@ -648,6 +650,16 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
         metric[:2] = 200.
     H = np.diag(metric+.1)
     g = -metric*preferred-.1*measured
+    geometry_preference_active = False
+    guidance = getattr(c, 'geometry_guidance', None)
+    if (guidance is not None and not brake and not preparing
+            and guidance.request.start_s <= trajectory_time <= guidance.request.end_s
+            and (guidance.request.pose_preferences or guidance.request.occupancy_preferences)):
+        geometry_H, geometry_g = c.geometry_backend.quadratic_guidance(
+            guidance,state,trajectory_time,base_z,base_rotation)
+        H = H + geometry_H
+        g = g + geometry_g
+        geometry_preference_active = True
     def hierarchy(bounds_lo):
         try:
             answer, residual = qp(H, g, np.vstack([A, J]), np.r_[bounds_lo, desired], np.r_[hi, desired], previous)
@@ -745,6 +757,7 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
                   rho_definition='joint minimum normalized active-barrier residual',
                   barrier_mode=barrier_mode,
                   kinematic_preference_active=kinematic_preference_active,
+                  geometry_preference_active=geometry_preference_active,
                   trajectory_id=getattr(c,'received_trajectory_id','received'),
                   first_predicted_conflict_s=prediction.get('tpr_first_conflict_s'), pairs=involved,
                   joint_braking_reserve_rad=reserve.tolist(),

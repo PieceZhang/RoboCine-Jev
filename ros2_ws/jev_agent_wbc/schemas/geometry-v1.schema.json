@@ -1,0 +1,564 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:jev:geometry:v1",
+  "title": "Jev two-part geometry middleware",
+  "$comment": "Runtime additionally enforces unit quaternion, increasing interval, path/observation binding, nonempty inset region, and matching coordinate conventions. No safety certificate is implied.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/observation"
+    },
+    {
+      "$ref": "#/$defs/request"
+    },
+    {
+      "$ref": "#/$defs/result"
+    },
+    {
+      "$ref": "#/$defs/task_context"
+    }
+  ],
+  "$defs": {
+    "pose": {
+      "type": "object",
+      "properties": {
+        "translation_m": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "quaternion_xyzw": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 4,
+          "maxItems": 4
+        }
+      },
+      "required": [
+        "translation_m",
+        "quaternion_xyzw"
+      ],
+      "additionalProperties": false
+    },
+    "box": {
+      "type": "object",
+      "properties": {
+        "center_m": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "half_extents_m": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "minItems": 3,
+          "maxItems": 3
+        }
+      },
+      "required": [
+        "center_m",
+        "half_extents_m"
+      ],
+      "additionalProperties": false
+    },
+    "observation": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "jev_geometry/v1"
+        },
+        "kind": {
+          "const": "observation"
+        },
+        "stamp_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "source": {
+          "enum": [
+            "measured_fk",
+            "predicted_fk",
+            "synthetic_fk"
+          ]
+        },
+        "units": {
+          "const": "m_s_rad"
+        },
+        "axes": {
+          "const": "right_handed_camera_x_forward_y_left_z_up"
+        },
+        "world_from_mount": {
+          "$ref": "#/$defs/pose"
+        },
+        "mount_from_camera": {
+          "$ref": "#/$defs/pose"
+        },
+        "occupancy_frame": {
+          "const": "mount"
+        },
+        "occupancy": {
+          "type": "object",
+          "properties": {
+            "mobile_platform": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/box"
+              },
+              "maxItems": 8,
+              "minItems": 1
+            },
+            "camera_manipulator": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/box"
+              },
+              "maxItems": 8
+            }
+          },
+          "required": [
+            "mobile_platform",
+            "camera_manipulator"
+          ],
+          "additionalProperties": false
+        },
+        "geometry_scope": {
+          "const": "conservative_proxy_of_backend_collision_model_not_safety_certificate"
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "stamp_s",
+        "source",
+        "units",
+        "axes",
+        "world_from_mount",
+        "mount_from_camera",
+        "occupancy_frame",
+        "occupancy",
+        "geometry_scope"
+      ],
+      "additionalProperties": false
+    },
+    "pose_preference": {
+      "type": "object",
+      "properties": {
+        "part": {
+          "enum": [
+            "mobile_platform",
+            "camera_manipulator"
+          ]
+        },
+        "frame": {
+          "enum": [
+            "world",
+            "mount_snapshot",
+            "camera_snapshot",
+            "mount",
+            "camera"
+          ]
+        },
+        "weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "target": {
+          "$ref": "#/$defs/pose"
+        },
+        "position_tolerance_m": {
+          "type": "array",
+          "items": {
+            "type": "number",
+            "minimum": 0
+          },
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "orientation_tolerance_rad": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "part",
+        "frame",
+        "weight",
+        "target",
+        "position_tolerance_m",
+        "orientation_tolerance_rad"
+      ],
+      "additionalProperties": false
+    },
+    "occupancy_preference": {
+      "type": "object",
+      "properties": {
+        "part": {
+          "enum": [
+            "mobile_platform",
+            "camera_manipulator"
+          ]
+        },
+        "frame": {
+          "enum": [
+            "world",
+            "mount_snapshot",
+            "camera_snapshot",
+            "mount",
+            "camera"
+          ]
+        },
+        "weight": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "relation": {
+          "enum": [
+            "avoid_region",
+            "stay_in_region"
+          ]
+        },
+        "region": {
+          "$ref": "#/$defs/box"
+        },
+        "margin_m": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "part",
+        "frame",
+        "weight",
+        "relation",
+        "region",
+        "margin_m"
+      ],
+      "additionalProperties": false
+    },
+    "request": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "jev_geometry/v1"
+        },
+        "kind": {
+          "const": "request"
+        },
+        "observation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "camera_path_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "start_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "end_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "pose_preferences": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/pose_preference"
+          },
+          "maxItems": 4
+        },
+        "occupancy_preferences": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/occupancy_preference"
+          },
+          "maxItems": 4
+        },
+        "semantics": {
+          "const": "camera_primary_geometry_soft_backend_safety_independent"
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "observation_id",
+        "camera_path_id",
+        "start_s",
+        "end_s",
+        "pose_preferences",
+        "occupancy_preferences",
+        "semantics"
+      ],
+      "additionalProperties": false
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "jev_geometry/v1"
+        },
+        "observation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "stamp_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "source": {
+          "enum": [
+            "measured_fk",
+            "predicted_fk",
+            "synthetic_fk"
+          ]
+        },
+        "frame": {
+          "const": "mount_snapshot"
+        },
+        "world_from_mount": {
+          "$ref": "#/$defs/pose"
+        },
+        "mount_from_camera": {
+          "$ref": "#/$defs/pose"
+        },
+        "parts": {
+          "type": "object",
+          "properties": {
+            "mobile_platform": {
+              "type": "object",
+              "properties": {
+                "components": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8
+                },
+                "bounds": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/$defs/box"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "regions": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/box"
+                  },
+                  "maxItems": 8
+                }
+              },
+              "required": [
+                "components",
+                "bounds",
+                "regions"
+              ],
+              "additionalProperties": false
+            },
+            "camera_manipulator": {
+              "type": "object",
+              "properties": {
+                "components": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 8
+                },
+                "bounds": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/$defs/box"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "regions": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/box"
+                  },
+                  "maxItems": 8
+                }
+              },
+              "required": [
+                "components",
+                "bounds",
+                "regions"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "mobile_platform",
+            "camera_manipulator"
+          ],
+          "additionalProperties": false
+        },
+        "geometry_scope": {
+          "const": "conservative_proxy_not_safety_certificate"
+        }
+      },
+      "required": [
+        "schema",
+        "observation_id",
+        "stamp_s",
+        "source",
+        "frame",
+        "world_from_mount",
+        "mount_from_camera",
+        "parts",
+        "geometry_scope"
+      ],
+      "additionalProperties": false
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "jev_geometry/v1"
+        },
+        "kind": {
+          "const": "result"
+        },
+        "evidence_kind": {
+          "enum": [
+            "predicted",
+            "measured"
+          ]
+        },
+        "camera_path_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "observation_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "stamp_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "backend_status": {
+          "enum": [
+            "pass",
+            "fail",
+            "unknown"
+          ]
+        },
+        "preference_residual_norm": {
+          "type": "number",
+          "minimum": 0
+        },
+        "geometry": {
+          "$ref": "#/$defs/summary"
+        },
+        "safety_certificate": {
+          "const": false
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "evidence_kind",
+        "camera_path_id",
+        "observation_id",
+        "stamp_s",
+        "backend_status",
+        "preference_residual_norm",
+        "geometry",
+        "safety_certificate",
+        "request_id"
+      ],
+      "additionalProperties": false
+    },
+    "task_context": {
+      "type": "object",
+      "properties": {
+        "schema": {
+          "const": "jev_geometry/v1"
+        },
+        "kind": {
+          "const": "task_context"
+        },
+        "reference_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "stamp_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "deadline_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "earliest_change_s": {
+          "type": "number",
+          "minimum": 0
+        },
+        "first_predicted_failure_s": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "recovery_required": {
+          "type": "boolean"
+        },
+        "unchanged_prefix_at_risk": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "target": {
+          "const": "complete_original_visible_intent_and_terminal_frame"
+        },
+        "past_coverage": {
+          "const": "immutable_measured_history"
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "reference_id",
+        "stamp_s",
+        "deadline_s",
+        "earliest_change_s",
+        "first_predicted_failure_s",
+        "recovery_required",
+        "unchanged_prefix_at_risk",
+        "target",
+        "past_coverage"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

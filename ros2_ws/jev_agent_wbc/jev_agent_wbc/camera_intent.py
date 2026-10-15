@@ -90,6 +90,15 @@ def obstacle_state(scene, t):
     return centers+age*velocities, radii
 
 
+def nominal_visibility_scene(scene):
+    """Forecast opacity from observed proxies, not future collision uncertainty.
+
+    The caller must label this as a nominal forecast. The original scene and
+    its conservative collision envelope remain intact for physical checking.
+    """
+    return dict(scene,radius_rates=np.zeros(len(scene.get('radii',[]))))
+
+
 def subject_clearances(positions, model, camera_radius):
     """Signed distance to the calibrated solid cylinder, minus camera radius."""
     positions = np.asarray(positions)

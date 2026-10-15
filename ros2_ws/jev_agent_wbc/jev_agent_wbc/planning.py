@@ -38,6 +38,7 @@ class ExecutionWBC(DynamicPredictiveQP):
     def set_trajectory(self, trajectory):
         super().set_trajectory(trajectory)
         self.kinematic_reference=None
+        self.geometry_guidance=None
         from .candidates import path_hash
         self.received_trajectory_id=path_hash(trajectory) if hasattr(trajectory,'sha256') else 'received'
         self.coordination.set_trajectory(trajectory)

@@ -49,6 +49,13 @@ def test_candidate_and_installation_use_measured_feedback_without_wbc_rollout(se
     approval=Approval(candidate.id,digest(candidate.card()),path_hash(original),original.sha256,None,1)
     checked=planner.verify(candidate,approval,original,scene,state,np.zeros(8),0.,z,Limits(),budget=budget)
     assert not checked['error']
+    assert checked['geometry_guidance'].request.camera_path_id == candidate.id
+    assert checked['geometry_guidance'].camera_path is candidate.path
+    from copy import deepcopy
+    tampered = deepcopy(candidate)
+    tampered.consequences['geometry']['request']['end_s'] -= .1
+    rejected = planner.verify(tampered,approval,original,scene,state,np.zeros(8),0.,z,Limits(),budget=budget)
+    assert rejected['error'] == 'approval_binding_mismatch'
     assert installation_guard(checked,original,scene,state,0.,budget,previous=np.zeros(8)) is None
     assert installation_guard(checked,original,scene,state,0.,budget)=='missing_latest_velocity_for_kinematic_gate'
     moved=state.copy();moved[0]+=.5

@@ -5,7 +5,7 @@ from scipy.optimize import linprog
 
 PROFILES = {
     'executable': dict(description='Generate camera targets from collision-constrained robot motion, then strictly reverify the explicit FK-derived path. Report all shot deviations.',
-                       amplitudes=(.12,.18,.20,.30),allocations=('anticipatory','path_heading','base_assisted','arm_assisted')),
+                       amplitudes=(.12,.18,.20,.30),allocations=('path_heading','anticipatory','base_assisted','arm_assisted')),
     'local': dict(description='Small nearby deformations; preserve measured bent posture; explore both timing signs.',
                   amplitudes=(.12, .18, .20, .22), allocations=('anticipatory','path_heading','arm_assisted','base_assisted')),
     'base': dict(description='Use base-assisted continuous FK allocations first; explore moderate returning detours.',

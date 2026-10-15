@@ -377,7 +377,9 @@ def draw_frame(run,t,cutoff=None,label='',end=False):
             program=tr.get('program')
             txt(d,(670,yy),f'{alias} {program["route"]} {program["amplitude_m"]:.2f}m {program["extension_s"]:+.1f}s' if program else
                 f'{alias} {c["id"][:8]}  [{vals[0]:+.2f}, {vals[1]:+.2f}, {vals[2]:+.2f}]',20,COLORS[j])
-            txt(d,(685,yy+25),f'{tr["activation_s"]:.2f}→{tr["duration_s"]:.2f}s  碰撞 / 意图均通过' if program else
+            intent_status = {True: '通过', False: '未通过'}.get(visual.get('intent_complete'), '未知')
+            physical_status = {True: '通过', False: '未通过'}.get(c.get('physical_valid'), '未知')
+            txt(d,(685,yy+25),f'{tr["activation_s"]:.2f}→{tr["duration_s"]:.2f}s  物理：{physical_status} / 意图：{intent_status}' if program else
                 f'{tr["activation_s"]:.2f}→{tr["envelope"]["end_s"]:.2f}s  {tr["envelope"]["terminal"]}  物理预测：{c["physical_valid"]}',16,MUTED)
             txt(d,(1190,yy),f'{fmt(pred.get("min_clearance_m"))} m'+(f' / {fmt(pred.get("joint_margin_rad"))} rad' if joint_checks else ' / 不适用'),19)
             txt(d,(1480,yy),f'{visual["effective_coverage"]:.1%} / {visual["visibility_min"]:.1%}' if program else

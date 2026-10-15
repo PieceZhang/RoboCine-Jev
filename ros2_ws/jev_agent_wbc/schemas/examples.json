@@ -1,0 +1,339 @@
+{
+  "observation": {
+    "schema": "jev_geometry/v1",
+    "kind": "observation",
+    "stamp_s": 0.0,
+    "source": "synthetic_fk",
+    "units": "m_s_rad",
+    "axes": "right_handed_camera_x_forward_y_left_z_up",
+    "world_from_mount": {
+      "translation_m": [
+        0.098,
+        0.0,
+        0.268
+      ],
+      "quaternion_xyzw": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    "mount_from_camera": {
+      "translation_m": [
+        0.15486281577272418,
+        -0.0015000000000000013,
+        0.548679490613355
+      ],
+      "quaternion_xyzw": [
+        0.0,
+        8.326672684688674e-17,
+        0.0,
+        1.0
+      ]
+    },
+    "occupancy_frame": "mount",
+    "occupancy": {
+      "mobile_platform": [
+        {
+          "center_m": [
+            -0.1395,
+            0.0,
+            -0.19696585609973066
+          ],
+          "half_extents_m": [
+            0.1115,
+            0.125,
+            0.07096585609973066
+          ]
+        },
+        {
+          "center_m": [
+            -0.09800000000000002,
+            0.0,
+            -0.136
+          ],
+          "half_extents_m": [
+            0.18,
+            0.18,
+            0.06
+          ]
+        },
+        {
+          "center_m": [
+            0.04933550208635912,
+            0.0,
+            -0.09896585609973067
+          ],
+          "half_extents_m": [
+            0.08933550208635913,
+            0.045,
+            0.16896585609973064
+          ]
+        }
+      ],
+      "camera_manipulator": [
+        {
+          "center_m": [
+            -0.07538267011754034,
+            0.008695212910960872,
+            0.190327849742182
+          ],
+          "half_extents_m": [
+            0.10238267011754033,
+            0.03569521291096087,
+            0.190327849742182
+          ]
+        },
+        {
+          "center_m": [
+            0.04240819630689963,
+            0.0165,
+            0.3969134565634901
+          ],
+          "half_extents_m": [
+            0.08692854712594866,
+            0.03846524890424961,
+            0.05426624007608638
+          ]
+        },
+        {
+          "center_m": [
+            0.14136362438752603,
+            -0.0015000000000000013,
+            0.49982867883304694
+          ],
+          "half_extents_m": [
+            0.04349919138519816,
+            0.04,
+            0.07385081178030808
+          ]
+        }
+      ]
+    },
+    "geometry_scope": "conservative_proxy_of_backend_collision_model_not_safety_certificate"
+  },
+  "request": {
+    "schema": "jev_geometry/v1",
+    "kind": "request",
+    "observation_id": "4932e4a824ed2a2bb0c3a1d89d28908c17907d204e2f76f92aeb52d9fc359dff",
+    "camera_path_id": "63b17cbfdf26e8d9861c3b9f86ed04cc3d56b6f00274692ee723ddb4113d6770",
+    "start_s": 1.5,
+    "end_s": 8.0,
+    "pose_preferences": [
+      {
+        "part": "mobile_platform",
+        "frame": "camera",
+        "target": {
+          "translation_m": [
+            -0.1548628157727241,
+            0.0015000000000000013,
+            -0.548679490613355
+          ],
+          "quaternion_xyzw": [
+            0.0,
+            -8.326672684688674e-17,
+            0.0,
+            1.0
+          ]
+        },
+        "position_tolerance_m": [
+          0.12,
+          0.12,
+          0.12
+        ],
+        "orientation_tolerance_rad": 0.3,
+        "weight": 0.3
+      }
+    ],
+    "occupancy_preferences": [
+      {
+        "part": "camera_manipulator",
+        "frame": "mount",
+        "relation": "stay_in_region",
+        "region": {
+          "center_m": [
+            0.0035487377688217525,
+            0.006732624452124806,
+            0.2868397453066775
+          ],
+          "half_extents_m": [
+            0.3013140780039024,
+            0.1682326244521248,
+            0.4068397453066775
+          ]
+        },
+        "margin_m": 0.0,
+        "weight": 0.3
+      }
+    ],
+    "semantics": "camera_primary_geometry_soft_backend_safety_independent"
+  },
+  "result": {
+    "schema": "jev_geometry/v1",
+    "kind": "result",
+    "evidence_kind": "predicted",
+    "camera_path_id": "63b17cbfdf26e8d9861c3b9f86ed04cc3d56b6f00274692ee723ddb4113d6770",
+    "observation_id": "4932e4a824ed2a2bb0c3a1d89d28908c17907d204e2f76f92aeb52d9fc359dff",
+    "stamp_s": 0.0,
+    "backend_status": "unknown",
+    "preference_residual_norm": 0.0,
+    "geometry": {
+      "schema": "jev_geometry/v1",
+      "observation_id": "4932e4a824ed2a2bb0c3a1d89d28908c17907d204e2f76f92aeb52d9fc359dff",
+      "stamp_s": 0.0,
+      "source": "synthetic_fk",
+      "frame": "mount_snapshot",
+      "world_from_mount": {
+        "translation_m": [
+          0.098,
+          0.0,
+          0.268
+        ],
+        "quaternion_xyzw": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "mount_from_camera": {
+        "translation_m": [
+          0.15486281577272418,
+          -0.0015000000000000013,
+          0.548679490613355
+        ],
+        "quaternion_xyzw": [
+          0.0,
+          8.326672684688674e-17,
+          0.0,
+          1.0
+        ]
+      },
+      "parts": {
+        "mobile_platform": {
+          "components": 3,
+          "bounds": {
+            "center_m": [
+              -0.06966449791364089,
+              0.0,
+              -0.09896585609973069
+            ],
+            "half_extents_m": [
+              0.20833550208635915,
+              0.18,
+              0.16896585609973064
+            ]
+          },
+          "regions": [
+            {
+              "center_m": [
+                -0.1395,
+                0.0,
+                -0.19696585609973066
+              ],
+              "half_extents_m": [
+                0.1115,
+                0.125,
+                0.07096585609973066
+              ]
+            },
+            {
+              "center_m": [
+                -0.09800000000000002,
+                0.0,
+                -0.136
+              ],
+              "half_extents_m": [
+                0.18,
+                0.18,
+                0.06
+              ]
+            },
+            {
+              "center_m": [
+                0.04933550208635912,
+                0.0,
+                -0.09896585609973067
+              ],
+              "half_extents_m": [
+                0.08933550208635913,
+                0.045,
+                0.16896585609973064
+              ]
+            }
+          ]
+        },
+        "camera_manipulator": {
+          "components": 3,
+          "bounds": {
+            "center_m": [
+              0.0035487377688217525,
+              0.006732624452124806,
+              0.2868397453066775
+            ],
+            "half_extents_m": [
+              0.18131407800390242,
+              0.04823262445212481,
+              0.2868397453066775
+            ]
+          },
+          "regions": [
+            {
+              "center_m": [
+                -0.07538267011754034,
+                0.008695212910960872,
+                0.190327849742182
+              ],
+              "half_extents_m": [
+                0.10238267011754033,
+                0.03569521291096087,
+                0.190327849742182
+              ]
+            },
+            {
+              "center_m": [
+                0.04240819630689963,
+                0.0165,
+                0.3969134565634901
+              ],
+              "half_extents_m": [
+                0.08692854712594866,
+                0.03846524890424961,
+                0.05426624007608638
+              ]
+            },
+            {
+              "center_m": [
+                0.14136362438752603,
+                -0.0015000000000000013,
+                0.49982867883304694
+              ],
+              "half_extents_m": [
+                0.04349919138519816,
+                0.04,
+                0.07385081178030808
+              ]
+            }
+          ]
+        }
+      },
+      "geometry_scope": "conservative_proxy_not_safety_certificate"
+    },
+    "safety_certificate": false,
+    "request_id": "5644bdb9a62c2504ce8faa649a77537b6ac1534105d2ab6e0d82f0d283c78f02"
+  },
+  "task_context": {
+    "schema": "jev_geometry/v1",
+    "kind": "task_context",
+    "reference_id": "original-shot-reference",
+    "stamp_s": 0.6,
+    "deadline_s": 8.0,
+    "earliest_change_s": 1.8,
+    "first_predicted_failure_s": 1.2,
+    "recovery_required": false,
+    "unchanged_prefix_at_risk": true,
+    "target": "complete_original_visible_intent_and_terminal_frame",
+    "past_coverage": "immutable_measured_history"
+  }
+}
