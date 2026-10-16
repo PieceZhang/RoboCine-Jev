@@ -7,7 +7,6 @@ import argparse
 import json
 from pathlib import Path
 import subprocess
-import shutil
 import sys
 import cv2
 import numpy as np
@@ -15,6 +14,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from jev_agent_wbc.kc_svsdf import CollisionGeometry
+from jev_agent_wbc.representation_video import append_representation_video
 
 FONT='/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'
 FONTS={s:ImageFont.truetype(FONT,s) for s in [18,20,22,24,28,32,40]}
@@ -113,8 +113,11 @@ def main():
         comparison=args.run/'video/comparison.mp4'
         if not comparison.is_file():
             raise RuntimeError('default three-camera PhysX video is missing')
-        if comparison.resolve()!=output.resolve():
-            shutil.copy2(comparison,output)
+        result=append_representation_video(comparison,output,args.run,
+                                          [row['t'] for row in metadata])
+        result.update(backend=summary['backend'],source_run=str(args.run.resolve()),
+                      continuous_simulation_time=True)
+        output.with_suffix('.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
         print(output)
         return
     frame_times=np.array([r['t'] for r in metadata])
@@ -129,14 +132,15 @@ def main():
     writer=cv2.VideoWriter(str(tmp),cv2.VideoWriter_fourcc(*'mp4v'),args.fps,(1920,1080))
     if not writer.isOpened():raise RuntimeError('video encoder unavailable')
     sample_step=max(1,len(rows)//800);plot_t=times[::sample_step]
-    for k,t in enumerate(np.arange(0,duration,1/args.fps)):
-        idx=min(int(np.searchsorted(times,t)),len(rows)-1);row=rows[idx]
+    replay_times=np.arange(float(times[0]),duration,1/args.fps).tolist() or [float(times[0])]
+    for k,t in enumerate(replay_times):
+        idx=max(0,int(np.searchsorted(times,t+1e-9,side='right')-1));row=rows[idx]
         image=Image.new('RGB',(1920,1080),BG);d=ImageDraw.Draw(image)
         text(d,(35,22),'TPR-WBC  |  相机固定，全身构型避障',40)
         subtitle='Isaac Sim / PhysX 实测状态' if physical else '加速度受限运动学闭环 · 无位姿投影'
         text(d,(38,80),subtitle+'   ·   障碍物连续飞行，WBC 不修改 received trajectory',22,MUTED)
         if videos:
-            fi=min(int(np.searchsorted(frame_times,t)),len(frame_times)-1)
+            fi=max(0,int(np.searchsorted(frame_times,t+1e-9,side='right')-1))
             overview=Image.open(args.run/f'video/overview/{fi:05d}.jpg')
             # A fixed crop only enlarges the same physical camera image.
             overview=overview.crop((120,125,840,650)).resize((1080,790))
@@ -187,6 +191,7 @@ def main():
         telemetry_sha256=hashlib.sha256((args.run/'telemetry.json').read_bytes()).hexdigest(),
         summary_sha256=hashlib.sha256((args.run/'summary.json').read_bytes()).hexdigest(),
         video_sha256=hashlib.sha256(output.read_bytes()).hexdigest())
+    manifest.update(append_representation_video(output,output,args.run,replay_times))
     output.with_suffix('.json').write_text(json.dumps(manifest,indent=2))
     print(output)
 

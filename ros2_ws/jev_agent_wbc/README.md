@@ -1,5 +1,30 @@
 # Jev 相机意图规划与独立执行层
 
+## 闭环视频默认展示统一 Representation（2026-10-16）
+
+后续交付的 **CPU 整机闭环和 PhysX 整机闭环视频都默认展示**统一 `jev_geometry/v1`：
+`mobile_platform`、`camera_manipulator` 两组 mount 系保守占用包络，
+`T_world_mount`、`T_mount_camera` 两个 6D 变换（平移、RPY 和 XYZW 四元数），
+以及简短的时间、来源、空间关系说明。默认每部分 3 个盒子，具体粒度跟随运行记录。
+
+`scripts/render_agent_demos.py --runs ... --output ...` 已默认启用该区域，兼容原有
+`--representation-panel` 参数。CPU 使用保存状态重建 FK；PhysX 使用保存的实测状态、
+完整 `base_rotation` 和 `base_z`，保留 FK 与实测物理相机的偏差。
+几何表示始终跟随物理机器人，增稳输出相机位姿独立保留。
+跟踪中心到包络的距离明确标为中心距离，不当作安全净距；缺少时间戳或观测过期时显示 unknown。
+独立 `ideal_floating_camera` 实验没有两个机器人模块，不虚构整机几何。
+
+固定相机 TPR 视频继续使用 `scripts/render_tpr_demo.py <运行目录> --output <新视频>`；
+CPU、PhysX 和三相机 PhysX 分支均自动追加同一几何区域，完整保留原画面。
+`video/reference`、`video/execution`、`video/stabilized` 等原始 RGB 流仍供测量和评分，
+最终交付通过上述渲染器生成。共同展示代码位于 `jev_agent_wbc/representation_video.py`，
+不修改规划器、控制器或执行运行器。
+
+本次六场景重录保存在
+`results/joint_curves_20261016/representation_replay_20261016/final_stable_joint_curves_six_demos.mp4`，
+1920×1080、16 fps、50.625 秒；使用同一 iteration14 的保存记录，原视频另行保留。
+同目录 JSON、源码快照和验证记录保存来源哈希、逐帧时间线与几何一致性检查。
+
 ## 运镜验收标准更新与原 demo 重新评估（2026-10-16）
 
 当前正式执行验收使用 `shot_acceptance/v1`，实现于 `jev_agent_wbc/shot_acceptance.py`。

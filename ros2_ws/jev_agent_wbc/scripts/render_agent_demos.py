@@ -105,7 +105,7 @@ def restore(original, spec):
 
 
 class Run:
-    def __init__(self, folder):
+    def __init__(self, folder, representation_panel=True):
         self.folder = Path(folder).resolve()
         self.summary = read(self.folder/'summary.json')
         self.task = read(self.folder/'original_task.json')
@@ -175,6 +175,10 @@ class Run:
         allpts = np.concatenate([self.reference, self.positions, *self.paths.values()])
         self.lo = allpts.min(axis=0)-.08; self.hi = allpts.max(axis=0)+.08
         self.image_cache = {}; self.render_audit = []
+        self.representation_panel = None
+        if representation_panel and not self.floating:
+            from jev_agent_wbc.representation_video import RepresentationPanel
+            self.representation_panel = RepresentationPanel(self)
 
     def state(self, t, cutoff=None):
         past = [(i,e) for i,e in enumerate(self.events) if e['time_s'] <= t+1e-9 and (cutoff is None or i <= cutoff)]
@@ -300,6 +304,8 @@ def draw_frame(run,t,cutoff=None,label='',end=False):
              'CPU 整机 · 规划避障开 / 执行避障关' if run.split_avoidance else
              'CPU 整机 · WBC 避障关闭' if run.cpu and run.no_avoidance else
              'CPU 整机 · WBC 运动预测 / 避障开' if run.cpu else 'PhysX 物理闭环 · 整机运行')
+    if not run.cpu:
+        backend='PhysX 物理闭环 · 整机运行'
     txt(d,(20,10),f'{run.name}  |  {backend}',29)
     txt(d,(1030,16),f'决策模型：{run.model}',24,GOLD,width=870)
     row=run.rows[max(0,np.searchsorted(run.times,t,side='right')-1)]
@@ -432,6 +438,9 @@ def draw_frame(run,t,cutoff=None,label='',end=False):
     prep=info.get('configuration_preparation',{})
     txt(d,(1292,958),f'构型 {prep.get("status","inactive")} | 准备 {fmt(prep.get("measured_duration_s"),2)}s | 相机误差 {fmt(info.get("position_error"))}m' if prep.get('status','inactive')!='inactive' else
         f'最新状态 / 时效 / 视觉复核：{gates}',16,MUTED,width=590)
+    representation_audit = {}
+    if run.representation_panel:
+        representation_audit = run.representation_panel.draw(im, run, t, s, txt, wrap, FONTS, cutoff)
     # Original-time progress bar and observed event markers, with no future choices revealed.
     d.rectangle((20,1002,1900,1009),fill='#2b3c54')
     d.rectangle((20,1002,20+1880*t/run.duration,1009),fill=GREEN)
@@ -455,14 +464,14 @@ def draw_frame(run,t,cutoff=None,label='',end=False):
         wrap(d,(390,348),run.summary.get('failure') or ('固定复用源 Agent 的相同目标与时刻，比较 WBC 跟踪及碰撞结果。' if run.replay else 'Agent 关闭：本段用于底层基线对照。' if baseline else '保留真实拒绝和复核失败；未将继续原目标计为修复。'),1140,21,2,GOLD)
         txt(d,(390,417),'结果摘要（独立预览图）；不插入视频，不重新判定实验结果',20,MUTED)
     run.render_audit.append(dict(t=t,cutoff=cutoff,max_event_time=max((e['time_s'] for _,e in s['past']),default=0.),
-        cards=[c['id'] for c in cards],rgb_t=captures[0] if captures else None))
+        cards=[c['id'] for c in cards],rgb_t=captures[0] if captures else None, **representation_audit))
     return im
 
 
 def render_run(run,write,timeline,preview_dir):
     start=write.count
     # Uniform source-time ticks only: events never add frames or freeze playback.
-    frame_times=np.arange(0,float(run.times[-1])-1e-8,1/FPS).tolist() or [0.]
+    frame_times=np.arange(float(run.times[0]),float(run.times[-1])-1e-8,1/FPS).tolist() or [float(run.times[0])]
     for t in frame_times:
         write(draw_frame(run,t))
     timeline.append(dict(output_start_s=start/FPS,output_end_s=write.count/FPS,
@@ -475,14 +484,19 @@ def render_run(run,write,timeline,preview_dir):
             break
     end=draw_frame(run,float(run.times[-1]),label='结果摘要（独立预览图）',end=True)
     end.save(preview_dir/f'{run.folder.parent.name}_{run.name}_end.jpg')
+    if run.representation_panel:
+        draw_frame(run, run.duration/2).save(preview_dir/f'{run.name}_representation.jpg')
     for row in run.render_audit:
         assert row['max_event_time']<=row['t']+1e-8
         assert row['rgb_t'] is None or row['rgb_t']<=row['t']+1e-8
+        assert row.get('representation_stamp_s', 0.)<=row['t']+1e-8
+        assert row.get('obstacle_relation_stamp_s') is None or row['obstacle_relation_stamp_s']<=row['t']+1e-8
     return dict(folder=str(run.folder),backend=run.summary['backend'],model=run.model,
         frames=write.count-start,output_start_s=start/FPS,output_end_s=write.count/FPS,
         candidate_hashes_verified=len(run.paths),api_requests_matched=len(run.request_at),
         source_events=len(run.events),rendered_event_holds=0,rendered_summary_hold_frames=0,
-        summary=run.summary,input_sha256={n:sha(run.folder/n) for n in ['original_task.json','runtime_scene.json','events.jsonl','telemetry.json','summary.json']})
+        summary=run.summary,input_sha256={n:sha(run.folder/n) for n in ['original_task.json','runtime_scene.json','events.jsonl','telemetry.json','summary.json','jev_api.jsonl'] if (run.folder/n).is_file()},
+        representation_audit=run.representation_panel.audit if run.representation_panel else None)
 
 
 class Encoder:
@@ -520,7 +534,7 @@ def pairs(root,name,manifest):
     return result
 
 
-def render_explicit_runs(folders, dest):
+def render_explicit_runs(folders, dest, representation_panel=True):
     """Render fresh CPU or PhysX logs in the existing demo layout."""
     dest = dest.resolve()
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -535,7 +549,7 @@ def render_explicit_runs(folders, dest):
     try:
         for folder in folders:
             print('render', folder, flush=True)
-            runs.append(render_run(Run(folder), writer, timeline, preview))
+            runs.append(render_run(Run(folder, representation_panel), writer, timeline, preview))
     finally:
         writer.close()
     subprocess.run(['ffmpeg', '-v', 'error', '-i', str(temp), '-f', 'null', '-'], check=True)
@@ -548,6 +562,16 @@ def render_explicit_runs(folders, dest):
         gold_path='full currently installed target reconstructed only after its logged installation/replay event',
         causal_audit='displayed decisions and RGB timestamps never exceed replay time',
         runs=runs, timeline=timeline, video_sha256=sha(dest), renderer_sha256=sha(__file__))
+    if representation_panel:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        source_root = Path(__file__).resolve().parents[1]
+        source_paths = [Path(__file__)]
+        source_paths += sorted((source_root/'jev_agent_wbc').glob('*.py'))
+        report.update(format='agent_demo/representation-v1',
+            created_at=datetime.now(ZoneInfo('Asia/Shanghai')).isoformat(),
+            representation_panel=any(r.get('representation_audit') for r in runs), new_model_calls=0, trajectory_modified=False,
+            current_source_sha256={str(p.relative_to(source_root)):sha(p) for p in source_paths})
     manifest.write_text(json.dumps(report, ensure_ascii=False, indent=2)+'\n')
     print('DONE', dest, writer.count/FPS, 'seconds', flush=True)
 
@@ -558,12 +582,14 @@ def main():
     p.add_argument('--runs', nargs='+', type=Path, help='explicit new run folders in chapter order')
     p.add_argument('--output', type=Path, help='new MP4 path for --runs')
     p.add_argument('--fps',type=int,default=8,choices=(8,16,24),help='uniform simulation-time frames per second')
+    p.add_argument('--representation-panel', action='store_true', default=True,
+                   help='enabled by default for CPU/PhysX whole-body videos; retained for command compatibility')
     p.add_argument('--only',nargs='*');p.add_argument('--preview-only',action='store_true');a=p.parse_args()
     FPS=a.fps
     if a.runs:
         if not a.output or a.root or a.only or a.preview_only:
             p.error('--runs requires --output and cannot be combined with --root/--only/--preview-only')
-        render_explicit_runs(a.runs, a.output)
+        render_explicit_runs(a.runs, a.output, a.representation_panel)
         return
     if not a.root or a.output:
         p.error('use --root for historical demos, or --runs with --output for new recordings')
@@ -606,6 +632,7 @@ def main():
             cpu_views='offline schematic render of CPU camera poses; scene truth for display only; no RGB input',
             baseline='strict chapters explicitly disable semantic stages; no fabricated model decisions',
             causal_audit='all displayed decisions <= replay time; RGB uses last capture <= replay time',
+            representation_panel=any(r.get('representation_audit') for r in runs),
             runs=runs,timeline=timeline,video_sha256=sha(dest),renderer_sha256=sha(__file__))
         (root/'demo'/f'{name}.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
         print('DONE',name,writer.count/FPS,'seconds',flush=True)
