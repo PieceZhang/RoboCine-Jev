@@ -115,6 +115,7 @@ def evaluate_path(path, scene, t, end, radius, step=.02, visual=False):
 
 
 def intent_prediction(spec, path, scene, t, history=(), step=.05):
+    from .camera_intent import nominal_visibility_scene
     prediction_end = path.duration+POLICY.terminal_hold_s
     # Include both confirmation-window boundaries explicitly. A monitoring
     # grid offset (e.g. t=2.78, step=.1) must not turn a full .4 s hold into .32 s.
@@ -125,10 +126,15 @@ def intent_prediction(spec, path, scene, t, history=(), step=.05):
     positions = [row['camera_position'] for row in previous]+[pose[0] for pose in poses]
     rotations = [Rotation.from_quat(row['camera_quaternion_xyzw']).as_matrix() for row in previous]+[pose[1] for pose in poses]
     progress = [row['progress_s'] for row in previous]+[progress_at(path, at) for at in times]
+    view_scene=nominal_visibility_scene(scene)
     measurements = [row['visual'] for row in previous]+[
-        visibility(pose[0], pose[1], scene, float(at), spec.model, spec.intrinsics) for at, pose in zip(times, poses)]
+        visibility(pose[0], pose[1], view_scene, float(at), spec.model, spec.intrinsics) for at, pose in zip(times, poses)]
     all_times = np.r_[[row['t'] for row in previous], times]
     result = spec.score(all_times, positions, rotations, measurements, progress)
+    result['visibility_forecast']=dict(mode='nominal_observed_geometry_and_velocity',
+        guarantee=False,physical_uncertainty_envelope_retained=True,
+        max_future_radius_growth_m=float(max(0.,prediction_end-scene['observation_stamp'])*
+            np.max(scene.get('radius_rates',[0.]),initial=0.)))
     velocity = np.gradient(np.array([pose[0] for pose in poses]), times, axis=0)
     acceleration = np.gradient(velocity, times, axis=0)
     angular = [(Rotation.from_matrix(b[1]@a[1].T).magnitude()/(tb-ta))
@@ -142,7 +148,8 @@ def intent_prediction(spec, path, scene, t, history=(), step=.05):
     return result
 
 
-def camera_candidates(original, active, strategy, scene, t, budget, radius, history=(), allow_time_extension=True):
+def camera_candidates(original, active, strategy, scene, t, budget, radius, history=(), allow_time_extension=True,
+                      kinematic_search=None, numerical_gate=None, search_config=None, proposal_transform=None):
     start = time.monotonic()
     if active.duration-t-budget.activation_lead_s < .3:
         return dict(error='insufficient_time_for_exact_plan_activation')
@@ -150,29 +157,152 @@ def camera_candidates(original, active, strategy, scene, t, budget, radius, hist
     observation_error=subject_observation_error(observation,original,t)
     if observation_error:return dict(error=observation_error)
     spec = IntentSpec(original, scene.get('subject_model'), scene.get('intrinsics'))
-    paths = propose_intent_paths(original,active,strategy,t,budget,spec.model,spec.intrinsics,allow_time_extension,scene)
+    if numerical_gate is not None:
+        from .regular_curve_search import bounded_paths
+        paths=bounded_paths(original,active,scene,t+budget.activation_lead_s,spec.model,spec.intrinsics,budget)
+    else:
+        paths = propose_intent_paths(original,active,strategy,t,budget,spec.model,spec.intrinsics,
+                                     allow_time_extension,scene,kinematic_search,search_config)
+    if numerical_gate is not None:
+        # Spend expensive continuous robot checks on camera programs that meet
+        # the task first, rather than on the first nearly identical box-clear
+        # detour. These are only ordering scores, never an execution approval.
+        preflight=[]
+        for path in paths:
+            from .cinematic_geometry import curve_quality
+            quality = curve_quality(path)
+            value,_=evaluate_path(path,scene,t,path.duration+POLICY.terminal_hold_s,radius)
+            metrics=intent_prediction(spec,path,scene,t,history)
+            metrics['curve_quality'] = quality
+            preflight.append(((not value.feasible,not metrics['camera_limits_pass'],
+                               not quality['direction_pass'],not quality['regular_curve_pass'],
+                               not (path.program['route']=='continuation' and metrics['intent_complete']),
+                               path.program.get('curve_family')=='global_endpoint_polynomial',
+                               not bool(path.program.get('curve_family')),
+                               path.program.get('search_role')!='coordinated_clearance',
+                               *selection_key(metrics,value.cost)),path))
+        paths=[path for _,path in sorted(preflight,key=lambda item:item[0])]
+        # Full IK is expensive. Try each spatial family before spending the
+        # budget on several almost identical above/below timing variants.
+        diverse=[];seen=set()
+        for path in paths:
+            route=path.program['route']
+            if route not in seen:
+                diverse.append(path);seen.add(route)
+        paths=paths if any(p.program.get('curve_family') for p in paths) else diverse+[path for path in paths if path not in diverse]
+    seed_wall_s=time.monotonic()-start
     ranked, evaluations = [], []
-    for path in paths:
+    attempts=[(path,False) for path in paths]
+    if proposal_transform is not None:
+        attempts += [(path,True) for path in paths if not path.program.get('curve_family')]
+    for path,project_pass in attempts:
+        if project_pass and ranked:
+            break
+        if numerical_gate is not None and evaluations and time.monotonic()-start>=budget.candidate_wall_budget_s:
+            break
+        if (proposal_transform is not None and not project_pass and not ranked and evaluations and
+                time.monotonic()-start>=.6*budget.candidate_wall_budget_s):
+            # Keep part of the finite budget for regularized robot proposals
+            # when direct camera curves have not produced any certificate.
+            continue
+        from .cinematic_geometry import curve_quality
+        if not project_pass and proposal_transform is not None and path.program.get('curve_family')=='global_endpoint_polynomial':
+            proposal=proposal_transform(path)
+            if proposal.get('error'):
+                evaluations.append(dict(id=path_hash(path),program=path.program,
+                    physical=Validation(False,'joint_curve_search').to_dict(),rejected=proposal['error'],
+                    failure_class='unverified_numerical_search',kinematics=proposal.get('summary')))
+                continue
+            path=proposal['path']
+        seed_quality = curve_quality(path)
+        if numerical_gate is not None and (not seed_quality['direction_pass'] or not seed_quality['regular_curve_pass']):
+            evaluations.append(dict(id=path_hash(path),program=path.program,curve_quality=seed_quality,
+                physical=Validation(False,'cinematic_seed_shape').to_dict(),
+                rejected='cinematic_curve_direction_or_shape',failure_class='cinematic_geometry'))
+            continue
+        # Preserve the authored regular camera curve whenever a strict robot
+        # lift exists. Projection is a fallback proposal, not mandatory damage
+        # to every otherwise feasible camera path.
+        direct_gate = None
+        if numerical_gate is not None and not project_pass:
+            camera_value,_=evaluate_path(path,scene,t,path.duration+POLICY.terminal_hold_s,radius)
+            if not camera_value.feasible:
+                evaluations.append(dict(id=path_hash(path),program=path.program,
+                    physical=camera_value.to_dict(),rejected='camera_collision',failure_class='physical_collision'))
+                continue
+            direct_gate = numerical_gate(path)
+            path=direct_gate.get('path',path)
+            if direct_gate.get('error'):
+                evaluations.append(dict(id=path_hash(path),program=path.program,
+                    physical=direct_gate.get('value',camera_value).to_dict(),
+                    rejected=direct_gate['error'],failure_class='unverified_numerical_search',
+                    kinematics=direct_gate.get('summary')))
+                continue
+        if project_pass:
+            proposal=proposal_transform(path)
+            if proposal.get('error'):
+                evaluations.append(dict(id=path_hash(path),program=path.program,
+                    physical=Validation(False,'projection_not_verified').to_dict(),
+                    rejected=proposal['error'],failure_class='unverified_numerical_search',
+                    kinematics=proposal.get('summary'),direct_kinematics=(direct_gate or {}).get('summary')))
+                continue
+            path=proposal['path']
+            direct_gate = None
         value, _ = evaluate_path(path,scene,t,path.duration+POLICY.terminal_hold_s,radius)
         detail = dict(id=path_hash(path), program=path.program, physical=value.to_dict())
+        from .cinematic_geometry import curve_quality
+        quality = curve_quality(path)
+        detail['curve_quality'] = quality
+        if numerical_gate is not None and (not quality['direction_pass'] or not quality['regular_curve_pass']):
+            detail.update(rejected='cinematic_curve_direction_or_shape', failure_class='cinematic_geometry')
+            evaluations.append(detail)
+            continue
         if value.feasible:
             metrics = intent_prediction(spec,path,scene,t,history)
             detail['intent'] = metrics
-            if metrics['camera_limits_pass'] and metrics['intent_complete']:
+            if metrics['camera_limits_pass']:
+                gate = direct_gate if direct_gate is not None else (None if numerical_gate is None else numerical_gate(path))
+                if gate is not None:
+                    detail['kinematics'] = gate['summary']
+                    if gate.get('error'):
+                        detail['rejected'] = gate['error']
+                        detail['failure_class'] = gate['kinematics'].get('failure_class','unverified_numerical_search')
+                        evaluations.append(detail)
+                        continue
+                    path=gate.get('path',path)
+                    value, metrics = gate['value'], gate['metrics']
+                    detail.update(physical=value.to_dict(), intent=metrics)
+                detail['intent_violations'] = metrics.get('intent_violations', [])
+                metrics['curve_quality'] = quality
                 consequences = dict(intent=metrics, source='floating_camera_calibrated_geometry_no_wbc',
-                    summary=metrics, prediction_interval_s=[t,path.duration])
+                    summary=metrics, prediction_interval_s=[t,path.duration],search_config=search_config,
+                    curve_quality=quality)
+                if gate is not None:
+                    consequences['source'] = 'measured_seed_camera_with_sampled_kinematic_gate_no_wbc'
                 candidate = Candidate(path,value,consequences,t,strategy)
+                if gate is not None:
+                    candidate.kinematics = gate['kinematics']
                 ranked.append((selection_key(metrics,value.cost),candidate))
             else:
                 detail['rejected'] = ('camera_limits' if not metrics['camera_limits_pass'] else
                     'terminal_frame_mismatch' if not metrics['terminal_frame']['pass_check'] else
                     'motion_trend_violation' if not metrics['motion_trend']['pass_check'] else 'incomplete_visible_intent')
+                detail['failure_class'] = 'physical_limit'
         else:
             detail['rejected'] = 'camera_collision'
+            detail['failure_class'] = 'physical_collision' if scene.get('valid') else 'unverified_observation'
         evaluations.append(detail)
+        if numerical_gate is not None and ranked and (len(ranked)>=budget.max_rollouts or ranked[-1][1].consequences['intent']['intent_complete']):
+            break
+        if numerical_gate is not None and ranked and time.monotonic()-start>=budget.candidate_wall_budget_s:
+            # Publish an already certified candidate before its exact
+            # activation expires. Additional posture branches must not hold
+            # a usable result hostage. Latest-state verification still runs.
+            break
     candidates = [c for _,c in sorted(ranked,key=lambda pair:pair[0])[:budget.max_rollouts]]
-    return dict(candidates=candidates,evaluations=evaluations,wall_s=time.monotonic()-start,
-                error='' if candidates else 'no_safe_candidate_completes_visible_intent')
+    return dict(candidates=candidates,evaluations=evaluations,wall_s=time.monotonic()-start,seed_wall_s=seed_wall_s,
+                search_exhausted=len(evaluations)==len(attempts), untested_proposals=max(0,len(attempts)-len(evaluations)),
+                error='' if candidates else 'no_verified_executable_candidate')
 
 
 class FloatingAgent:
@@ -281,8 +411,8 @@ class FloatingAgent:
                     elif not scene['valid'] or t-scene['observation_stamp']>.3:self.reject('camera_observation_stale',t)
                     elif subject_observation_error(scene.get('subject_observation'),self.original,t):
                         self.reject(subject_observation_error(scene.get('subject_observation'),self.original,t),t)
-                    elif not current_intent['intent_complete'] or not current_intent['camera_limits_pass']:
-                        self.reject('latest_visible_intent_incomplete',t)
+                    elif not current_intent['camera_limits_pass']:
+                        self.reject('latest_camera_motion_limits',t)
                     else:
                         self.active=candidate.path;self.installed+=1;self.last_attempt=t
                         latency=time.monotonic()-self.started
@@ -290,7 +420,7 @@ class FloatingAgent:
                         self.write('plan_installed',t,candidate_id=candidate.id,approval=approval,
                             program=self.active.program,actual_parameters=self.active.values.tolist(),
                             checks=dict(physical_valid='pass',state_fresh='pass',target_authorized='pass',
-                            predicted_visual_valid='pass_calibrated_geometry',observed_visual_valid='unknown_RGB'),
+                            predicted_visual_valid='pass_calibrated_geometry' if current_intent['intent_complete'] else 'accepted_intent_violation',observed_visual_valid='unknown_RGB'),
                             end_to_end_wall_s=latency,latest_state_check=refreshed.to_dict(),intent=current_intent)
         if (self.future is None and self.jev.future is None and t-self.last_attempt>=self.budget.decision_period_s
                 and self.active.duration-t>self.budget.activation_lead_s+.3):
@@ -437,6 +567,20 @@ def run_case(case,output,mode,budget,radius,model,api_url,pace):
                 [row['camera_quaternion_xyzw'] for row in rows]),
             observed_visual_source='current simulated LiDAR subject returns fitted to calibrated cylinder; RGB/SAM not run',
             whole_body_execution='not_run')
+        if rows:
+            from .shot_acceptance import evaluate_shot
+            acceptance=evaluate_shot(original,subject_model,[row['t'] for row in rows],
+                positions,rotations,true_measurements,[row['progress_s'] for row in rows],
+                safety_pass=safe and limits_pass,execution_ok=not failure,
+                intrinsics=intrinsics,motion_end_s=agent.active.duration,legacy_intent=intent,
+                safety_source='camera_sphere_and_camera_kinematic_limits_only; not_whole_body')
+            summary.update(shot_acceptance=acceptance,
+                legacy_camera_intent_success=summary['camera_intent_success'],
+                legacy_within_budget_success=summary['within_budget_success'],
+                camera_intent_success=acceptance['accepted'],
+                within_budget_success=bool(acceptance['accepted'] and
+                    elapsed<=POLICY.max_duration_factor*original.duration+POLICY.terminal_hold_s),
+                intent_role='legacy_reference_fidelity_diagnostic_only')
         save_json(output/'summary.json',summary);save_json(output/'telemetry.json',rows)
     print(json.dumps(dict(case=runtime.document['name'],mode=mode,completed=completed,safe=safe,
         intent=intent['intent_complete'],coverage=intent['effective_coverage'],duration_s=elapsed,

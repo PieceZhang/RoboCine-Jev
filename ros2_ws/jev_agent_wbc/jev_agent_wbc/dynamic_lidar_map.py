@@ -19,6 +19,30 @@ from .lidar_collision_map import LidarCollisionMap, voxel_keys
 _worker = None
 
 
+def measured_sphere(points, tolerance):
+    """Accept a round-shape hypothesis only with well-conditioned surface data.
+
+    No scene dimensions or object identities enter this fit. Non-round and
+    nearly planar packets retain the generic measured-box representation.
+    """
+    points=np.asarray(points,float)
+    if len(points)<6:
+        return None
+    anchor=points.mean(axis=0); local=points-anchor
+    spread=np.linalg.svd(local,compute_uv=False)
+    if spread[-1] < .08*spread[0]:
+        return None
+    fit,_,rank,_=np.linalg.lstsq(np.c_[2*local,np.ones(len(local))],np.sum(local**2,axis=1),rcond=None)
+    radius2=fit[3]+fit[:3]@fit[:3]
+    if rank!=4 or not .03**2<=radius2<=.45**2:
+        return None
+    radius=np.sqrt(radius2); center=anchor+fit[:3]
+    residual=np.abs(np.linalg.norm(points-center,axis=1)-radius)
+    if residual.max()>tolerance or np.linalg.norm(center-anchor)>radius:
+        return None
+    return dict(center=center,radius=float(radius),residual_m=float(residual.max()))
+
+
 def integrate_dynamic_batch(settings, scans):
     global _worker
     if _worker is None:
@@ -88,7 +112,7 @@ class DynamicLidarMap(LidarCollisionMap):
                 minimum_height=self.minimum_height, maximum_height=self.maximum_height,
                 minimum_clearance=self.minimum_clearance, retention_s=self.retention_s, confirmations=1)
             filtered.integrate(**scan)
-            points = filtered.snapshot()['surfel_centers']
+            points = filtered.filtered_points.copy()
             # A rotating packet may contain the robot at an earlier posture.
             # Its own articulated surface must not become a retained obstacle
             # when the joints move. Keep this filter local and use measured TF
@@ -125,6 +149,9 @@ class DynamicLidarMap(LidarCollisionMap):
                   if stamp - t <= self.fusion_window and len(points)]
         if not chunks:
             return
+        current_chunks=[points for measured_at,points in chunks if abs(measured_at-stamp)<1e-6]
+        current=np.vstack(current_chunks) if current_chunks else np.empty((0,3))
+        self.current_points=current
         points = self.align_measurements(chunks, stamp)
         _, indices = voxel_keys(points, self.voxel_size)
         points = points[indices]
@@ -244,12 +271,25 @@ class DynamicLidarMap(LidarCollisionMap):
                 continue
             measured = points[selected]
             low, high = measured.min(axis=0), measured.max(axis=0)
-            center = (low+high)/2
+            # A partial visible packet cannot recenter a rigid object's box.
+            # Intersect the measured extrema with the retained half extent;
+            # keep the causal predicted center whenever it is consistent.
+            # Recentring on a clipped packet manufactures lateral velocity as
+            # the robot's self mask hides one side of an approaching mover.
+            center = np.clip(predicted, high-track['model_extent'], low+track['model_extent'])
             center[2] = track['model_center_z']
             assigned[len(detections)] = key
             detections.append(dict(center=center, extent=track['model_extent'], points=measured))
             remaining[selected] = False
         detections.extend(self.clusters(points[remaining]))
+        # Fit only simultaneous raw returns: accumulated asynchronous packets
+        # stretch a moving sphere and corrupt both its center and velocity.
+        for detection in detections:
+            current=getattr(self,'current_points',points)
+            packet=current[np.all(abs(current-detection['center']) <= detection['extent']+.08,axis=1)]
+            fitted=measured_sphere(packet,min(.005,.2*self.voxel_size))
+            if fitted is not None:
+                detection.update(center=fitted['center'],extent=np.full(3,fitted['radius']),sphere=fitted)
         identifiers = [key for key in self.tracks if key not in moving_ids]
         if identifiers and detections:
             available = [index for index in range(len(detections)) if index not in assigned]
@@ -270,6 +310,10 @@ class DynamicLidarMap(LidarCollisionMap):
                                         anchor=detection['center'].copy(), first_stamp=stamp,
                                         template=detection['points'].copy(), motion_votes=0)
             track = self.tracks[key]
+            if track.get('sphere') is not None and 'sphere' not in detection:
+                radius=track['sphere']['radius']
+                if np.any(np.linalg.norm(detection['points']-detection['center'],axis=1)>radius+2*self.voxel_size):
+                    track.pop('sphere')
             # A bounding-box centre can move when a static object becomes
             # partially occluded. Require novel surfaces relative to its
             # accumulated stationary template as well as coherent translation.
@@ -363,7 +407,12 @@ class DynamicLidarMap(LidarCollisionMap):
             extent = np.maximum(track['model_extent'], np.max(abs(track['points']-track['center']), axis=0))
             half_extent = .5*extent
             proxies = center+corners*half_extent
-            proxy_radius = np.linalg.norm(half_extent)+1.5*self.voxel_size
+            proxy_radius = np.linalg.norm(half_extent)+static['surfel_radius']
+            if track.get('sphere') is not None:
+                # Retain an observed round rigid shape through partial
+                # occlusion, with the same range/voxel uncertainty allowance.
+                proxies=center[None]
+                proxy_radius=track['sphere']['radius']+static['surfel_radius']+track['sphere']['residual_m']
             # The proxy union contains the retained AABB AND all current
             # measured surfel balls. Use just these eight witnesses; retaining
             # hundreds of redundant interior surfels slows the safety QP.
@@ -374,7 +423,8 @@ class DynamicLidarMap(LidarCollisionMap):
             ages.append(np.full(count, age))
             radii.append(np.full(len(proxies), proxy_radius))
             tracks.append(dict(id=key, center=(track['center'] + track['velocity'] * age).tolist(),
-                velocity=track['velocity'].tolist(), age_s=age, surfaces=len(points)))
+                velocity=track['velocity'].tolist(), age_s=age, surfaces=len(points),
+                shape_model='measured_sphere' if track.get('sphere') is not None else 'measured_box'))
         return {
             **static, 'surfel_centers': np.vstack(centers), 'surfel_velocities': np.vstack(velocities),
             'surfel_track_ids': np.concatenate(ids), 'surfel_ages': np.concatenate(ages), 'surfel_radii': np.concatenate(radii),

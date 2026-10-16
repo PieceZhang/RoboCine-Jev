@@ -127,7 +127,9 @@ def test_agent_planning_controller_is_independent_of_execution(tmp_path,monkeypa
     try:
         state=np.array(runtime.document['initial_state']);z=runtime.document['base_z']
         engine.update(state,scene,0.,z)
-        monkeypatch.setattr(engine.jev,'poll',lambda: dict(stage='strategy',strategy='view'))
+        # Configuration selection now follows family selection before numeric
+        # planning. Verify this stage still uses the separate planning limits.
+        monkeypatch.setattr(engine.jev,'poll',lambda: dict(stage='configuration',strategy='view',search_config='local'))
         engine.update(state,scene,.02,z)
         assert [kind for kind,_ in submitted]==['diagnose','candidates']
         for _,args in submitted:

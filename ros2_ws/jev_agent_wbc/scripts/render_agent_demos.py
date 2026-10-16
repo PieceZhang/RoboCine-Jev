@@ -32,10 +32,12 @@ BLUE = '#69b9ff'; GREEN = '#5ce0b2'; RED = '#ff9184'; GOLD = '#ffd47a'
 COLORS = ['#da9dff', '#ffbf69', '#f47fba', '#8dc8fa']
 FONT = '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'
 FONTS = {s: ImageFont.truetype(FONT, s) for s in range(14, 35)}
-KEY_EVENTS = {'target_replayed', 'search_strategy', 'candidate_set',
+KEY_EVENTS = {'target_replayed', 'search_strategy', 'search_configuration', 'configuration_preparation_state', 'candidate_set',
               'proposal_rejected', 'continuation_selected', 'candidate_approved',
               'installation_rejected', 'plan_installed', 'math_failure', 'run_failed'}
 EVENT_NAMES = {'camera_difficulty':'相机意图 / 可见性诊断', 'candidate_evaluation':'相机约束与意图筛选', 'target_replayed': '复用悬空相机 Agent 目标', 'whole_body_difficulty': '整机困难诊断', 'strategy_requested': '请求搜索策略',
+    'search_configuration_requested':'继续 Jev：参数 / 数值行为', 'search_configuration':'参数 / 数值行为已选择',
+    'configuration_preparation_planned':'构型准备计划已绑定', 'configuration_preparation_state':'构型准备 / 持续余量维护',
     'search_strategy': '模型返回搜索策略', 'candidate_set': '候选预测完成',
     'selection_requested': '请求候选意图排序', 'proposal_rejected': '本轮结束：未安装',
     'continuation_selected': '选择继续原目标', 'candidate_approved': '模型已选择候选',
@@ -116,6 +118,8 @@ class Run:
         self.times = np.array([r['t'] for r in self.rows])
         self.duration = float(self.times[-1])
         self.intent_planner = 'intent' in self.summary
+        self.kinematic_gate = bool(self.summary.get('kinematic_gate'))
+        self.program_candidates = self.intent_planner or self.kinematic_gate
         self.positions = np.array([r['camera_position'] for r in self.rows])
         self.targets = np.array([r['info']['target_position'] for r in self.rows])
         self.camera_planner = self.summary.get('planner_model') == 'floating_camera'
@@ -134,10 +138,11 @@ class Run:
         self.frame_times = np.array([r['t'] for r in self.frames])
         self.name = self.scene['name']
         self.paths = {}; self.card_by_id = {}; self.api_at = {}; self.request_at = {}
-        requests = [(i, e) for i, e in enumerate(self.events) if e['event'] in ('strategy_requested','selection_requested')]
+        requests = [(i, e) for i, e in enumerate(self.events) if e['event'] in ('strategy_requested','search_configuration_requested','selection_requested')]
         # One serial model worker: pair requests by stage and original evidence timestamp.
         for a in self.api:
-            stage = 'strategy' if 'strategy' in a.get('request', {}).get('questions', {}) else 'selection'
+            questions=a.get('request', {}).get('questions', {})
+            stage = 'strategy' if 'strategy' in questions else 'configuration' if 'configuration' in questions else 'selection'
             state = a.get('request', {}).get('state', '')
             decoder = json.JSONDecoder(); evidence = None
             for pos in (i for i, ch in enumerate(state) if ch == '{'):
@@ -152,11 +157,11 @@ class Run:
                 and (evidence is None or abs(e['evidence']['time_s']-evidence['time_s']) < .001)]
             assert matches, ('unmatched API request', self.folder)
             i, e = matches[0]; self.request_at[i] = a
-            terminal = ('search_strategy','proposal_rejected') if stage == 'strategy' else ('candidate_approved','continuation_selected','proposal_rejected')
+            terminal = ('search_strategy','proposal_rejected') if stage == 'strategy' else ('search_configuration','proposal_rejected') if stage=='configuration' else ('candidate_approved','continuation_selected','proposal_rejected')
             for j in range(i+1, len(self.events)):
                 if self.events[j]['event'] in terminal:
                     self.api_at[j] = a; break
-                if self.events[j]['event'] in ('strategy_requested','selection_requested'):
+                if self.events[j]['event'] in ('strategy_requested','search_configuration_requested','selection_requested'):
                     break
         for event in self.events:
             for card in event.get('cards', []):
@@ -184,10 +189,10 @@ class Run:
         answers = [(self.api_at[i],e) for i,e in cycle if i in self.api_at]
         selected = last('target_replayed', {}) if self.replay else last('candidate_approved', last('continuation_selected', {}))
         return dict(past=past, cycle=cycle, round=len(starts), evidence=evidence, bank=bank,
-            cards=bank.get('cards', []), strategy=last('search_strategy', {}),
+            cards=bank.get('cards', []), strategy=last('search_strategy', {}),configuration=last('search_configuration',{}),
             answer=answers[-1][0] if answers else None,
             decision=selected, rejected=last('proposal_rejected', last('installation_rejected', {})),
-            installed=last('plan_installed', {}), requests=sum(e['event'] in ('strategy_requested','selection_requested') for _,e in past),
+            installed=last('plan_installed', {}), requests=sum(e['event'] in ('strategy_requested','search_configuration_requested','selection_requested') for _,e in past),
             diagnosis=last('camera_difficulty', last('whole_body_difficulty', {}, past), past))
 
 
@@ -289,7 +294,8 @@ def plot(draw, box, run, state, t, axes):
 
 def draw_frame(run,t,cutoff=None,label='',end=False):
     im=Image.new('RGB',(W,H),BG);d=ImageDraw.Draw(im);s=run.state(t,cutoff)
-    backend=('CPU 独立悬空相机 · 1:1 任务空间跟踪' if run.floating else
+    backend=('CPU 整机 WBC + agent 路径规划 · FK 约束开启' if run.cpu and run.kinematic_gate else
+             'CPU 独立悬空相机 · 1:1 任务空间跟踪' if run.floating else
              'CPU 整机 · 相机候选规划 / WBC 避障开' if run.camera_planner else
              'CPU 整机 · 规划避障开 / 执行避障关' if run.split_avoidance else
              'CPU 整机 · WBC 避障关闭' if run.cpu and run.no_avoidance else
@@ -298,11 +304,12 @@ def draw_frame(run,t,cutoff=None,label='',end=False):
     txt(d,(1030,16),f'决策模型：{run.model}',24,GOLD,width=870)
     row=run.rows[max(0,np.searchsorted(run.times,t,side='right')-1)]
     phase=run.original.phase(row.get('progress_s',t))
-    clock_text=(f'场景 {t:.2f} / {run.duration:.2f}s  意图进度 {row.get("progress_s",t)/run.original.duration:.0%}'
+    clock_text=(f'场景 {t:.2f} / {run.duration:.2f}s  '+('结束窗口确认' if t>=run.original.duration else f'镜头期限 {run.original.duration:.2f}s') if run.kinematic_gate else
+                f'场景 {t:.2f} / {run.duration:.2f}s  意图进度 {row.get("progress_s",t)/run.original.duration:.0%}'
                 if run.intent_planner else f'原始时刻 {t:.2f} / {run.original.duration:.2f} s')
     txt(d,(20,53),f'{clock_text}   阶段 {phase["name"]} / {phase["motion"]}',21)
-    txt(d,(900,53),label or '仿真时间回放 8 FPS；不代表在线墙钟实时速度',21,GOLD,width=990)
-    names=['感知 / 诊断','搜索策略','候选预测','模型选择','复核 / 安装',
+    txt(d,(900,53),label or f'仿真时间回放 {FPS} FPS；不代表在线墙钟实时速度',21,GOLD,width=990)
+    names=['感知 / 诊断','搜索族 / 参数','数值候选 / FK' if run.kinematic_gate else '候选预测','模型选择','复核 / 安装',
            '直接跟踪 / 反馈' if run.floating else 'WBC / 反馈']
     baseline=run.summary['mode']=='strict'
     cycle_names={e['event'] for _,e in s['cycle']}
@@ -335,6 +342,7 @@ def draw_frame(run,t,cutoff=None,label='',end=False):
     txt(d,(24,456),'意图原文：'+run.task['intent'],17,FG,width=1868)
     txt(d,(20,484),'CPU：离线示意图；主体 LiDAR 数值进入决策，无 RGB 输入' if run.floating and 'observed_terminal_pass' in run.summary else 'CPU：仅离线示意渲染，无 RGB 输入' if run.cpu else f'RGB 采集时刻 {captures[0]:.2f} s；事件页沿用最近已采集帧',17,MUTED)
     txt(d,(760,484),('碰撞仅检测不干预；相机半径 '+fmt(run.summary.get('camera_radius_m'))+' m' if run.floating else
+        'FK / 关节限位 / 速度 / 加速度 / 奇异值：数值工具检查' if run.kinematic_gate else
         '实际位姿播种相机预测；无整机预测；执行 WBC 避障开' if run.camera_planner else
         '规划 WBC 避障开启；执行关闭，碰撞仅检测' if run.split_avoidance else
         'WBC 避障关闭；碰撞仅检测不干预' if run.no_avoidance else
@@ -349,7 +357,7 @@ def draw_frame(run,t,cutoff=None,label='',end=False):
     bank=s['bank'];cards=s['cards'];ev=bank.get('evaluations',[])
     counts=Counter('full' if 'full' in e else 'coarse' if 'coarse' in e else 'other' for e in ev)
     txt(d,(668,521),'源 Agent 已安装的精确目标（当前仅回放，无重新选择）' if run.replay else
-        f'第 {s["round"]} 轮 | 相机程序 {len(ev)} / 合格 {len(cards)}' if run.intent_planner else
+        f'第 {s["round"]} 轮 | 数值候选 {len(ev)} / 合格 {len(cards)}' if run.program_candidates else
         f'第 {s["round"]} 轮候选  |  粗筛 {counts["coarse"]}  完整预测 {counts["full"]}  可展示 {len(cards)}',23)
     txt(d,(1370,524),'来源：已录制的悬空相机 Agent' if run.replay else f'规划墙钟 {fmt(bank.get("planner_wall_s"))} s',20,MUTED,width=515)
     if not cards:
@@ -357,9 +365,10 @@ def draw_frame(run,t,cutoff=None,label='',end=False):
         txt(d,(680,572),reason,24,GOLD,width=1200)
         wrap(d,(680,617),run.task['intent'],1195,20,3,MUTED)
     else:
-        txt(d,(670,558),'候选程序 / 绕行幅度 / 激活→结束' if run.intent_planner else 'ID / 参数 r,l,h (m) / 激活→结束',18,MUTED)
-        txt(d,(1190,558),'源相机净距 / 无关节约束' if run.floating or run.replay or run.camera_planner else '预测净距 / 关节余量',18,MUTED)
-        txt(d,(1480,558),'有效覆盖 / 最低可见率' if run.intent_planner else '预测构图 / 尺度代理 / 观察角',18,MUTED)
+        txt(d,(670,558),'候选程序 / 绕行幅度 / 激活→结束' if run.program_candidates else 'ID / 参数 r,l,h (m) / 激活→结束',18,MUTED)
+        joint_checks = run.kinematic_gate or not (run.floating or run.replay or run.camera_planner)
+        txt(d,(1190,558),'预测净距 / 关节余量' if joint_checks else '源相机净距 / 无关节约束',18,MUTED)
+        txt(d,(1480,558),'有效覆盖 / 最低可见率' if run.program_candidates else '预测构图 / 尺度代理 / 观察角',18,MUTED)
         for j,c in enumerate(cards):
             assert j<3,'layout supports the configured maximum of 3 full candidates'
             yy=585+j*51;pred=c['prediction'];visual=c['visual']['summary'];tr=c['trajectory'];vals=tr.get('values',[0.,0.,0.])
@@ -368,19 +377,23 @@ def draw_frame(run,t,cutoff=None,label='',end=False):
             program=tr.get('program')
             txt(d,(670,yy),f'{alias} {program["route"]} {program["amplitude_m"]:.2f}m {program["extension_s"]:+.1f}s' if program else
                 f'{alias} {c["id"][:8]}  [{vals[0]:+.2f}, {vals[1]:+.2f}, {vals[2]:+.2f}]',20,COLORS[j])
-            txt(d,(685,yy+25),f'{tr["activation_s"]:.2f}→{tr["duration_s"]:.2f}s  碰撞 / 意图均通过' if program else
+            intent_status = {True: '通过', False: '未通过'}.get(visual.get('intent_complete'), '未知')
+            physical_status = {True: '通过', False: '未通过'}.get(c.get('physical_valid'), '未知')
+            txt(d,(685,yy+25),f'{tr["activation_s"]:.2f}→{tr["duration_s"]:.2f}s  物理：{physical_status} / 意图：{intent_status}' if program else
                 f'{tr["activation_s"]:.2f}→{tr["envelope"]["end_s"]:.2f}s  {tr["envelope"]["terminal"]}  物理预测：{c["physical_valid"]}',16,MUTED)
-            txt(d,(1190,yy),f'{fmt(pred.get("min_clearance_m"))} m'+(' / 不适用' if run.floating or run.replay or run.camera_planner else f' / {fmt(pred.get("joint_margin_rad"))} rad'),19)
+            txt(d,(1190,yy),f'{fmt(pred.get("min_clearance_m"))} m'+(f' / {fmt(pred.get("joint_margin_rad"))} rad' if joint_checks else ' / 不适用'),19)
             txt(d,(1480,yy),f'{visual["effective_coverage"]:.1%} / {visual["visibility_min"]:.1%}' if program else
                 f'{fmt(visual.get("composition_error"))} / {fmt(visual.get("range_scale_error"))} / {fmt(visual.get("view_angle_error_rad"))}',19)
-            txt(d,(1190,yy+25),f'下一阶段已检查：{pred.get("next_phase_checked",False)}',16,MUTED)
+            kin=c.get('kinematic_feasibility',{})
+            txt(d,(1190,yy+25),f'FK 最小奇异值 {fmt(kin.get("min_singular_value"))}' if kin else
+                f'下一阶段已检查：{pred.get("next_phase_checked",False)}',16,MUTED)
             txt(d,(1480,yy+25),f'终帧尺度误差 {visual.get("terminal_frame",{}).get("log_area_error",0.):.3f}' if program and 'terminal_frame' in visual else
                 f'最长遮挡 {visual["longest_occlusion_s"]:.2f}s' if program else
                 f'出画中心时长 {fmt(visual.get("center_out_of_frame_duration_s"))} s',16,MUTED)
     evidence=s['evidence'];diag=evidence.get('difficulty',s['diagnosis'].get('report',{}))
     txt(d,(668,778),'输入证据与搜索决策',22)
     family=s['strategy'].get('strategy','未调用' if baseline else '等待')
-    txt(d,(668,811),f'修复族：{family}   API 已请求 {s["requests"]} 次',20,GOLD)
+    txt(d,(668,811),f'修复族 {family} / 参数 {s["configuration"].get("search_config","等待")}   API {s["requests"]}',20,GOLD,width=590)
     issues=', '.join(diag.get('issues',[])) or ('基线控制，无语义修复' if baseline else '等待诊断')
     wrap(d,(668,845),issues,575,18,2,MUTED)
     txt(d,(668,902),f'预测风险时刻 {fmt(diag.get("first_risk_s"),2)} s  净距 {fmt(diag.get("min_clearance_m"))} m',18)
@@ -413,7 +426,9 @@ def draw_frame(run,t,cutoff=None,label='',end=False):
     installs=sum(e['event']=='plan_installed' for _,e in s['past'])
     txt(d,(1292,931),f'已复用 {sum(e["event"]=="target_replayed" for _,e in s["past"])} 条源目标；无新修复安装' if run.replay else f'截至当前安装 {installs} 次 | 概率不代表物理安全',18,MUTED)
     gates=verification_status(s)
-    txt(d,(1292,958),f'最新状态 / 时效 / 视觉复核：{gates}',16,MUTED,width=590)
+    prep=info.get('configuration_preparation',{})
+    txt(d,(1292,958),f'构型 {prep.get("status","inactive")} | 准备 {fmt(prep.get("measured_duration_s"),2)}s | 相机误差 {fmt(info.get("position_error"))}m' if prep.get('status','inactive')!='inactive' else
+        f'最新状态 / 时效 / 视觉复核：{gates}',16,MUTED,width=590)
     # Original-time progress bar and observed event markers, with no future choices revealed.
     d.rectangle((20,1002,1900,1009),fill='#2b3c54')
     d.rectangle((20,1002,20+1880*t/run.duration,1009),fill=GREEN)
@@ -425,8 +440,9 @@ def draw_frame(run,t,cutoff=None,label='',end=False):
     txt(d,(1050,1024),f'整段运行墙钟 {run.summary["wall_s"]:.1f} s | 连续回放 · 无讲解停留',19,MUTED,width=840)
     if end:
         d.rounded_rectangle((350,198,1570,456),radius=14,fill='#101827',outline=GOLD,width=2)
-        result='镜头达标' if run.summary['within_budget_success'] else '镜头未达标'
-        txt(d,(390,211),f'本段结果：{result}  |  '+(f'复用 {len(run.summary["replayed_targets"])} 条源目标' if run.replay else f'修复安装 {run.summary["installed_plans"]} 次'),30,GREEN if run.summary['within_budget_success'] else RED)
+        success=run.summary.get('intent_success',run.summary['within_budget_success'])
+        result='镜头达标' if success else '镜头未达标'
+        txt(d,(390,211),f'本段结果：{result}  |  '+(f'复用 {len(run.summary["replayed_targets"])} 条源目标' if run.replay else f'修复安装 {run.summary["installed_plans"]} 次'),30,GREEN if success else RED)
         txt(d,(390,262),f'执行 {run.duration:.2f}s / 原参考 {run.original.duration:.2f}s；有效覆盖 {run.summary["intent"]["effective_coverage"]:.1%}' if run.intent_planner else
             f'记录 {run.summary["elapsed_shot_s"]:.2f} / {run.original.duration:.2f} s；位置 RMS {run.summary["original_position_rms_m"]:.4f} m',24)
         physical=(f'相机球体净距 {fmt(run.summary.get("min_truth_clearance_m"))} m；直接跟踪误差 0；无机器人约束' if run.floating else
@@ -534,10 +550,13 @@ def render_explicit_runs(folders, dest):
 
 
 def main():
+    global FPS
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--root',type=Path)
     p.add_argument('--runs', nargs='+', type=Path, help='explicit new run folders in chapter order')
     p.add_argument('--output', type=Path, help='new MP4 path for --runs')
+    p.add_argument('--fps',type=int,default=8,choices=(8,16,24),help='uniform simulation-time frames per second')
     p.add_argument('--only',nargs='*');p.add_argument('--preview-only',action='store_true');a=p.parse_args()
+    FPS=a.fps
     if a.runs:
         if not a.output or a.root or a.only or a.preview_only:
             p.error('--runs requires --output and cannot be combined with --root/--only/--preview-only')

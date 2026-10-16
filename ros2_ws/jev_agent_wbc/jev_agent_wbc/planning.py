@@ -37,6 +37,8 @@ class ExecutionWBC(DynamicPredictiveQP):
 
     def set_trajectory(self, trajectory):
         super().set_trajectory(trajectory)
+        self.kinematic_reference=None
+        self.geometry_guidance=None
         from .candidates import path_hash
         self.received_trajectory_id=path_hash(trajectory) if hasattr(trajectory,'sha256') else 'received'
         self.coordination.set_trajectory(trajectory)
@@ -52,7 +54,8 @@ class ExecutionWBC(DynamicPredictiveQP):
         # configuration task. Before it, predict the currently active parent;
         # otherwise an uninstalled candidate changes the shared execution prefix.
         received = self.trajectory
-        while isinstance(received, DeformedReference) and t < received.activation_s-1e-9:
+        from .intent_paths import IntentPath
+        while isinstance(received, (DeformedReference, IntentPath)) and t < received.activation_s-1e-9:
             received = received.previous or received.original
         self.coordination.set_trajectory(received)
         self.reconfiguration.reset(received)

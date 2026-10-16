@@ -21,11 +21,12 @@ def look_at(position, subject):
     if norm < 1e-6:
         raise ValueError('camera coincides with subject')
     forward /= norm
-    left = np.cross([0., 0., 1.], forward)
+    left = np.array([-forward[1],forward[0],0.])
     if np.linalg.norm(left) < 1e-6:
         left = np.array([0., 1., 0.])
     left /= np.linalg.norm(left)
-    return np.column_stack([forward, left, np.cross(forward, left)])
+    up=np.array([-forward[2]*left[1],forward[2]*left[0],forward[0]*left[1]-forward[1]*left[0]])
+    return np.column_stack([forward, left, up])
 
 
 def bound_effect_estimate(evidence, parameter, amount):

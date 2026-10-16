@@ -49,7 +49,15 @@ def test_candidate_and_installation_use_measured_feedback_without_wbc_rollout(se
     approval=Approval(candidate.id,digest(candidate.card()),path_hash(original),original.sha256,None,1)
     checked=planner.verify(candidate,approval,original,scene,state,np.zeros(8),0.,z,Limits(),budget=budget)
     assert not checked['error']
-    assert installation_guard(checked,original,scene,state,0.,budget) is None
+    assert checked['geometry_guidance'].request.camera_path_id == candidate.id
+    assert checked['geometry_guidance'].camera_path is candidate.path
+    from copy import deepcopy
+    tampered = deepcopy(candidate)
+    tampered.consequences['geometry']['request']['end_s'] -= .1
+    rejected = planner.verify(tampered,approval,original,scene,state,np.zeros(8),0.,z,Limits(),budget=budget)
+    assert rejected['error'] == 'approval_binding_mismatch'
+    assert installation_guard(checked,original,scene,state,0.,budget,previous=np.zeros(8)) is None
+    assert installation_guard(checked,original,scene,state,0.,budget)=='missing_latest_velocity_for_kinematic_gate'
     moved=state.copy();moved[0]+=.5
     assert installation_guard(checked,original,scene,moved,0.,budget)=='camera_left_verified_state_neighborhood'
     stale=planner.verify(candidate,approval,original,scene,state,np.zeros(8),.8,z,Limits(),budget=budget)
@@ -71,3 +79,46 @@ def test_uncertainty_grows_at_prediction_time_not_from_horizon_end():
                radii=[.1],radius_rates=[.035])
     values=predicted_clearances([[0.,0.,0.],[0.,0.,0.]],[0.,8.],scene,.06)
     np.testing.assert_allclose(values,[.84,.56],atol=1e-12)
+
+
+def test_camera_valid_candidates_are_rejected_by_joint_acceleration_gate(setup):
+    original,state,z,scene=setup
+    limits=Limits(acceleration=np.full(8,.001),wheel_acceleration=.01)
+    result=planner.build(original,original,'view',scene,state,np.zeros(8),0.,z,limits,
+        budget=SearchBudget(activation_lead_s=1.5),measured_control=np.zeros(8))
+    assert result['error'] and not result['candidates']
+    assert result['evaluations']
+    numeric=[e for e in result['evaluations'] if 'kinematics' in e]
+    assert numeric  # cooperative wall budget can stop after the first failed lift
+    for evaluation in numeric:
+        assert evaluation['physical']['feasible']  # camera-only screening passes
+        assert evaluation['rejected']=='kinematic_gate:kinematic_tracking_unreachable'
+
+
+def test_latest_velocity_is_rechecked_and_jev_does_not_receive_fk_internals(setup):
+    from jev_agent_wbc.jev import semantic_card
+    original,state,z,scene=setup;budget=SearchBudget(activation_lead_s=1.5)
+    result=planner.build(original,original,'view',scene,state,np.zeros(8),0.,z,Limits(),budget=budget)
+    candidate=result['candidates'][0]
+    assert candidate.card()['kinematic_feasibility']['feasible']
+    card=semantic_card('c0',candidate.card())
+    assert 'kinematic_feasibility' not in card
+    assert not any(k in json.dumps(card) for k in ('effective_jacobian','control_matrix','singular_value_floor'))
+    approval=Approval(candidate.id,digest(candidate.card()),path_hash(original),original.sha256,None,1)
+    checked=planner.verify(candidate,approval,original,scene,state,np.zeros(8),0.,z,Limits(),
+        budget=budget,measured_control=np.full(8,2.))
+    assert checked['error']=='kinematic_gate:initial_velocity_limit'
+    assert checked['checks']['kinematic_feasibility']=='fail'
+
+
+@pytest.mark.parametrize('approved,feasible,should_replan',[(False,True,True),(True,True,False),(True,False,True)])
+def test_approved_curve_can_use_warning_reserve_but_never_failed_clearance(setup,monkeypatch,approved,feasible,should_replan):
+    from jev_agent_wbc.intent_paths import IntentPath
+    from jev_agent_wbc.contracts import Validation
+    original,state,z,scene=setup
+    active=IntentPath(original,original,1.,dict(route='continuation',amplitude_m=0.,extension_s=0.),scene['subject_model']) if approved else original
+    monkeypatch.setattr(planner,'prediction',lambda *a,**kw:(Validation(feasible,'test_clearance',min_clearance_m=.04 if feasible else .02),2.))
+    result=planner.diagnose(original,scene,state,np.zeros(8),0.,z,Limits(),active=active,
+        budget=SearchBudget(activation_lead_s=1.),accepted_intent={'longest_occlusion_s':0.} if approved else None)
+    assert ('predicted_camera_collision_or_low_clearance' in result['report']['issues']) is should_replan
+    assert result['report']['low_clearance_warning_s']==2.

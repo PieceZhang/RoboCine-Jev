@@ -32,14 +32,15 @@ STRATEGIES = {
 
 @dataclass(frozen=True)
 class SearchBudget:
-    max_proposals: int = 8
-    max_rollouts: int = 3
+    max_proposals: int = 6
+    max_rollouts: int = 2
     activation_lead_s: float = 4.
     prediction_step_s: float = .1
     max_prediction_age_s: float = 4.
     max_install_age_s: float = 1.2
     max_horizon_s: float = 8.
     decision_period_s: float = .5
+    candidate_wall_budget_s: float = 2.
     # Numerical model-consistency allowances, NOT authored shot tolerances.
     composition_slack: float = .015
     scale_slack: float = .04
@@ -59,7 +60,7 @@ class SearchBudget:
             raise ValueError('activation lead must be in [.2, 5] seconds')
         if not self.activation_lead_s+.6 <= self.max_horizon_s <= 12.:
             raise ValueError('bounded horizon must accommodate activation and be at most 12 seconds')
-        for value in (self.max_prediction_age_s, self.max_install_age_s, self.composition_slack,
+        for value in (self.max_prediction_age_s, self.max_install_age_s, self.candidate_wall_budget_s,self.composition_slack,
                       self.scale_slack, self.angle_slack_rad, self.progress_slack):
             if not np.isfinite(value) or value <= 0:
                 raise ValueError('all timing and consistency allowances must be finite and positive')
@@ -82,6 +83,9 @@ def restore_path(original, spec):
     if spec.get('kind') == 'intent_program/v1':
         from .intent_paths import IntentPath
         return IntentPath.from_spec(original, spec)
+    if spec.get('kind') == 'fk_camera_program/v1':
+        from .fk_camera_path import FKCameraPath
+        return FKCameraPath.from_spec(original,spec)
     if 'values' not in spec:
         return original
     from .contracts import Envelope
@@ -102,6 +106,7 @@ class Candidate:
     snapshot_time_s: float
     strategy: str
     id: str = ''
+    kinematics: dict | None = None
 
     def __post_init__(self):
         self.id = path_hash(self.path)
@@ -112,11 +117,15 @@ class Candidate:
         numeric.pop('terminal_state', None)
         consequences = {k: v for k, v in self.consequences.items() if k != 'samples'}
         intent_path = hasattr(self.path, 'program')
-        return native(dict(id=self.id, strategy=self.strategy, trajectory=path_spec(self.path),
+        card = dict(id=self.id, strategy=self.strategy, trajectory=path_spec(self.path),
             physical_valid=self.validation.feasible, prediction=numeric,
             visual=consequences, valid_before_s=self.path.activation_s,
             approval_scope=('exact camera motion program, directed intent intervals and physical timing; no WBC prediction'
-                if intent_path else 'this exact camera target path and full activation/hold/recovery process only; robot execution is predicted, not prescribed')))
+                if intent_path else 'this exact camera target path and full activation/hold/recovery process only; robot execution is predicted, not prescribed'))
+        if self.kinematics is not None:
+            from .kinematic_feasibility import summary
+            card['kinematic_feasibility'] = summary(self.kinematics)
+        return native(card)
 
 
 @dataclass(frozen=True)
@@ -365,7 +374,8 @@ def verify_candidate(candidate, approval, original, scene, state, previous, t, b
         validation=full, snapshot_time_s=t, scene=scene, wall_s=time.monotonic()-begin)
 
 
-def installation_guard(result, active, scene, state, t, budget):
+def installation_guard(result, active, scene, state, t, budget, *, measured_control=None, previous=None,
+                       commanded_q=None, base_rotation=None, base_z=None):
     """Cheap bounded checks after the worker returns; no rebasing an approved path."""
     candidate, approval = result['candidate'], result['approval']
     if np.asarray(state).shape != (9,) or not np.isfinite(state).all() or not np.isfinite(t):
@@ -385,7 +395,8 @@ def installation_guard(result, active, scene, state, t, budget):
         return 'missing_execution_prediction'
     times = np.array([row['t'] for row in trace])
     if result.get('prediction_model') == 'floating_camera':
-        p,r,_ = whole_body_kinematics(state,result['base_z'])
+        latest_z = result['base_z'] if base_z is None else base_z
+        p,r,_ = whole_body_kinematics(state,latest_z,base_rotation)
         positions = np.array([row['position'] for row in trace])
         expected = np.array([np.interp(t,times,positions[:,j]) for j in range(3)])
         from scipy.spatial.transform import Slerp
@@ -397,6 +408,24 @@ def installation_guard(result, active, scene, state, t, budget):
             whole_body_prediction='not_performed')
         if position_error > .04 or angle_error > .08:
             return 'camera_left_verified_state_neighborhood'
+        if 'kinematics' in result:
+            from .kinematic_feasibility import installation_error, KinematicSearch
+            velocity = measured_control if measured_control is not None else previous
+            if velocity is None:
+                return 'missing_latest_velocity_for_kinematic_gate'
+            error = installation_error(result['kinematics'], state, velocity, t, result['kinematic_limits'])
+            if error:
+                return error
+            if velocity is not None:
+                latest = KinematicSearch(state, previous if previous is not None else velocity,
+                    t, latest_z, result['kinematic_limits'], measured_control=measured_control,
+                    commanded_q=commanded_q, base_rotation=base_rotation)
+                error = latest.initial_error()
+                _, lo, hi = latest.constraints(latest.state, latest.velocity, .02, t,
+                                               latest.commanded_q, initial=True)
+                if error or np.any(lo > hi):
+                    return 'latest_kinematic_state_invalid:'+(error or 'braking_or_acceleration_infeasible')
+            result['installation_diagnostics']['kinematic_state'] = 'pass'
     else:
         predicted = np.array([row['state'] for row in trace])
         expected = np.array([np.interp(t, times, predicted[:, j]) for j in range(9)])
