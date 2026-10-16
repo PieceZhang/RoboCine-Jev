@@ -134,17 +134,18 @@ class LatestMaskWorker:
         self.future = None
         self.dropped = 0
 
-    def submit(self, rgb, stamp):
+    def submit(self, rgb, stamp, metadata=None):
         if self.future is not None:
             self.dropped += 1
             return False
         self.started = time.monotonic()
-        self.future = self.pool.submit(self._observe, rgb.copy(), float(stamp))
+        self.future = self.pool.submit(self._observe, rgb.copy(), float(stamp), dict(metadata or {}))
         return True
 
-    def _observe(self, rgb, stamp):
+    def _observe(self, rgb, stamp, metadata):
         started = time.monotonic()
         result = self.observer(rgb, stamp)
+        result.update(metadata)
         finished = time.monotonic()
         return result, finished-started, finished
 
@@ -189,7 +190,7 @@ def main(args=None):
     class ObserverNode(Node):
         def __init__(self):
             super().__init__('cinematic_sam_observer')
-            for key, value in dict(image_topic='/camera/image_raw', subject_id='',
+            for key, value in dict(image_topic='/camera/image', subject_id='',
                 seed_box=[0., 0., 0., 0.], checkpoint='', config='configs/sam2.1/sam2.1_hiera_b+.yaml',
                 device='cuda', sam_python='python3', observation_rate_hz=4.).items():
                 self.declare_parameter(key, value)
@@ -224,7 +225,8 @@ def main(args=None):
                         now-self.last_submission_wall >= self.submission_period):
                     stamp = message.header.stamp.sec+message.header.stamp.nanosec*1e-9
                     if stamp > self.last_submitted:
-                        self.worker.submit(rgb_from_message(message), stamp)
+                        self.worker.submit(rgb_from_message(message), stamp,
+                            metadata=dict(camera_frame=message.header.frame_id))
                         self.last_submitted = stamp
                         self.last_submission_wall = now
             except Exception as error:

@@ -7,6 +7,7 @@ import argparse
 import json
 from pathlib import Path
 import subprocess
+import shutil
 import sys
 import cv2
 import numpy as np
@@ -108,6 +109,14 @@ def main():
         from audit_tpr_video import audit
         if not audit(args.run)['pass_motion']:
             raise RuntimeError('visible obstacle motion does not match telemetry; see video_motion_audit.json')
+    if physical and (args.run/'video/camera_output.json').exists():
+        comparison=args.run/'video/comparison.mp4'
+        if not comparison.is_file():
+            raise RuntimeError('default three-camera PhysX video is missing')
+        if comparison.resolve()!=output.resolve():
+            shutil.copy2(comparison,output)
+        print(output)
+        return
     frame_times=np.array([r['t'] for r in metadata])
     renderer=None if videos else geometry_renderer()
     reference=summary.get('received_camera_position',rows[0]['camera_position'])

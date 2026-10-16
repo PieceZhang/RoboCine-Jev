@@ -37,12 +37,17 @@ def main():
     parser.add_argument('--velocity-window-ms', type=float, default=2.)
     parser.add_argument('--yaw-response-s', type=float, default=0.)
     parser.add_argument('--yaw-acceleration', type=float, default=.3)
+    from jev_agent_wbc.camera_output import add_camera_arguments
+    add_camera_arguments(parser)
     args = parser.parse_args()
     backend.validate_args(args)
     from isaacsim import SimulationApp
     app = SimulationApp(dict(headless=True, width=args.width, height=args.height,
                              renderer='RaytracedLighting', anti_aliasing=0, multi_gpu=False))
     try:
+        if args.publish_camera_ros:
+            import omni.kit.app
+            omni.kit.app.get_app().get_extension_manager().set_extension_enabled_immediate('isaacsim.ros2.bridge', True)
         run(args, app)
     finally:
         app.close()
@@ -71,6 +76,8 @@ def run(args, app):
     args.output.mkdir(parents=True, exist_ok=False)
     save_json(args.output/'provenance.json',source_manifest(ROOT,
         {key:str(value) if isinstance(value,Path) else value for key,value in vars(args).items()}))
+    from jev_agent_wbc.camera_output import CameraOutput
+    camera_output = CameraOutput.from_args(args)
     sim = controller = recorder = audit = None
     rows, contacts, failure = [], [], ''
     obstacle_position_error=0.;obstacle_samples=0
@@ -168,6 +175,7 @@ def run(args, app):
         velocity_samples=deque([measured.copy()],maxlen=window)
         base_samples=deque([np.r_[robot.get_linear_velocity(),robot.get_angular_velocity()]],maxlen=window)
         audit = PhysicsAudit(str(args.output),physical_limits,1/args.physics_hz)
+        camera_output.update(0., reference.p, reference.r, cp, cr)
 
         def on_contacts(headers, data):
             for h in headers:
@@ -175,7 +183,7 @@ def run(args, app):
                 if any('/FlyingBall' in p for p in paths) and any(p.startswith(robot_scope+'/') for p in paths):
                     contacts.append(dict(t=physical_t,actors=paths,points=int(h.num_contact_data)))
         subscription = get_physx_simulation_interface().subscribe_contact_report_events(on_contacts)
-        if args.record:
+        if args.record or args.publish_camera_ros:
             recorder = RGBPair(stage,sim,args,args.output,robot_scope,subject_data)
             overview = np.array([1.45,-1.75,1.12])
             recorder.pose('overview',overview,look_at(overview,np.array([.05,0.,.46])))
@@ -204,17 +212,21 @@ def run(args, app):
             truth=DynamicCollision(observed_scene,t,uncertainty_rate=0.)
             fk,fr,_=whole_body_kinematics(state,bp[2],br)
             obstacle_requested,_=flight(t,args.period)
+            output_p, output_r = camera_output.pose(t)
             rows.append(dict(t=t,state=state.tolist(),command=u.tolist(),measured=measured.tolist(),
                 estimated_velocity=controller.measured_control.tolist(),velocity_window_ms=args.velocity_window_ms,
                 obstacle=obstacle_measured.tolist(),obstacle_requested=obstacle_requested.tolist(),
-                camera_position=cp.tolist(),camera_rotation=cr.tolist(),
+                **{key:value for key,value in camera_output.latest.items() if key != 't'},
+                camera_rotation=output_r.tolist(), actual_camera_rotation=cr.tolist(),
                 obstacle_physx_position=obstacle_measured.tolist(),obstacle_usd_position=obstacle_usd.tolist(),
-                position_error_m=float(np.linalg.norm(cp-reference.p)),
-                orientation_error_rad=float(np.linalg.norm(Rotation.from_matrix(cr@reference.r.T).as_rotvec())),
+                position_error_m=float(np.linalg.norm(output_p-reference.p)),
+                orientation_error_rad=float(np.linalg.norm(Rotation.from_matrix(output_r@reference.r.T).as_rotvec())),
                 clearance_m=float(truth.clearance(state,bp[2],br).min()),
                 base_z=float(bp[2]),base_rotation=br.tolist(),fk_error_m=float(np.linalg.norm(fk-cp)),info=info))
             if recorder and t+1e-8>=next_frame:
-                recorder.capture(t,reference.p,reference.r,cp,cr,None)
+                value=camera_output.latest
+                sp=np.array(value['stabilized_camera_position']);sr=Rotation.from_quat(value['stabilized_camera_quaternion_xyzw']).as_matrix()
+                recorder.capture(t,reference.p,reference.r,cp,cr,None,stabilized_pose=(sp,sr))
                 next_frame+=1/args.record_fps
             if tick%100==0:
                 print(f'TPR_PHYSX t={t:.2f} error={rows[-1]["position_error_m"]:.6f} clearance={rows[-1]["clearance_m"]:.4f} yaw={state[2]:.4f} omega_command={u[1]:.4f} status={info["tpr_status"]}',flush=True)
@@ -234,7 +246,7 @@ def run(args, app):
                 obstacle_samples+=1
                 if obstacle_position_error>1e-5:
                     raise RuntimeError('physical obstacle did not follow its kinematic target')
-                ss=observe();audit.record(physical_t,ss[0][3:],ss[3],ss[4],ss[5])
+                ss=observe();camera_output.update(physical_t,reference.p,reference.r,ss[6],ss[7]);audit.record(physical_t,ss[0][3:],ss[3],ss[4],ss[5])
                 velocity_samples.append(ss[3].copy())
                 base_samples.append(np.r_[robot.get_linear_velocity(),robot.get_angular_velocity()])
             if tick%10==0:
@@ -259,6 +271,7 @@ def run(args, app):
         summary['obstacle_motion_audit']=dict(samples=obstacle_samples,
             physics_position_max_error_m=obstacle_position_error,
             render_pose_source='PhysX collider read-back copied to a non-colliding display sphere before capture')
+        summary['camera_output_source']=camera_output.source
         summary['received_camera_position']=reference.p.tolist() if rows else None
         summary['received_camera_rotation']=reference.r.tolist() if rows else None
         if rows:
@@ -279,7 +292,7 @@ def run(args, app):
         save_json(args.output/'summary.json',summary)
         save_json(args.output/'telemetry.json',rows)
         save_json(args.output/'contacts.json',contacts)
-        if recorder and rows:
+        if recorder and rows and args.record:
             try:
                 from audit_tpr_video import audit as audit_video
                 motion=audit_video(args.output)

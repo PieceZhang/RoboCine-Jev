@@ -323,16 +323,19 @@ def draw_frame(run,t,cutoff=None,label='',end=False):
         if i==4 and s['decision'].get('event')=='continuation_selected':suffix='不适用'
         txt(d,(x+10,103),f'{i+1} {name} · {suffix}',20,GREEN if flags[i] else MUTED,width=283)
     captures=[]
-    for col,title in enumerate(['独立相机（无底盘 / 机械臂）' if run.floating else 'CPU 相机位姿（整机 FK 示意）' if run.cpu else 'PhysX 整机实录',
-                               ('同进度参考相机画面' if run.intent_planner else '原始参考相机画面')+('（示意）' if run.cpu else ''),
-                               'CPU 执行相机画面（示意）' if run.cpu else 'PhysX 实际执行 RGB']):
+    modern_camera = not run.cpu and (run.folder/'video/camera_output.json').exists()
+    titles = (['原始参考相机画面', '原始实际执行相机（中间检查）', '增稳相机（默认输出）']
+        if modern_camera else ['独立相机（无底盘 / 机械臂）' if run.floating else 'CPU 相机位姿（整机 FK 示意）' if run.cpu else 'PhysX 整机实录',
+            ('同进度参考相机画面' if run.intent_planner else '原始参考相机画面')+('（示意）' if run.cpu else ''),
+            'CPU 执行相机画面（示意）' if run.cpu else 'PhysX 实际执行 RGB'])
+    for col,title in enumerate(titles):
         x=16+col*640;txt(d,(x,151),title,21)
         if run.cpu:
             pic=synthetic_view(run,t,overview=col==0,reference=col==1)
         else:
             idx=max(0,np.searchsorted(run.frame_times,t+1e-9,side='right')-1)
             capture=run.frames[idx];captures.append(capture['t'])
-            stream=['overview','reference','execution'][col];key=(idx,stream)
+            stream=(['reference','execution','stabilized'] if modern_camera else ['overview','reference','execution'])[col];key=(idx,stream)
             if key not in run.image_cache:
                 src=Image.open(run.folder/'video'/stream/f'{idx:05d}.jpg').convert('RGB');src.thumbnail((624,300))
                 pic=Image.new('RGB',(624,300),'#0b111c');pic.paste(src,((624-src.width)//2,(300-src.height)//2));run.image_cache[key]=pic

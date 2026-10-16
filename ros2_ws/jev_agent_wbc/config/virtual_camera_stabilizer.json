@@ -1,0 +1,8 @@
+{
+  "translation_cutoff_hz": 0.5,
+  "rotation_cutoff_hz": 0.5,
+  "stages": 2,
+  "max_translation_correction_m": 0.12,
+  "max_rotation_correction_deg": 8.0,
+  "reset_gap_s": 0.15
+}

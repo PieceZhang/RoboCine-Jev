@@ -1,0 +1,75 @@
+Reference-aware Virtual Camera Stabilization
+
+默认行为
+PhysX 相机输出默认 source=stabilized。无需额外 ROS 进程即可运行本地因果滤波。
+新录制的 video/comparison.mp4 默认从左到右并排展示：
+1. 原始参考相机画面（原始轨迹与静态参考场景）；
+2. 原始实际执行相机画面（中间检查）；
+3. 增稳相机画面（默认 camera 输出）。
+原始参考使用原时间戳，不会被 Agent 新轨迹替换。滤波参考采用 WBC 实际接收的 active.sample(t)。
+Raw 与 Stabilized 来自同一 render pass；参考是独立静态渲染 pass，按相同记录时间戳配对。
+video/camera/ 和 video/camera.mp4 指向默认输出。video/camera_output.json 明确声明来源。
+video/execution/、execution.mp4 和 actual_camera_* 只保留作真实运动与控制检查。
+
+Agent 和评价
+PhysX Agent 的相机反馈、主体画面投影及相机历史使用增稳输出的采集时刻位姿。
+遥测 camera_position/camera_quaternion_xyzw 是所选 camera 输出，另存 actual_camera_* 与 stabilized_camera_*。
+标准视觉结果、轨迹画面质量、拍摄意图评价使用 camera 输出。SAM2 默认按 camera_output.json 读取增稳帧和对应位姿。
+WBC 始终接收真实关节、底盘和物理速度；物理碰撞、约束、FK 检查继续使用真实状态。
+增稳不会把物理验收失败改写为通过。physical_camera_tracking 保存原始相机跟踪诊断。
+旧录制没有 camera 输出声明时按历史 execution 数据读取；声明增稳但缺失增稳数据时会报错，不静默退回原始画面。
+render_agent_demos.py 和固定相机 PhysX demo 同样默认展示三个相机视角。
+
+运行（仓库根目录）
+source /opt/ros/humble/setup.bash
+export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1
+export OMNI_KIT_ACCEPT_EULA=YES ACCEPT_EULA=Y
+export PYTHONPATH="$PWD/ros2_ws/jev_agent_wbc:${PYTHONPATH:-}"
+stabilization_output=$(mktemp -d /tmp/virtual_camera_stabilization.XXXXXX)
+/usr/bin/python3 ros2_ws/jev_agent_wbc/scripts/jvs_isaac_bootstrap.py \
+  --isaac-python "$HOME/miniconda3/envs/env_isaaclab/bin/python" \
+  --runner "$PWD/ros2_ws/jev_agent_wbc/scripts/run_isaac.py" -- \
+  --case orbit --mode strict --headless true --pace 0 \
+  --output "$stabilization_output" --record --record-fps 25 --width 640 --height 480
+
+ROS launch cinematic_wbc.launch.py 的 camera_output 默认也是 stabilized，并默认发布 ROS camera。
+独立脚本可加 --publish-camera-ros 启用同一发布器：
+/camera/image 是默认增稳 RGB，/camera/pose 与 /camera/camera_info 提供对应几何。
+/camera/debug/execution/image 仅用于检查真实执行画面。TF 的 odom → virtual_camera_stabilized 与 RGB 使用相同采集时间戳；轴约定与 camera_link 相同。
+SAM observer 默认订阅 /camera/image，并把采集时刻 frame_id 随异步结果传递。
+ROS 控制入口等待新鲜的默认 camera pose 后启动；输出过期时请求约束制动，不会静默换回原始相机。控制节点按该 frame_id 查询 TF，不再把增稳画面配上原始 camera_link 的位姿。
+--camera-output execution 是显式的原始输出对照选项；并排视频仍保留三视角。
+--stabilizer-config config.json 可覆盖滤波参数。
+--skip-reference-video 是显式调试选项，会同时跳过参考录像及三视角合成。
+
+可选独立 ROS 后端
+默认本地后端没有额外 DDS 等待；--virtual-stabilizer-ros 可改用之前验证过的独立节点。
+两个终端设置相同空闲 ROS_DOMAIN_ID 和 ROS_LOCALHOST_ONLY=1。节点启动命令：
+/usr/bin/python3 -m jev_agent_wbc.virtual_stabilizer_ros \
+  --config ros2_ws/jev_agent_wbc/config/virtual_camera_stabilizer.json
+然后在上述 Isaac 命令加入 --virtual-stabilizer-ros。节点配置决定 ROS 后端的滤波参数。
+安装后也可用 ros2 run jev_agent_wbc cinematic_stabilizer。
+节点通过 /virtual_camera/input 和 /virtual_camera/output（std_msgs/String JSON）交换有序物理采样批次。
+相同 session/sequence/时间戳匹配后才使用输出；不同 session 重置滤波。
+这是锁步仿真接口，墙钟等待不推进仿真时间，未承诺全链路硬实时。
+
+算法与局限
+世界 Z-up，camera_link 轴 X 向前、Y 向左、Z 向上。
+xi = Log(inverse(T_ref) T_actual)
+T_stabilized = T_ref Exp(LPF(xi))
+SE(3) 指数/对数包含平移和旋转耦合。默认平移、旋转各 2 个 0.5 Hz 极点串联。
+修正上限 0.12 m / 8°；时间回退、间隔超过 0.15 s 或接近 180° 误差时重新初始化。
+保留正常参考运动及低频跟踪偏差。参考自身的高频运动会保留。
+为避免虚拟相机进入原相机外壳而发生黑挡，增稳相机近裁剪为 0.05 + 修正距离 + 0.01 m。
+内参相同，近裁剪逐帧记录；很近的前景可能因此被裁掉。
+
+验证与诊断
+PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
+  /usr/bin/python3 -m pytest -q ros2_ws/jev_agent_wbc/test/test_virtual_stabilizer.py \
+  ros2_ws/jev_agent_wbc/test/test_camera_output.py
+/usr/bin/python3 ros2_ws/jev_agent_wbc/scripts/analyze_virtual_stabilization.py \
+  "$stabilization_output/orbit_strict"
+/usr/bin/python3 ros2_ws/jev_agent_wbc/scripts/tune_virtual_stabilization.py \
+  "$stabilization_output/orbit_strict" --output /tmp/new_stabilization_sweep
+virtual_camera_physics.json 保存物理采样率的参考、实际和增稳位姿。原始相机仅用于这些中间诊断。
+离线高通评分使用零相位滤波；实时输出始终使用因果滤波，不使用未来帧。

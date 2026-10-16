@@ -52,10 +52,12 @@ def segment(predictor, directory, device):
 
 
 def evaluate(predictor, folder, model_info):
+    from jev_agent_wbc.camera_output import video_camera_source, frame_camera_pose
     video = folder/'video'
+    camera_source = video_camera_source(video)
     frames = json.loads((video/'frames.json').read_text())
     reference, reference_status = segment(predictor, video/'reference', model_info['device'])
-    actual, actual_status = segment(predictor, video/'execution', model_info['device'])
+    actual, actual_status = segment(predictor, video/camera_source, model_info['device'])
     if len(reference) != len(actual) or len(frames) != len(actual):
         raise ValueError('frame correspondence mismatch; refusing to retime evaluation')
     values = []
@@ -67,7 +69,7 @@ def evaluate(predictor, folder, model_info):
                    phase=next((p['name'] for p in task['shot_phase'] if f['t'] < p['end_s']), task['shot_phase'][-1]['name']),
                    execution_segmentation_status=actual_status[i],
                    observation_angle_error_rad=observation_angle(f['reference_camera_position'],
-                       f['actual_camera_position'], f.get('subject_track') or {}),
+                       frame_camera_pose(f, camera_source)[0], f.get('subject_track') or {}),
                    visibility=f.get('visibility', {'available': False}))
         values.append(row)
     def stats(key, rows=None):
@@ -77,7 +79,8 @@ def evaluate(predictor, folder, model_info):
                     mean=None if not vals else float(np.mean(vals)),
                     rms=None if not vals else float(np.sqrt(np.mean(np.asarray(vals)**2))),
                     max=None if not vals else float(np.max(vals)))
-    result = dict(model=model_info, correspondence='original_elapsed_time; no time warping', frames=len(values),
+    result = dict(model=model_info, camera_output_source=camera_source,
+        correspondence='original_elapsed_time; no time warping', frames=len(values),
         composition_error=stats('composition_error'), subject_scale_error=stats('subject_scale_error'),
         observation_angle_error_rad=stats('observation_angle_error_rad'),
         segmentation_failure_frames=sum(not row['valid'] for row in values),

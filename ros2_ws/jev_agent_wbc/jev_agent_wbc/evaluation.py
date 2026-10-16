@@ -127,7 +127,18 @@ def trajectory_summary(rows, original, engine_summary, failure='', physical_audi
         if (previous['info'].get('active_decision') != current['info'].get('active_decision') or
                 bool(previous['info'].get('dynamic_constraint_count', 0)) != bool(current['info'].get('dynamic_constraint_count', 0))):
             event_times.append(current['t'])
+    physical_camera_tracking = None
+    if all('actual_camera_position' in row for row in rows):
+        raw_positions = np.array([row['actual_camera_position'] for row in rows])
+        raw_quaternions = np.array([row['actual_camera_quaternion_xyzw'] for row in rows])
+        raw_angles = np.array([np.linalg.norm(Rotation.from_matrix(pose[1]@Rotation.from_quat(q).as_matrix().T).as_rotvec())
+                               for pose, q in zip(poses, raw_quaternions)])
+        physical_camera_tracking = dict(role='intermediate physical diagnostic',
+            position_rms_m=float(np.sqrt(np.mean(np.sum((raw_positions-nominal)**2, axis=1)))),
+            orientation_rms_rad=float(np.sqrt(np.mean(raw_angles**2))))
     return native(dict(**engine_summary, evaluation_protocol=EVALUATION_PROTOCOL,
+        camera_output_source=rows[0].get('camera_output_source', 'execution'),
+        physical_camera_tracking=physical_camera_tracking,
         evaluation_sha256=digest(EVALUATION_PROTOCOL), completed=bool(finished and not failure), failure=failure,
         within_budget_success=bool(finished and not failure and safe and task_preserved and all(p['completed'] for p in phases)),
         received_task_preserved=task_preserved,

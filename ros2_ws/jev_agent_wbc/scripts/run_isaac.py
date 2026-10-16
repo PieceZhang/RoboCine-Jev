@@ -35,6 +35,10 @@ def arguments():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--model', default='perplexity', help='explicit backend model ID')
     parser.add_argument('--api-url', default='http://127.0.0.1:8000/v1/systemone')
+    from jev_agent_wbc.camera_output import add_camera_arguments
+    add_camera_arguments(parser)
+    parser.add_argument('--virtual-stabilizer-ros', action='store_true', help='independent reference-aware virtual camera via timestamped ROS batches')
+    parser.add_argument('--skip-reference-video', action='store_true', help='record raw/stabilized/overview only')
     parser.add_argument('--record', action='store_true')
     parser.add_argument('--record-fps', type=float, default=8.)
     parser.add_argument('--width', type=int, default=384)
@@ -96,7 +100,11 @@ def run_case(args, app, name, mode, output):
     save_json(output/'original_task.json', reference.task)
     save_json(output/'runtime_scene.json', fixture)
     save_json(output/'evaluation_protocol.json', EVALUATION_PROTOCOL)
-    engine = audit = recorder = None
+    engine = audit = recorder = stabilizer_client = None
+    from jev_agent_wbc.camera_output import CameraOutput
+    camera_output = CameraOutput.from_args(args)
+    camera_samples = []
+    stabilized_pose = None
     rows, contacts, failure = [], [], ''
     prediction_snapshots = []
     recording_error = ''
@@ -289,6 +297,34 @@ def run_case(args, app, name, mode, output):
         engine.wbc.measured_limits=physical_limits
         audit.record(0., state[3:], measured, wheels, lateral)
         physical_t = 0.
+        if args.virtual_stabilizer_ros:
+            from jev_agent_wbc.virtual_stabilizer_ros import StabilizerClient
+            stabilizer_client = StabilizerClient(str(output.resolve()))
+
+        def stabilize_batch(samples):
+            nonlocal stabilized_pose
+            if stabilizer_client:
+                values = stabilizer_client.update(samples)
+            else:
+                values = []
+                for sample in samples:
+                    sp, sr, info = camera_output.filter.update(sample['t'], sample['rp'], sample['rr'], sample['ap'], sample['ar'])
+                    values.append(dict(t=sample['t'], p=sp.tolist(), r=sr.tolist(), info=info))
+            if len(values) != len(samples):
+                raise RuntimeError('stabilizer dropped physics samples')
+            for source, result in zip(samples, values):
+                if abs(source['t']-result['t']) > 1e-10:
+                    raise RuntimeError('stabilizer timestamp mismatch')
+                camera_samples.append(dict(**source, stabilized=result))
+                camera_output.accept(source['t'], source['ap'], source['ar'], result['p'], result['r'], result['info'])
+            stabilized_pose = (np.array(values[-1]['p']), np.array(values[-1]['r']))
+
+        def camera_sample(stamp, position, rotation):
+            rp, rr, _ = engine.active.sample(stamp)
+            return dict(t=float(stamp), rp=rp.tolist(), rr=rr.tolist(),
+                        ap=position.tolist(), ar=rotation.tolist())
+
+        stabilize_batch([camera_sample(0., cp, cr)])
 
         def on_contacts(headers, data):
             for h in headers:
@@ -302,7 +338,7 @@ def run_case(args, app, name, mode, output):
                         print('CONTACT_DEBUG '+json.dumps(contacts[-1]), flush=True)
 
         subscription = get_physx_simulation_interface().subscribe_contact_report_events(on_contacts)
-        if args.record:
+        if args.record or args.publish_camera_ros:
             recorder = RGBPair(stage, sim, args, output, robot_scope, subject_data)
         print(f'JEV_ISAAC_READY case={name} mode={mode} surfaces={len(observed["surfel_centers"])}', flush=True)
         run_start = time.monotonic()
@@ -327,6 +363,8 @@ def run_case(args, app, name, mode, output):
                     previous=engine.wbc.previous.copy(), commanded_q=q_command.copy(),
                     base_z=float(bp[2]), base_rotation=br.copy(),
                     active_is_original=engine.active is reference))
+            output_p, output_r = camera_output.pose(t)
+            engine.set_camera_output(t, output_p, output_r, source=camera_output.source)
             try:
                 command, info = engine.step(state, observed, t, dt, base_z=bp[2], base_rotation=br, commanded_q=q_command, measured_control=measured,
                                            measured_base_twist=np.r_[robot.get_linear_velocity(),robot.get_angular_velocity()])
@@ -346,13 +384,13 @@ def run_case(args, app, name, mode, output):
                 base_z=float(bp[2]), base_rotation=br.tolist(),
                 commanded_q=q_command.tolist(),
                 measured_wheels=wheels.tolist(), measured_lateral_velocity=float(lateral),
-                camera_position=cp.tolist(), camera_quaternion_xyzw=Rotation.from_matrix(cr).as_quat().tolist(),
+                **{key:value for key,value in camera_output.latest.items() if key != 't'},
                 subject_track=subject_track, truth_clearance_m=clearance, info=info))
             rows[-1]['runtime_tracks'] = observed.get('tracks', [])
             rows[-1]['sensor_diagnostics'] = observed.get('sensor_diagnostics', {})
             if recorder and t+1e-8 >= next_frame:
                 rp, rr, _ = reference.sample(t)
-                recorder.capture(t, rp, rr, cp, cr, subject_track)
+                recorder.capture(t, rp, rr, cp, cr, subject_track, stabilized_pose=stabilized_pose)
                 next_frame += 1/args.record_fps
             if k % 50 == 0:
                 print(json.dumps(dict(case=name, mode=mode, t=t, clearance=clearance, contacts=len(contacts),
@@ -360,6 +398,7 @@ def run_case(args, app, name, mode, output):
             if t >= reference.duration:
                 break
             requested_command = command.copy()
+            physics_camera_batch = []
             for j in range(substeps):
                 physical_t = t+(j+1)/args.physics_hz
                 # Interpolate the acceleration-bounded WBC command at physics rate.
@@ -370,7 +409,9 @@ def run_case(args, app, name, mode, output):
                 move_obstacles(physical_t)
                 sim.step(render=False)
                 measured_state = observe()
+                physics_camera_batch.append(camera_sample(physical_t, measured_state[6], measured_state[7]))
                 audit.record(physical_t, measured_state[0][3:], measured_state[3], measured_state[4], measured_state[5])
+            stabilize_batch(physics_camera_batch)
             previous_command = requested_command
             if k % 10 == 0:
                 sim.render()
@@ -401,6 +442,9 @@ def run_case(args, app, name, mode, output):
             operating_acceleration_fraction=args.acceleration_reserve,
             operating_yaw_acceleration_fraction=(args.yaw_acceleration_reserve
                 if args.yaw_acceleration_reserve is not None else args.acceleration_reserve),
+            camera_output_source=camera_output.source,
+            camera_output_role='primary Agent and visual evaluation input',
+            raw_camera_role='intermediate physical diagnostic',
             sensor_limitation='PhysX first-hit raycasting; no RTX material/noise/motion-distortion simulation',
             measured_physical_constraints=physical_summary is not None, recording_error=recording_error)
         if contact_count:
@@ -410,6 +454,10 @@ def run_case(args, app, name, mode, output):
         if prediction_snapshots:
             save_json(output/'prediction_snapshots.json', prediction_snapshots)
         save_json(output/'contacts.json', contacts)
+        if camera_samples:
+            save_json(output/'virtual_camera_physics.json', camera_samples)
+        if stabilizer_client:
+            stabilizer_client.close()
         if engine:
             engine.close()
         if sim:
@@ -425,14 +473,28 @@ class RGBPair:
         from pxr import Gf, UsdGeom
         self.cv2, self.rep, self.stage, self.sim, self.args = cv2, rep, stage, sim, args
         rep.orchestrator.set_capture_on_play(False)
+        self.recording = bool(getattr(args, 'record', True))
         self.root = output/'video'
         self.root.mkdir()
         self.frame_metadata = []
+        from jev_agent_wbc.camera_output import CameraOutput
+        self.camera_output = CameraOutput.from_args(args)
+        self.output_rgb = None
+        self.camera_publisher = None
+        if getattr(args, 'publish_camera_ros', False):
+            from jev_agent_wbc.camera_output_ros import CameraPublisher
+            self.camera_publisher = CameraPublisher(self.camera_output.source)
         self.subject = subject
-        self.hide_for_reference = [UsdGeom.Imageable(stage.GetPrimAtPath(robot_scope)),
-                                    UsdGeom.Imageable(stage.GetPrimAtPath('/World/Moving'))]
+        self.hide_for_reference = [UsdGeom.Imageable(stage.GetPrimAtPath(path))
+            for path in (robot_scope, '/World/Moving', '/World/MovingDisplay')
+            if stage.GetPrimAtPath(path).IsValid()]
         self.cameras, self.products, self.annotators, self.writers = {}, {}, {}, {}
-        for key in ('reference', 'execution', 'overview'):
+        self.camera_prims = {}
+        keys = ['execution', 'overview']
+        if self.recording and not getattr(args, 'skip_reference_video', False):
+            keys.append('reference')
+        keys.append('stabilized')
+        for key in keys:
             folder = self.root/key
             folder.mkdir()
             cam = UsdGeom.Camera.Define(stage, '/World/Eval_'+key)
@@ -443,16 +505,28 @@ class RGBPair:
             cam.CreateClippingRangeAttr(Gf.Vec2f(.05, 50.))
             translate, orient = cam.AddTranslateOp(), cam.AddOrientOp()
             self.cameras[key] = (translate, orient)
+            self.camera_prims[key] = cam
             product = rep.create.render_product(str(cam.GetPath()), (args.width, args.height))
             self.products[key] = product
             annotator = rep.AnnotatorRegistry.get_annotator('rgb')
             annotator.attach(product)
             self.annotators[key] = annotator
-            writer = cv2.VideoWriter(str(self.root/f'{key}.mp4'), cv2.VideoWriter_fourcc(*'mp4v'),
-                                     args.record_fps, (args.width, args.height))
-            if not writer.isOpened():
-                raise RuntimeError('cannot open RGB video writer')
-            self.writers[key] = writer
+            if self.recording:
+                writer = cv2.VideoWriter(str(self.root/f'{key}.mp4'), cv2.VideoWriter_fourcc(*'mp4v'),
+                                         args.record_fps, (args.width, args.height))
+                if not writer.isOpened():
+                    raise RuntimeError('cannot open RGB video writer')
+                self.writers[key] = writer
+        source = self.camera_output.source
+        (self.root/'camera').symlink_to(source, target_is_directory=True)
+        if self.recording:
+            (self.root/'camera.mp4').symlink_to(source+'.mp4')
+        (self.root/'camera_output.json').write_text(json.dumps(dict(schema='camera_output/v1',
+            source=source, image_directory=source, video=source+'.mp4' if self.recording else None,
+            recorded=self.recording,
+            comparison=None if not self.recording or getattr(args, 'skip_reference_video', False) else 'comparison.mp4',
+            views=[view for view in ('reference','execution','stabilized') if view in self.cameras],
+            raw_role='intermediate physical diagnostic', fps=args.record_fps))+'\n')
         from jev_agent_wbc.reference import look_at
         import numpy as np
         overview_position = np.array([2.6, -3.2, 2.1])
@@ -469,28 +543,63 @@ class RGBPair:
         self.cameras[key][0].Set(Gf.Vec3d(*map(float, position)))
         self.cameras[key][1].Set(Gf.Quatf(float(quat[3]), Gf.Vec3f(*map(float, quat[:3]))))
 
-    def capture(self, t, rp, rr, ap, ar, subject_track):
+    def capture(self, t, rp, rr, ap, ar, subject_track, stabilized_pose=None):
         import numpy as np
         from jev_agent_wbc.contracts import native
         from scipy.spatial.transform import Rotation
+        if stabilized_pose is None:
+            self.camera_output.update(t, rp, rr, ap, ar)
+            value = self.camera_output.latest
+            stabilized_pose = (np.array(value['stabilized_camera_position']), Rotation.from_quat(value['stabilized_camera_quaternion_xyzw']).as_matrix())
+        capture_clock_before = float(self.sim.current_time)
         self.pose('execution', ap, ar)
+        if stabilized_pose is not None:
+            self.pose('stabilized', *stabilized_pose)
+            from pxr import Gf
+            # Preserve the physical camera's near-plane clearance when the
+            # virtual viewpoint retreats into its visual housing. Intrinsics
+            # and far clip remain identical; foreground closer than this
+            # explicitly logged plane is excluded from the virtual image.
+            virtual_near_m = .05+float(np.linalg.norm(stabilized_pose[0]-ap))+.01
+            self.camera_prims['stabilized'].GetClippingRangeAttr().Set(Gf.Vec2f(virtual_near_m, 50.))
         # Keep all actors visible throughout execution. Repeatedly toggling USD
         # visibility between render products can leave a delayed reference image
         # containing the robot. Reference RGB is rendered in one isolated pass.
-        self.capture_rgb('execution', len(self.frame_metadata))
+        raw_rgb = self.capture_rgb('execution', len(self.frame_metadata))
         self.capture_rgb('overview', len(self.frame_metadata), advance_render=False)
-        record = dict(frame=len(self.frame_metadata), t=t,
+        if stabilized_pose is not None:
+            stabilized_rgb = self.capture_rgb('stabilized', len(self.frame_metadata), advance_render=False)
+        output_p, output_r = stabilized_pose if self.camera_output.source == 'stabilized' else (ap, ar)
+        self.output_rgb = (stabilized_rgb if self.camera_output.source == 'stabilized' else raw_rgb)[:, :, ::-1].copy()
+        if abs(float(self.sim.current_time)-capture_clock_before) > 1e-8:
+            raise RuntimeError('RGB capture advanced the physical simulation')
+        record = dict(frame=len(self.frame_metadata), t=t, physical_time_before_capture=capture_clock_before, physical_time_after_capture=float(self.sim.current_time),
             reference_camera_position=rp, actual_camera_position=ap,
             reference_camera_quaternion_xyzw=Rotation.from_matrix(rr).as_quat(),
             actual_camera_quaternion_xyzw=Rotation.from_matrix(ar).as_quat(), subject_track=subject_track,
-            visibility=self.visibility(ap, ar))
+            camera_output_source=self.camera_output.source,
+            camera_position=output_p, camera_quaternion_xyzw=Rotation.from_matrix(output_r).as_quat(),
+            visibility=self.visibility(output_p, output_r), actual_visibility=self.visibility(ap, ar))
+        if stabilized_pose is not None:
+            record['stabilized_camera_position'] = stabilized_pose[0]
+            record['stabilized_camera_quaternion_xyzw'] = Rotation.from_matrix(stabilized_pose[1]).as_quat()
+            record['capture_protocol'] = 'same_render_pass_same_simulation_timestamp'
+            record['stabilized_near_clip_m'] = virtual_near_m
+            record['raw_near_clip_m'] = .05
         if not self.frame_metadata:
             # A deterministic first-frame box from known evaluation fixture geometry,
             # used only to identify SAM's object, never as its measured mask.
-            for key, p, r in [('reference', rp, rr), ('execution', ap, ar)]:
+            for key, p, r in [('reference', rp, rr), ('execution', ap, ar), ('stabilized', *stabilized_pose)]:
+                if key not in self.cameras:
+                    continue
                 box = self.project_box(p, r)
                 (self.root/key/'seed.json').write_text(json.dumps(dict(box_xyxy=box,
                     source='first_frame_projected_subject_fixture_bbox; offline_initialization_only'))+'\n')
+        if self.camera_publisher is not None:
+            intrinsics = [.5*self.args.height/self.args.width/np.tan(np.deg2rad(27.5)),
+                          .5/np.tan(np.deg2rad(27.5)), .5, .5]
+            self.camera_publisher.publish(self.output_rgb, raw_rgb[:, :, ::-1].copy(),
+                record, capture_clock_before, intrinsics)
         self.frame_metadata.append(native(record))
         with (self.root/'frames.jsonl').open('a') as journal:
             journal.write(json.dumps(self.frame_metadata[-1], allow_nan=False)+'\n')
@@ -503,9 +612,11 @@ class RGBPair:
         if rgba.ndim != 3 or rgba.shape[:2] != (self.args.height, self.args.width):
             raise RuntimeError(f'RGB annotator is not ready: {key} {rgba.shape}')
         bgr = self.cv2.cvtColor(rgba[:, :, :3].copy(), self.cv2.COLOR_RGB2BGR)
-        if not self.cv2.imwrite(str(self.root/key/f'{index:05d}.jpg'), bgr):
-            raise RuntimeError('could not save paired RGB frame')
-        self.writers[key].write(bgr)
+        if self.recording:
+            if not self.cv2.imwrite(str(self.root/key/f'{index:05d}.jpg'), bgr):
+                raise RuntimeError('could not save paired RGB frame')
+            self.writers[key].write(bgr)
+        return bgr
 
     def project_box(self, p, r):
         import numpy as np
@@ -553,6 +664,12 @@ class RGBPair:
         from scipy.spatial.transform import Rotation
         rendered = 0
         try:
+            if not self.recording or getattr(self.args, 'skip_reference_video', False):
+                return
+            if self.frame_metadata:
+                first = self.frame_metadata[0]
+                self.pose('reference', first['reference_camera_position'],
+                    Rotation.from_quat(first['reference_camera_quaternion_xyzw']).as_matrix())
             for obj in self.hide_for_reference:
                 obj.MakeInvisible()
             # Flush visibility changes once, outside the shot/control clock.
@@ -570,19 +687,30 @@ class RGBPair:
                 writer.release()
             save_json(self.root/'frames.json', self.frame_metadata)
             save_json(self.root/'reference_rendering.json', dict(
-                protocol='static_reference_separate_pass/v2', frames_expected=len(self.frame_metadata),
-                frames_written=rendered, valid=rendered == len(self.frame_metadata),
+                protocol='static_reference_separate_pass/v2',
+                skipped=not self.recording or bool(getattr(self.args, 'skip_reference_video', False)),
+                frames_expected=0 if not self.recording or getattr(self.args, 'skip_reference_video', False) else len(self.frame_metadata),
+                frames_written=rendered,
+                valid=None if not self.recording or getattr(self.args, 'skip_reference_video', False) else rendered == len(self.frame_metadata),
                 scope='stationary subject and background fixture; original-time camera poses; not online perception'))
-            for annotator in self.annotators.values():
-                try:
-                    annotator.detach()
-                except RuntimeError:
-                    pass
-            for product in self.products.values():
-                try:
-                    product.destroy()
-                except RuntimeError:
-                    pass
+            try:
+                if self.recording and not getattr(self.args, 'skip_reference_video', False):
+                    from jev_agent_wbc.camera_output import write_three_camera_video
+                    comparison = write_three_camera_video(self.root, self.frame_metadata, self.args.record_fps)
+                    save_json(self.root/'comparison.json', comparison)
+            finally:
+                for annotator in self.annotators.values():
+                    try:
+                        annotator.detach()
+                    except RuntimeError:
+                        pass
+                for product in self.products.values():
+                    try:
+                        product.destroy()
+                    except RuntimeError:
+                        pass
+                if self.camera_publisher is not None:
+                    self.camera_publisher.close()
 
 
 def main():
@@ -598,6 +726,8 @@ def main():
         import omni.kit.app
         manager = omni.kit.app.get_app().get_extension_manager()
         manager.set_extension_enabled_immediate('isaacsim.asset.importer.urdf', True)
+        if args.virtual_stabilizer_ros or args.publish_camera_ros:
+            manager.set_extension_enabled_immediate('isaacsim.ros2.bridge', True)
         for _ in range(3):
             app.update()
         from jev_agent_wbc.scenarios import NAMES

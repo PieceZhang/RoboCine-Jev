@@ -13,7 +13,7 @@ def start(context, share):
         '--isaac-python', value('isaac_python'), '--runner', str(share/'scripts/run_isaac.py'), '--',
         '--case', value('case'), '--mode', value('mode'), '--output', value('output_directory'),
         '--physics-hz', value('physics_hz'), '--pace', value('real_time_factor'),
-        '--api-url', value('api_url'), '--headless', 'true']
+        '--api-url', value('api_url'), '--camera-output', value('camera_output'), '--publish-camera-ros', '--headless', 'true']
     if value('record').lower() in ('1', 'true', 'yes'):
         command.append('--record')
     return [ExecuteProcess(cmd=command, output='screen',
@@ -23,7 +23,7 @@ def start(context, share):
 def generate_launch_description():
     share = Path(get_package_share_directory('jev_agent_wbc'))
     defaults = dict(case='all', mode='jev', output_directory='/tmp/jev_cinematic_isaac',
-        physics_hz='1000', real_time_factor='.2', record='true',
+        physics_hz='1000', real_time_factor='.2', record='true', camera_output='stabilized',
         api_url='http://127.0.0.1:8000/v1/systemone',
         isaac_python=str(Path.home()/'miniconda3/envs/env_isaaclab/bin/python'))
     return LaunchDescription([*[DeclareLaunchArgument(k, default_value=v) for k, v in defaults.items()],

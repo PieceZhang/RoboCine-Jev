@@ -39,6 +39,7 @@ class CinematicEngine:
         self.last_geometry_feedback_s = -float('inf')
         self.camera_history = []
         self.actual_feedback = None
+        self.camera_output = None
         self.original = self.active = original
         self.mode, self.limits = mode, limits or Limits()
         # Planning may model avoidance independently of the execution controller.
@@ -233,6 +234,15 @@ class CinematicEngine:
         if status == 'fail' or cause == 'new_visibility_evidence_requires_review':
             self._feedback(cause, t, finish_pipeline=False)
 
+    def set_camera_output(self, stamp_s, position, rotation, *, source='stabilized', max_age_s=0.):
+        """Acquisition-time virtual camera geometry; robot state remains physical."""
+        p, r = np.asarray(position, float), np.asarray(rotation, float)
+        if (source not in ('stabilized', 'execution') or p.shape != (3,) or r.shape != (3, 3)
+                or not np.isfinite(np.r_[stamp_s, max_age_s, p, r.ravel()]).all() or max_age_s < 0):
+            raise ValueError('invalid camera output observation')
+        self.camera_output = dict(stamp_s=float(stamp_s), position=p.copy(), rotation=r.copy(), source=source,
+                                  max_age_s=float(max_age_s))
+
     def update(self, state, scene, t, base_z, commanded_q=None):
         if self.planner_model == 'floating_camera':
             scene = dict(scene, subject_model=self.subject_model or scene.get('subject_model'),
@@ -240,16 +250,27 @@ class CinematicEngine:
         self.geometry_scene, self.geometry_base_z = scene, base_z
         self.revision += 1
         p,r,_ = whole_body_kinematics(state,base_z,getattr(self,'planning_base_rotation',None))
+        camera_source = 'execution'
+        camera_stamp = t
+        if self.camera_output is not None:
+            age = t-self.camera_output['stamp_s']
+            if age < -1e-8 or age > self.camera_output['max_age_s']+1e-8:
+                raise ValueError('Agent camera output is not aligned to the control timestamp')
+            p, r = self.camera_output['position'], self.camera_output['rotation']
+            camera_source = self.camera_output['source']
+            camera_stamp = self.camera_output['stamp_s']
         self.actual_feedback = dict(time_s=t,state=np.asarray(state).tolist(),camera_position=p.tolist(),
+            camera_output_source=camera_source, stamp_s=camera_stamp,
             camera_quaternion_xyzw=Rotation.from_matrix(r).as_quat().tolist(),
             target_position=self.active.sample(t)[0].tolist(),observation_stamp=scene['observation_stamp'])
-        if self.planner_model == 'floating_camera':
+        if self.planner_model == 'floating_camera' and (not self.camera_history or camera_stamp > self.camera_history[-1]['t']):
             from .task_space_planning import camera_scene
             from .camera_intent import visibility, progress_at, default_intrinsics
             observed = camera_scene(scene,t,self.active.duration)
-            self.camera_history.append(dict(t=t,camera_position=p.tolist(),
+            self.camera_history.append(dict(t=camera_stamp,camera_position=p.tolist(),
+                camera_output_source=camera_source,
                 camera_quaternion_xyzw=Rotation.from_matrix(r).as_quat().tolist(),
-                progress_s=progress_at(self.active,t),visual=visibility(p,r,observed,t,
+                progress_s=progress_at(self.active,camera_stamp),visual=visibility(p,r,observed,camera_stamp,
                     observed.get('subject_model'),self.intrinsics or default_intrinsics())))
         self.wbc.update_collision_map(scene)
         self.wbc.set_time(t)
@@ -499,6 +520,8 @@ class CinematicEngine:
             if not self.pending_feedback or t-self.pending_feedback[-1].get('time_s', -1.) >= .5:
                 self.pending_feedback.append(dict(error=info['primary_qp_failure'], time_s=t))
         p, r, _ = whole_body_kinematics(state, base_z, base_rotation)
+        if self.camera_output is not None:
+            p, r = self.camera_output['position'], self.camera_output['rotation']
         original_p, original_r, _ = self.original.sample(t)
         parameters = np.zeros(len(PARAMETERS)) if self.active is self.original else self.active.parameters(t)
         info.update(jev_busy=self.jev.future is not None, math_busy=self.math_future is not None,
@@ -512,11 +535,12 @@ class CinematicEngine:
             actual_view = p-self.original.subject
             denom = max(np.linalg.norm(reference_view)*np.linalg.norm(actual_view), 1e-9)
             self.history.append(dict(time_s=t, original_position_error_m=float(np.linalg.norm(p-original_p)),
+                camera_output_source='execution' if self.camera_output is None else self.camera_output['source'],
                 original_orientation_error_rad=float(np.linalg.norm(Rotation.from_matrix(r@original_r.T).as_rotvec())),
                 target_tracking_residual_m=float(np.linalg.norm(p-target)),
                 view_angle_proxy_rad=float(np.arccos(np.clip(reference_view@actual_view/denom, -1., 1.))),
                 area_scale_proxy_ratio=float((np.linalg.norm(reference_view)/max(np.linalg.norm(actual_view), 1e-6))**2),
-                visual_proxy_source='runtime subject position and measured FK; no SAM; not evaluation masks',
+                visual_proxy_source='runtime subject position and declared camera output pose; no SAM; not evaluation masks',
                 clearance_m=info.get('command_sweep_lower_m'), joint_margin_rad=info['joint_margin_rad'],
                 actual_parameters=parameters.tolist(), remaining_budget_s=max(0., self.original.duration-t)))
         return command, info
