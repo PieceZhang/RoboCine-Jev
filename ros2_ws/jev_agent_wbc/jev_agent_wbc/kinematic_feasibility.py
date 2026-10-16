@@ -166,6 +166,7 @@ class KinematicSearch:
         started=time.monotonic()
         best=None; accepted=[]; attempts=[]
         allocations = self.config['allocations'] if self.config else ('balanced','path_heading','base_assisted','arm_assisted')
+        if getattr(getattr(path,'path',path),'joint_seed',[]):allocations=allocations[:1]
         for allocation in allocations:
             report=self._lift(path,end,allocation)
             report['allocation']=allocation
@@ -203,6 +204,7 @@ class KinematicSearch:
         underlying=getattr(path,'path',path)
         activation=getattr(underlying,'activation_s',self.t)
         seed_trace=getattr(underlying,'joint_seed',[])
+        seed_exact=bool(seed_trace) and not getattr(underlying,'joint_seed_preference_only',False)
         if seed_trace:
             seed_times=np.array([row['t'] for row in seed_trace])
             seed_states=np.array([row['state'] for row in seed_trace])
@@ -294,7 +296,32 @@ class KinematicSearch:
             desired = np.r_[tp-p, Rotation.from_matrix(tr@r.T).as_rotvec()]/dt
             factor = .5 if lim.command_ramp else 1.
             offset = .5*j@velocity if lim.command_ramp else np.zeros(6)
-            if self.collision is not None and not (seed_trace and at>=activation):
+            if project_camera and at>=activation and getattr(underlying,'program',{}).get('regular_curve'):
+                # Preserve directed camera motion; redundant base motion may
+                # retreat or turn to make room for the manipulator.
+                original=getattr(underlying,'original',underlying)
+                motion=original.phase(float(at))['motion'].lower()
+                terminal=underlying.sample(underlying.duration)[0]
+                relative=p-original.subject
+                if motion in ('movein','moveout'):
+                    axis=relative/max(np.linalg.norm(relative),1e-8)
+                    if motion=='movein':axis=-axis
+                    gap=(np.linalg.norm(terminal-original.subject)-np.linalg.norm(relative))*(1 if motion=='moveout' else -1)
+                elif motion=='orbit':
+                    first=original.sample(0.)[0]-original.subject
+                    last=original.sample(original.duration)[0]-original.subject
+                    sign=np.sign(np.cross(first[:2],last[:2]))
+                    axis=sign*np.array([-relative[1],relative[0],0.])/max(np.linalg.norm(relative[:2]),1e-8)
+                    gap=float((terminal-p)@axis)
+                else:
+                    axis=original.sample(0.)[1][:,1] if 'truck' in motion else np.array([0.,0.,1.])
+                    axis=axis*np.sign((original.sample(original.duration)[0]-original.sample(0.)[0])@axis)
+                    gap=float((terminal-p)@axis)
+                row=axis@j[:3]
+                a=np.vstack([a,factor*row])
+                lo=np.r_[lo,-.0001-axis@offset[:3]]
+                hi=np.r_[hi,max(0.,gap+.004)/max(dt,.25)-axis@offset[:3]]
+            if self.collision is not None and not (seed_exact and at>=activation):
                 from .tpr_wbc import witnesses, primitive_values
                 from .shot_predictive_qp import integration_matrix
                 br = None if self.tilt is None else Rotation.from_euler('z',state[2]).as_matrix()@self.tilt
@@ -336,6 +363,8 @@ class KinematicSearch:
             # continuous branch away from limits without permitting task jumps.
             metric=(np.ones(8) if allocation=='balanced' else
                     np.r_[.08,.2,np.ones(6)] if allocation in ('base_assisted','path_heading','anticipatory','base_left','base_right','base_retreat') else np.r_[3.,2.,np.ones(6)])
+            if allocation=='base_retreat':
+                metric=np.r_[2.,.3,np.full(6,.2)]
             # The joint-range midpoint can be a straight-arm singularity.
             # Preserve the measured bent posture in alternate allocations.
             anchor=(JOINT_LOWER+JOINT_UPPER)/2 if allocation=='balanced' else self.state[3:]
@@ -348,8 +377,7 @@ class KinematicSearch:
                         angle=angle-np.sign(angle)*np.pi
                     center[0]=planar@np.array([np.cos(state[2]),np.sin(state[2])])
                     center[1]=1.5*angle
-            if (allocation=='anticipatory' and self.collision is not None and not seed_trace and
-                    at>=getattr(getattr(path,'path',path),'activation_s',self.t)):
+            if allocation=='anticipatory' and self.collision is not None and not seed_trace:
                 # Future path/obstacle geometry supplies a redundancy gradient.
                 # This is only a seed preference; all task residuals, actuator
                 # constraints and nonlinear sweeps below still have to pass.
@@ -378,26 +406,26 @@ class KinematicSearch:
                         pull=np.where(q<(JOINT_LOWER+JOINT_UPPER)/2,1.,-1.)*np.maximum(0.,.25-reserve)
                         preview_preference+=null@np.r_[0.,0.,pull]
                     preview_preference=np.clip(2.*preview_preference,-.5*lim.velocity,.5*lim.velocity)
-                center+=preview_preference
+                center+=preview_preference/np.maximum(metric,.1)
             if allocation in ('base_left','base_right','base_retreat'):
                 # Distinct continuous redundant branches, not independent IK
                 # jumps. The fixed camera equality is audited at every step.
-                center[:2]=[-.2,0.] if allocation=='base_retreat' else [.12,.65 if allocation=='base_left' else -.65]
-            if seed_trace and at>=activation:
+                center[:2]=[-.2*np.exp(-((at-activation)/1.5)**2),0.] if allocation=='base_retreat' else [.12,.65 if allocation=='base_left' else -.65]
+            if seed_trace:
                 expected=np.array([np.interp(at,seed_times,seed_states[:,j]) for j in range(9)])
                 delta=expected-state;delta[2]=(delta[2]+np.pi)%(2*np.pi)-np.pi
                 center=np.array([np.interp(after,seed_times,seed_controls[:,j]) for j in range(8)])
-                center+=.8*np.r_[delta[:2]@np.array([np.cos(state[2]),np.sin(state[2])]),delta[2:]]
+                center+=2.*np.r_[delta[:2]@np.array([np.cos(state[2]),np.sin(state[2])]),delta[2:]]
                 metric=np.ones(8)
             h = jw.T@jw+np.diag(metric)*1e-5
             g = -jw.T@(self.weight*(desired-offset))-1e-5*metric*center
-            if seed_trace and at>=activation:
-                # Reproduce the verified continuous control seed instead of
-                # solving its discretized camera chord into a different IK
-                # branch. Corrections are bounded by the same constraints;
-                # strict nonlinear FK audits still reject any lost tracking.
-                h=np.eye(8)
-                g=-center
+            if seed_exact and at>=activation:
+                # Fresh-state verification may start after redundant body
+                # preparation in the seed. Correct the camera task while
+                # preserving its null-space allocation. Actuator constraints
+                # and independent nonlinear FK/sweep checks remain mandatory.
+                h=jw.T@jw+np.eye(8)*.001
+                g=-jw.T@(self.weight*(desired-offset))-.001*center
             pm = sparse.csc_matrix((h[rows, cols], (rows, cols)), shape=(8, 8))
             if solver_shape != a.shape:
                 solver = None

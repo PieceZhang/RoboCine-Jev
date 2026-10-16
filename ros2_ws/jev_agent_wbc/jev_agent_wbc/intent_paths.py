@@ -10,11 +10,11 @@ from .reference import look_at, smoothstep
 
 
 STRATEGIES = {
-    'framing': 'Compare small radius/height adjustments and time allocation; preserve subject scale and the immutable final frame.',
-    'view': 'Compare small side/height adjustments and time allocation; preserve viewing direction, motion trend and final framing.',
-    'joint': 'Compare bounded time allocation and small returning side/radius/height changes; preserve the final frame.',
-    'timing': 'Keep the original shot trend; smoothly accelerate or slow passage while obstacles move, plus small local deformations.',
-    'restore': 'Finish the remaining intent with a smooth continuation or a new visible route.',
+    'framing': 'Compare regular radius/height curves and timing; preserve subject scale and end inside the numerical final-frame tolerance region.',
+    'view': 'Compare regular side/height curves and timing; preserve directed motion, viewing and final framing.',
+    'joint': 'Compare coordinated platform/manipulator preparation, broad camera curves and timing; keep shot direction and an acceptable final frame.',
+    'timing': 'Smoothly redistribute passage time while obstacles move; preserve the spatial curve and directed shot trend.',
+    'restore': 'Continue the remaining directed intent to an acceptable final frame; do not reverse to chase the exact reference endpoint.',
 }
 
 
@@ -63,6 +63,11 @@ class IntentPath:
         self.original, self.previous = original, previous
         self.activation_s = float(activation_s)
         self.program = dict(program)
+        if self.program.get('regular_curve'):
+            skew=float(self.program.get('shape_skew',1.))
+            endpoint=np.asarray(self.program.get('endpoint_offset_m',[0.,0.,0.]),float)
+            if not np.isfinite(skew) or skew<=0. or endpoint.shape!=(3,) or not np.isfinite(endpoint).all():
+                raise ValueError('invalid regular curve geometry')
         self.seed_cache={} if seed_cache is None else seed_cache
         if self.program.get('timing_profile') in ('early_fast','early_slow'):
             fast=self.program['timing_profile']=='early_fast'
@@ -105,6 +110,8 @@ class IntentPath:
         else:
             self.geometry = geometry
         g = self.geometry
+        self.joint_seed = g.get('joint_seed', [])
+        self.joint_seed_preference_only = bool(g.get('joint_seed_preference_only'))
         self.translation = make_interp_spline(g['times'], g['positions'], k=5,
             bc_type=([(1, np.array(g['start_velocity'])), (2, np.array(g['start_acceleration']))],
                      [(1, np.zeros(3)), (2, np.zeros(3))]))
@@ -161,9 +168,13 @@ class IntentPath:
         return self.activation_s+elapsed-self.extension_s*smoothstep(u)
 
     def progress_time(self, t):
+        if t>self.activation_s and 'progress_times' in getattr(self,'geometry',{}):
+            return float(np.interp(t,self.geometry['times'],self.geometry['progress_times']))
         return progress_at(self.previous, self.parent_time(t))
 
     def _construct_position(self, t):
+        if self.program.get('regular_curve'):
+            return self._regular_position(t)
         source_t = self.parent_time(t)
         p, r = pose_at(self.previous,source_t)
         u = max(0.,min((t-self.activation_s)/(self.duration-self.activation_s), 1.))
@@ -243,12 +254,64 @@ class IntentPath:
                 p = p+correction*(np.sqrt(area/target)-1.)
         return p
 
+    def _regular_position(self, t):
+        """One broad curve, rebuilt from the immutable shape, with C2 joining.
+
+        No nesting of local obstacle bumps and no forced reference endpoint.
+        The six-dimensional join residual decays over the whole suffix.
+        """
+        span = self.duration-self.activation_s
+        u = np.clip((t-self.activation_s)/span, 0., 1.)
+        def nominal(at):
+            return pose_at(self.original, self.progress_time(at))[0]
+        if not hasattr(self, '_regular_join'):
+            a = self.activation_s; h = .001
+            p, _, v = self.previous.sample(a)
+            acceleration = (self.previous.sample(a+h)[2][:3]-self.previous.sample(a-h)[2][:3])/(2*h)
+            n = nominal(a)
+            nv = (nominal(a+h)-nominal(a-h))/(2*h)
+            na = (nominal(a+h)-2*n+nominal(a-h))/h**2
+            self._regular_join = (p-n, span*(v[:3]-nv), span**2*(acceleration-na))
+        d, v, a = self._regular_join
+        s = smoothstep(u)
+        correction = ((1-s)*d+(u-6*u**3+8*u**4-3*u**5)*v+
+                      .5*(u**2-3*u**3+3*u**4-u**5)*a)
+        p = nominal(t)
+        radial = p-self.subject; radial[2] = 0.
+        radial /= max(np.linalg.norm(radial), 1e-8)
+        left = np.array([radial[1],-radial[0],0.]); up = np.array([0.,0.,1.])
+        directions = dict(outer=radial,inner=-radial,above=up,below=-up,left=left,right=-left,
+                          timing=np.zeros(3),continuation=np.zeros(3))
+        route = self.program['route']
+        direction = sum((directions[x] for x in route.split('_')), np.zeros(3))
+        direction /= max(np.linalg.norm(direction),1.)
+        motion = self.original.phase(self.progress_time(t))['motion'].lower()
+        if 'pedestal' in motion:
+            direction[2] = 0.
+        elif 'truck' in motion:
+            axis = self.original.sample(0.)[1][:,1]
+            direction -= (direction@axis)*axis
+        elif motion == 'orbit':
+            direction = (direction@radial)*radial+direction[2]*up
+        endpoint = np.asarray(self.program.get('endpoint_offset_m',[0.,0.,0.]))
+        # Shape in geometric progress, not wall time: a speed pulse must not
+        # turn a regular arc into a spatial kink. A free terminal tangent is
+        # stopped by the reference clock, not bent back to the reference line.
+        first, last = nominal(self.activation_s), nominal(self.duration)
+        chord = last-first
+        q = np.clip((p-first)@chord/max(chord@chord,1e-10),0.,1.)
+        endpoint_blend=smoothstep(q)
+        skew=float(self.program.get('shape_skew',1.))
+        q=q/(skew+(1-skew)*q)
+        bow = (256./27.)*q**3*(1-q)
+        return p+correction+endpoint_blend*endpoint+bow*self.program['amplitude_m']*direction
+
     def pose(self, t):
         if t <= self.activation_s or self.program['route'] == 'continuation':
             return pose_at(self.previous,t)
         p = self.translation(np.clip(t, self.activation_s, self.duration))
         base_p, base_r = pose_at(self.previous,self.parent_time(t))
-        if self.program.get('restore_original'):
+        if self.program.get('restore_original') or self.program.get('regular_curve'):
             target_p,target_r=pose_at(self.original,self.progress_time(t))
             blend=smoothstep(np.clip((t-self.activation_s)/(self.duration-self.activation_s),0.,1.))
             base_p=base_p+blend*(target_p-base_p)
@@ -312,7 +375,7 @@ def propose_intent_paths(original, active, strategy, t, budget, model=None, intr
                    ['outer_above','inner_above','outer_below','inner_below'] if motion == 'orbit' or 'truck' in motion else
                    ['left_above','right_above'])
     programs = [dict(route='continuation', amplitude_m=0., extension_s=0.)]
-    if active is not original:
+    if active is not original and allow_time_extension:
         # Recovery targets the immutable original. Repeatedly deforming an
         # already projected path cannot remove its terminal framing error.
         programs += [dict(route='timing',amplitude_m=0.,extension_s=0.,
@@ -367,6 +430,33 @@ def propose_intent_paths(original, active, strategy, t, budget, model=None, intr
         centers=np.asarray(scene['centers'])[None]+(times-scene['observation_stamp'])[:,None,None]*np.asarray(scene['velocities'])[None]
         gap=np.min(np.linalg.norm(points[:,None]-centers,axis=2)-np.asarray(scene['radii'])[None],axis=1)
         encounter=float(times[np.argmin(gap)])
+    if not allow_time_extension:
+        from .cinematic_geometry import terminal_band
+        band = terminal_band(original,model,intrinsics)
+        endpoint_offsets = np.asarray(band['offsets_m'])
+        # All new whole-body proposals use a broad global shape. Endpoint
+        # choices follow the detour direction but remain inside image space
+        # tolerance; their exact coordinates are bound into the path hash.
+        regular = []
+        end_p = original.sample(original.duration)[0]
+        radial_end = end_p-original.subject;radial_end[2]=0.
+        radial_end /= max(np.linalg.norm(radial_end),1e-8)
+        left_end = np.array([radial_end[1],-radial_end[0],0.])
+        axes = dict(outer=radial_end,inner=-radial_end,left=left_end,right=-left_end,
+                    above=np.array([0.,0.,1.]),below=np.array([0.,0.,-1.]),timing=np.zeros(3))
+        for program in programs:
+            if program['route']=='continuation':
+                regular.append(program);continue
+            if 'up_fraction' in program or abs(program.get('phase_rate',0.))>.91:
+                continue
+            direction = sum((axes[x] for x in program['route'].split('_')),np.zeros(3))
+            if not np.any(direction):
+                direction = pose_at(active,active.duration)[0]-end_p
+            selected = endpoint_offsets[np.argmax(endpoint_offsets@direction)]
+            for skew in ((.2,.5,1.) if program['amplitude_m'] else (1.,)):
+                regular.append(dict(program,regular_curve=True,shape_skew=skew,endpoint_offset_m=selected.tolist(),
+                                    endpoint_region=band['method']))
+        programs = regular
     result = []
     seed_cache={}
     radial = pose_at(active, activation)[0]-original.subject
@@ -379,7 +469,7 @@ def propose_intent_paths(original, active, strategy, t, budget, model=None, intr
                 program['route'], program['amplitude_m'], radial))
         if program.get('timing_profile') != 'early_slow' and program['extension_s']/(active.duration+program['extension_s']-activation) > .52:
             continue
-        if encounter is not None and program['amplitude_m']:
+        if encounter is not None and program['amplitude_m'] and not program.get('regular_curve'):
             duration=active.duration+program['extension_s']
             program['peak_s']=float(np.clip(encounter,activation+min(.6,(duration-activation)/3),
                                            duration-min(.6,(duration-activation)/3)))
@@ -443,14 +533,25 @@ def propose_intent_paths(original, active, strategy, t, budget, model=None, intr
         diverse=[];seen=set()
         for path in result:
             program=path.program
-            key=(program['route'],np.sign(program.get('phase_rate',0.)),bool(program.get('restore_original')))
+            key=(program['route'],bool(program.get('restore_original')))
             if key not in seen:
                 diverse.append(path);seen.add(key)
             if len(diverse)>=budget.max_proposals//2:
                 break
-        result=diverse+[p for p in result if p not in diverse]
+        # Reserve the other half for coordinated early spatial clearance with
+        # slower progress. A camera-only score otherwise fills all slots with
+        # tiny offsets and nearly identical timing, before body checks see them.
+        coordinated=[]
+        for route in dict.fromkeys(p.program['route'] for p in result):
+            options=[p for p in result if p.program['route']==route and
+                     p.program.get('shape_skew')==.2 and -.71<=p.program.get('phase_rate',0.)<=-.44 and
+                     .17<=p.program['amplitude_m']<=.23]
+            if options:
+                options[0].program['search_role']='coordinated_clearance'
+                coordinated.append(options[0])
+        result=coordinated+diverse+[p for p in result if p not in coordinated and p not in diverse]
     result=result[:budget.max_proposals]
-    if not allow_time_extension and model is not None:
+    if allow_time_extension and model is not None:
         # Reserve a few alternatives for the same directed movement with
         # scale compensation. Do not replace all original routes: compensation
         # can remove useful radial clearance and is not always preferable.

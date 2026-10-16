@@ -296,6 +296,27 @@ class CinematicEngine:
             elif kind == 'diagnose':
                 self.report = result
                 self._write('whole_body_difficulty', t, **result)
+                if (self.planner_model=='floating_camera' and self.active is not self.original
+                        and not result['report']['issues']):
+                    kept=[]
+                    for feedback in self.pending_feedback:
+                        report=feedback.get('wbc_feasibility',{})
+                        recovered=(result['report'].get('actual_tracking_error_m',float('inf'))<.005
+                            and result.get('kinematics',{}).get('feasible')
+                            and result['snapshot_time_s']-feedback.get('time_s',t)>=.3
+                            and feedback.get('error') in ('trajectory_preserving_configuration_degraded',
+                                'no_verified_executable_candidate'))
+                        if recovered:
+                            self._write('recovered_execution_feedback_acknowledged',t,feedback=feedback,
+                                reason='fresh_safe_diagnosis_and_measured_tracking_recovered')
+                            continue
+                        if (feedback.get('error')=='trajectory_preserving_configuration_warning'
+                                and report.get('camera_task_feasible')
+                                and report.get('first_predicted_conflict_s') is None):
+                            self._write('configuration_warning_acknowledged',t,feedback=feedback,
+                                reason='fresh_diagnosis_and_actual_tracking_preserve_approved_curve')
+                        else:kept.append(feedback)
+                    self.pending_feedback=kept
                 if t-result['snapshot_time_s'] > self.budget.max_prediction_age_s:
                     self._feedback('diagnosis_expired', t)
                 elif (result['report']['issues'] or self.pending_feedback):

@@ -308,7 +308,7 @@ def draw_frame(run,t,cutoff=None,label='',end=False):
                 f'场景 {t:.2f} / {run.duration:.2f}s  意图进度 {row.get("progress_s",t)/run.original.duration:.0%}'
                 if run.intent_planner else f'原始时刻 {t:.2f} / {run.original.duration:.2f} s')
     txt(d,(20,53),f'{clock_text}   阶段 {phase["name"]} / {phase["motion"]}',21)
-    txt(d,(900,53),label or '仿真时间回放 8 FPS；不代表在线墙钟实时速度',21,GOLD,width=990)
+    txt(d,(900,53),label or f'仿真时间回放 {FPS} FPS；不代表在线墙钟实时速度',21,GOLD,width=990)
     names=['感知 / 诊断','搜索族 / 参数','数值候选 / FK' if run.kinematic_gate else '候选预测','模型选择','复核 / 安装',
            '直接跟踪 / 反馈' if run.floating else 'WBC / 反馈']
     baseline=run.summary['mode']=='strict'
@@ -550,10 +550,13 @@ def render_explicit_runs(folders, dest):
 
 
 def main():
+    global FPS
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--root',type=Path)
     p.add_argument('--runs', nargs='+', type=Path, help='explicit new run folders in chapter order')
     p.add_argument('--output', type=Path, help='new MP4 path for --runs')
+    p.add_argument('--fps',type=int,default=8,choices=(8,16,24),help='uniform simulation-time frames per second')
     p.add_argument('--only',nargs='*');p.add_argument('--preview-only',action='store_true');a=p.parse_args()
+    FPS=a.fps
     if a.runs:
         if not a.output or a.root or a.only or a.preview_only:
             p.error('--runs requires --output and cannot be combined with --root/--only/--preview-only')

@@ -23,6 +23,12 @@ def main():
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--key-file', type=Path, required=True)
     p.add_argument('--model', default='jev-1.14.0')
+    p.add_argument('--cases', nargs='+', help='Optional subset of the existing scenario catalog')
+    p.add_argument('--pace', type=float, default=.03)
+    p.add_argument('--lead', type=float, default=1.2)
+    p.add_argument('--candidate-seconds', type=float, default=12.)
+    p.add_argument('--proposals', type=int, default=6)
+    p.add_argument('--shortlist', type=int, default=2)
     a = p.parse_args()
     a.output.mkdir(parents=True, exist_ok=False)
     os.environ.update(TYPESAFE_API_KEY_FILE=str(a.key_file.resolve()),
@@ -30,22 +36,31 @@ def main():
     sys.path.insert(0, str(ROOT))
     from jev_agent_wbc.provenance import source_manifest
     from jev_agent_wbc.scenarios import NAMES
+    names = a.cases or NAMES
+    if any(name not in NAMES for name in names):
+        p.error('unknown scenario')
     config = dict(model=a.model, api_url='https://api.typesafe.ai/v1/systemone',
-                  pace=.03, activation_lead_s=1.2, candidate_wall_budget_s=20.,
-                  parallel_cases=6, planner_model='floating_camera',
+                  pace=a.pace, activation_lead_s=a.lead, candidate_wall_budget_s=a.candidate_seconds,
+                  max_proposals=a.proposals,max_rollouts=a.shortlist,parallel_cases=len(names), planner_model='floating_camera',
                   representation_boxes=3, geometry_preferences=True,
                   obstacle_avoidance_enabled=True)
     (a.output/'provenance.json').write_text(json.dumps(source_manifest(ROOT, config), indent=2))
     shutil.copytree(ROOT/'jev_agent_wbc', a.output/'frozen_code'/'jev_agent_wbc',
                     ignore=shutil.ignore_patterns('__pycache__'))
+    shutil.copytree(ROOT/'scenarios', a.output/'frozen_code'/'scenarios')
+    # Workers and their spawned numerical processes execute the same snapshot,
+    # even while the next tuning iteration edits the working tree.
+    os.environ['PYTHONPATH'] = str((a.output/'frozen_code').resolve())
     results = []
-    with ProcessPoolExecutor(max_workers=6) as pool:
+    with ProcessPoolExecutor(max_workers=len(names)) as pool:
         futures = []
-        for name in NAMES:
+        for name in names:
             command = [sys.executable, '-m', 'jev_agent_wbc.runner', '--case', name,
+                       '--scenarios', str((a.output/'frozen_code'/'scenarios').resolve()),
                        '--mode', 'jev', '--model', a.model, '--api-url', config['api_url'],
-                       '--pace', '.03', '--activation-lead', '1.2',
-                       '--candidate-wall-budget', '20', '--output', str(a.output/name)]
+                       '--pace', str(a.pace), '--activation-lead', str(a.lead),
+                       '--candidate-wall-budget', str(a.candidate_seconds), '--candidate-proposals',str(a.proposals),
+                       '--candidate-budget',str(a.shortlist), '--output', str(a.output/name)]
             futures.append(pool.submit(run_one, command, a.output/(name+'.log')))
         for future in as_completed(futures):
             result = future.result(); results.append(result)

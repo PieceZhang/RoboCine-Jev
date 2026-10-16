@@ -151,7 +151,8 @@ def main():
     parser.add_argument('--pace', type=float, default=1., help='maximum sim/wall ratio; 0 unpaced for strict tests')
     parser.add_argument('--agent-period', type=float, default=.5, help='minimum event spacing, independent of WBC')
     parser.add_argument('--activation-lead', type=float, default=4., help='exact candidate activation lead; never rebased')
-    parser.add_argument('--candidate-budget', type=int, default=3, help='maximum full counterfactual branches')
+    parser.add_argument('--candidate-proposals', type=int, default=6, help='maximum local numerical proposals')
+    parser.add_argument('--candidate-budget', type=int, default=2, help='maximum full counterfactual branches')
     parser.add_argument('--candidate-wall-budget',type=float,default=2.,help='cooperative candidate search budget in wall seconds')
     parser.add_argument('--prediction-horizon', type=float, default=8., help='bounded prediction lease in seconds')
     parser.add_argument('--prediction-step', type=float, default=.1, help='far prediction step, .04 to .1 seconds')
@@ -162,7 +163,7 @@ def main():
         parser.error("--target-replay-root requires --mode strict")
     if args.disable_wbc_avoidance and args.allocation_preview:
         parser.error("tracking-only WBC cannot enable allocation preview")
-    budget = SearchBudget(max_proposals=16,decision_period_s=args.agent_period, activation_lead_s=args.activation_lead,
+    budget = SearchBudget(max_proposals=args.candidate_proposals,decision_period_s=args.agent_period, activation_lead_s=args.activation_lead,
                           max_rollouts=args.candidate_budget, max_horizon_s=args.prediction_horizon,
                           prediction_step_s=args.prediction_step,candidate_wall_budget_s=args.candidate_wall_budget)
     args.output.mkdir(parents=True, exist_ok=True)

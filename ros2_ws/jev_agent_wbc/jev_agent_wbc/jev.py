@@ -44,7 +44,7 @@ def compact_evidence(state):
                 if 'intent_complete' in value:
                     keys=('intent_complete','range_complete','effective_coverage','visibility_min',
                         'longest_occlusion_s','in_frame_min','phase_order_valid','duration_s',
-                        'max_speed_m_s','max_acceleration_m_s2','camera_limits_pass','motion_trend','intent_violations','visibility_forecast')
+                        'max_speed_m_s','max_acceleration_m_s2','camera_limits_pass','motion_trend','intent_violations','visibility_forecast','curve_quality')
                     out={k:value[k] for k in keys if k in value}
                     # Violations repeat full target/predicted subject states
                     # already summarized below. Retain every violation and
@@ -434,6 +434,13 @@ current phase, history, activation, recovery and next-phase reserves. This is a
 relative choice among available candidates, not an absolute accept/reject test.
 There is no refusal option. Unknown visual evidence remains unknown; compare the
 available evidence without requiring every aspect of intent to be proven.
+Preserve the direction and simple geometry of the shot: a continuous straight
+line or broad smooth curve is preferable to bends, reversals or repeated repairs.
+For move-in, keep approaching; never retreat just to hit a reference endpoint.
+The terminal image tolerance region, not a unique world position, defines the
+acceptable ending. Once inside it, do not reward smaller reference pose error.
+Use coordinated platform and manipulator motion to make camera space available;
+camera translation, height and subject-directed orientation may change together.
 The selection binds only the exact chosen trajectory and timing. Independent
 latest-state checks and physical safety constraints still govern installation.
 """
@@ -451,7 +458,9 @@ Preserve the ORIGINAL immutable terminal subject frame: centroid, unoccluded sca
 bounding box and observation direction, with a stable confirmation window. Match
 process trends at motion progress, including companion changes already in the
 reference. Large detours are not complete-intent solutions. Prefer bounded slowing
-while obstacles pass, then small local returning adjustments. Compare reference,
+while obstacles pass, or a single broad regular curve ending within the numerical
+terminal image tolerance band. Do not add a return to the original world endpoint
+when an acceptable final image is already reachable without reversing. Compare reference,
 candidate and actual subject states; measured LiDAR and SAM feature records are
 plain text, never images. Unknown body pose, occlusion or stale evidence remains
 unknown. SAM visible area is not unoccluded size; mask principal axis is not body yaw.
@@ -542,6 +551,7 @@ def semantic_card(alias, card):
             process=dict(activation_s=path['activation_s'],end_s=path['duration_s']),
             physical_valid=card['physical_valid'],clearance_m=prediction.get('min_clearance_m'),
             intent=visual.get('intent'),smoothness=visual.get('smoothness'),geometry=geometry,
+            curve_quality=visual.get('curve_quality'),
             prediction_kind='backend_screened_geometric_candidate_not_execution')
     if path.get('kind') in ('intent_program/v1','fk_camera_program/v1'):
         return dict(id=alias, program=path['program'], process=dict(

@@ -393,9 +393,12 @@ def progress_at(path, t):
 
 def selection_key(metrics, smoothness_cost=0.):
     """Lexicographic order: no reference loss can compensate for unfinished work."""
-    return (not metrics['intent_complete'], not metrics['geometric_complete'],
+    quality = metrics.get('curve_quality', {})
+    terminal = metrics.get('terminal_frame', {})
+    return (not quality.get('direction_pass',True), not quality.get('regular_curve_pass',True),
+            not metrics['intent_complete'], not metrics['geometric_complete'],
             -metrics['effective_coverage'], metrics['longest_occlusion_s'],
             -metrics['visibility_p05'], -metrics['visibility_mean'],
             round(metrics.get('motion_trend',{}).get('companion_travel_m',0.),3),
-            round(metrics.get('terminal_frame',{}).get('log_area_error',0.),4),
+            0. if terminal.get('pass_check') else round(terminal.get('log_area_error',0.),4),
             metrics['duration_s'], smoothness_cost)

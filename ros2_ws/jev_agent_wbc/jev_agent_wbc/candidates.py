@@ -32,8 +32,8 @@ STRATEGIES = {
 
 @dataclass(frozen=True)
 class SearchBudget:
-    max_proposals: int = 8
-    max_rollouts: int = 3
+    max_proposals: int = 6
+    max_rollouts: int = 2
     activation_lead_s: float = 4.
     prediction_step_s: float = .1
     max_prediction_age_s: float = 4.

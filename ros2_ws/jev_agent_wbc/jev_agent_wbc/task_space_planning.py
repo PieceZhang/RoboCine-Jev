@@ -97,34 +97,45 @@ def diagnose(original,scene,state,previous,t,base_z,limits,commanded_q=None,acti
     kinematics=search.lift(virtual,active.duration+POLICY.terminal_hold_s)
     metrics=intent_prediction(spec,virtual,observed,t,history,step=.1)
     issues=[]
-    if risk is not None or not value.feasible:issues.append('predicted_camera_collision_or_low_clearance')
+    # The 105 mm warning starts proactive search on the original shot. A
+    # verified repair is allowed to use that reserve; otherwise every accepted
+    # 25+ mm clearance detour immediately requests yet another detour.
+    if not value.feasible or (risk is not None and active is original):
+        issues.append('predicted_camera_collision_or_low_clearance')
     accepted_degradation=False
+    actual_tracking_error=float(np.linalg.norm(search.p-active.sample(t)[0]))
+    if active is not original and actual_tracking_error>.015:
+        issues.append('measured_camera_tracking_error')
     if not metrics['intent_complete']:
-        accepted_degradation=bool(accepted_intent and
-            metrics['effective_coverage']>=accepted_intent['effective_coverage']-.03 and
-            metrics['longest_occlusion_s']<=accepted_intent['longest_occlusion_s']+.1 and
-            metrics['motion_trend'].get('companion_travel_m',float('inf'))<=
-                accepted_intent['motion_trend'].get('companion_travel_m',0.)+.03 and
-            metrics['terminal_frame'].get('centroid_error',float('inf'))<=
-                accepted_intent['terminal_frame'].get('centroid_error',0.)+.015 and
-            metrics['terminal_frame'].get('log_area_error',float('inf'))<=
-                accepted_intent['terminal_frame'].get('log_area_error',0.)+.04)
+        # Missing historical coverage cannot be recovered by bending a second
+        # curve onto the accepted one. Preserve that geometry while its future
+        # safety, terminal frame and measured tracking remain intact.
+        accepted_degradation=bool(active is not original and accepted_intent and
+            metrics['terminal_frame']['pass_check'] and actual_tracking_error<=.015 and
+            metrics['longest_occlusion_s']<=accepted_intent.get('longest_occlusion_s',0.)+.25)
         if not accepted_degradation:issues.append('incomplete_visible_intent')
-        elif active is not original:
+        if active is not original and not metrics['terminal_frame']['pass_check']:
             issues.append('intent_recovery_required')
-    if not kinematics['feasible']:issues.append('numerical_kinematic_gate_failed')
+    if not kinematics['feasible']:
+        imminent=kinematics.get('first_failure_s',t)<=t+1.
+        if active is original or actual_tracking_error>.015 or imminent:
+            issues.append('numerical_kinematic_gate_failed')
     return dict(snapshot_time_s=t,physical_caps=CAPS,kinematic_prior=search.prior(),robot_capability=robot_capability,
         kinematics=summary(kinematics),report=dict(issues=issues,first_risk_s=risk,
         min_clearance_m=value.min_clearance_m,joint_margin_rad=None,intent=metrics,
         accepted_intent_degradation_unchanged=accepted_degradation,
+        low_clearance_warning_s=risk,actual_tracking_error_m=actual_tracking_error,
         local_repair_evidence='camera intent programs; numerical FK/actuator screening; no WBC rollout'))
 
 
 def screen(path,search,spec,observed,budget,history):
+    if getattr(path,'program',{}).get('curve_family'):
+        from .regular_curve_search import bind_geometric_progress
+        path=bind_geometric_progress(path)
     virtual=MeasuredCameraPrediction(path,search.state,search.base_z,search.t,budget.activation_lead_s,
         None if search.tilt is None else Rotation.from_euler('z',search.state[2]).as_matrix()@search.tilt)
     kinematics=search.lift(virtual,path.duration+POLICY.terminal_hold_s)
-    result=dict(kinematics=kinematics,summary=summary(kinematics),error='')
+    result=dict(kinematics=kinematics,summary=summary(kinematics),error='',path=path)
     if not kinematics['feasible']:
         result['error']='kinematic_gate:'+kinematics['reason']
         return result
@@ -144,6 +155,8 @@ def screen(path,search,spec,observed,budget,history):
         result['error']='measured_camera_seed_collision'
     elif not metrics['camera_limits_pass']:
         result['error']='measured_camera_seed_exceeds_motion_limits'
+    elif not metrics['terminal_frame']['pass_check']:
+        result['error']='realized_terminal_frame_outside_band'
     result.update(value=value,metrics=metrics)
     return result
 
@@ -158,14 +171,23 @@ def build(original,active,strategy,scene,state,previous,t,base_z,limits,
         commanded_q=commanded_q,base_rotation=base_rotation,scene=scene,search_config=search_config)
     spec=IntentSpec(original,observed.get('subject_model'),observed.get('intrinsics'))
     def project(path):
-        from .fk_camera_path import FKCameraPath
+        if path.program.get('curve_family')=='global_endpoint_polynomial':
+            from .joint_curve_optimizer import refine
+            fitted,diagnostics=refine(path,search,seconds=min(8.,budget.candidate_wall_budget_s*.5),max_iterations=30)
+            if fitted is None:return dict(error='joint_curve_search:'+diagnostics['reason'],summary=diagnostics)
+            return dict(path=fitted,summary=diagnostics)
+        from .cinematic_geometry import regularize_lift,smooth_lift
         virtual=MeasuredCameraPrediction(path,search.state,search.base_z,search.t,budget.activation_lead_s,base_rotation)
         report=None
         allocations=list(dict.fromkeys(('path_heading',*search.config['allocations'])))[:2]
         for allocation in allocations:
             report=search._lift(virtual,path.duration+POLICY.terminal_hold_s,allocation,project_camera=True)
             if report['feasible']:
-                return dict(path=FKCameraPath.from_lift(path,report),summary=summary(report))
+                fitted=smooth_lift(path,report)
+                if fitted is None:fitted=regularize_lift(path,report,observed)
+                if fitted is not None:
+                    return dict(path=fitted,summary=summary(report))
+                return dict(error='regular_curve_fit_unverified',summary=summary(report))
         return dict(error='fk_projection_unverified:'+report['reason'],summary=summary(report))
     # Filter every proposal before shortlist truncation, so an infeasible top
     # camera candidate cannot hide a feasible lower-ranked robot candidate.
@@ -180,6 +202,17 @@ def build(original,active,strategy,scene,state,previous,t,base_z,limits,
     backend = JVSGeometryBackend(representation_boxes)
     observation = backend.observe(state,t,base_z=base_z,base_rotation=base_rotation)
     for candidate in result.get('candidates', []):
+        # Bind the verified allocation into the approved trajectory. Re-solving
+        # from an older coarse seed during installation could choose a different
+        # branch and lose a curve that had already passed all strict checks.
+        from .intent_paths import IntentPath
+        witness=getattr(candidate,'kinematics',None)
+        path=candidate.path
+        if isinstance(path,IntentPath) and witness and witness.get('feasible') and path.program.get('route')!='continuation':
+            exact_geometry=dict(path.geometry,joint_seed=witness['trace'],joint_seed_preference_only=False)
+            candidate.path=IntentPath(path.original,path.previous,path.activation_s,
+                dict(path.program,allocation_binding='verified_continuous_witness'),path.model,path.intrinsics,geometry=exact_geometry)
+            candidate.id=path_hash(candidate.path)
         geometry = candidate_geometry(candidate,backend,observation,base_z,base_rotation,geometry_preferences)
         geometry['box_budget'] = representation_boxes
         candidate.consequences['geometry'] = geometry

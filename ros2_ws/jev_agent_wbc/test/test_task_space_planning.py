@@ -109,3 +109,16 @@ def test_latest_velocity_is_rechecked_and_jev_does_not_receive_fk_internals(setu
         budget=budget,measured_control=np.full(8,2.))
     assert checked['error']=='kinematic_gate:initial_velocity_limit'
     assert checked['checks']['kinematic_feasibility']=='fail'
+
+
+@pytest.mark.parametrize('approved,feasible,should_replan',[(False,True,True),(True,True,False),(True,False,True)])
+def test_approved_curve_can_use_warning_reserve_but_never_failed_clearance(setup,monkeypatch,approved,feasible,should_replan):
+    from jev_agent_wbc.intent_paths import IntentPath
+    from jev_agent_wbc.contracts import Validation
+    original,state,z,scene=setup
+    active=IntentPath(original,original,1.,dict(route='continuation',amplitude_m=0.,extension_s=0.),scene['subject_model']) if approved else original
+    monkeypatch.setattr(planner,'prediction',lambda *a,**kw:(Validation(feasible,'test_clearance',min_clearance_m=.04 if feasible else .02),2.))
+    result=planner.diagnose(original,scene,state,np.zeros(8),0.,z,Limits(),active=active,
+        budget=SearchBudget(activation_lead_s=1.),accepted_intent={'longest_occlusion_s':0.} if approved else None)
+    assert ('predicted_camera_collision_or_low_clearance' in result['report']['issues']) is should_replan
+    assert result['report']['low_clearance_warning_s']==2.
