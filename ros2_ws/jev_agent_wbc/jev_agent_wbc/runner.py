@@ -19,6 +19,7 @@ from .dynamic_collision import DynamicCollision
 from .whole_body_qp import whole_body_kinematics, Limits
 from .provenance import source_manifest
 from .camera_intent import POLICY,IntentSpec
+from .shot_acceptance import evaluate_shot, attach_acceptance
 
 
 def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, budget=None, model='perplexity', disable_wbc_avoidance=False, target_replay=None, planning_wbc_avoidance=False, planner_model="floating_camera", representation_boxes=3, geometry_preferences=True):
@@ -115,6 +116,16 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
             summary.update(executed_camera_intent=measured_intent,
                 terminal_confirmation_observed_s=max(0.,rows[-1]['t']-original.duration) if rows else 0.,
                 intent_success=bool(not failure and summary['safety_pass'] and measured_intent['intent_complete']))
+            acceptance=evaluate_shot(original,runtime['subject'],
+                [r['t'] for r in history],[r['camera_position'] for r in history],
+                [Rotation.from_quat(r['camera_quaternion_xyzw']).as_matrix() for r in history],
+                [r['visual'] for r in history],[r['progress_s'] for r in history],
+                safety_pass=summary['safety_pass'],execution_ok=not failure,
+                intrinsics=engine.intrinsics,motion_end_s=engine.active.duration,
+                legacy_intent=measured_intent,
+                safety_source='runner_execution_checks; independent_sweep_audit_is_separate')
+            attach_acceptance(summary,acceptance)
+            save_json(output/'camera_history.json',history)
         summary.update(backend='kinematic_integration', obstacle_avoidance_enabled=not disable_wbc_avoidance, wall_s=time.monotonic()-begin,
                        observation_source='synthetic_sparse_lidar_raycast', measured_physical_constraints=False,
                        camera_model='configured 384x288 pinhole, 55deg vertical FOV; no RGB observations')

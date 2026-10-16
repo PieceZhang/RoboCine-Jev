@@ -1,5 +1,44 @@
 # Jev 相机意图规划与独立执行层
 
+## 运镜验收标准更新与原 demo 重新评估（2026-10-16）
+
+当前正式执行验收使用 `shot_acceptance/v1`，实现于 `jev_agent_wbc/shot_acceptance.py`。
+它分别报告安全、主方向、整体曲线、主体构图、终帧五项结果，以及明确的失败项/证据不足项。
+每项保留原有数值门槛：安全检查不变；累计反向量 orbit ≤0.003 rad、其他 ≤0.004 m；
+全程总转角 <3.5 rad、最大相邻方向转角 <0.45 rad（不使用初始接续豁免）；主体入画比例 ≥98%；
+终帧仍使用原有中心、面积、包围框、观察方向、轮廓轴误差和稳定保持条件。
+构图是已标定主体的几何投影检查，不声称具有真实 RGB 美学评价能力。
+
+运动完成由主方向正确、有实际运动、进度顺序正确及稳定终帧落入误差带判定，
+不再要求 reference 的精确运动量或精确进度终点。相同运动类型的相邻阶段合并；
+本版本对多个不同运动类型组成的复合镜头报告“未验证”，不自动判为通过。
+reference 过程位置偏移、偏移累计变化、观察角度与主体尺度变化，以及旧覆盖率、
+精确终点进度评分全部作为诊断。遮挡单独给出最大遮挡比例、部分遮挡和可见率低于85%的
+各段起止时间、累计时长、最长连续时长；遮挡不导致验收失败，未知可见性不冒充无遮挡。
+主体出画仍是构图失败，且与遮挡分别统计。结束画面检查不会因为较早的过程画面失效而连带失效。
+
+`runner.py` 与独立相机运行器在执行结束后发布 `shot_acceptance`；主成功字段使用新验收，
+旧成功标志保留为 `legacy_reference_intent_success` / `legacy_camera_intent_success`。
+`executed_camera_intent` / `intent` 保留旧评分数据，并标注仅用于 reference 保真诊断。
+本次只调整执行后的验收和报告，未修改在线规划、候选选择、控制器或已保存轨迹。
+原规划器内部预测/排序仍使用历史 `IntentSpec`；不能把该历史字段当作新验收结论。
+
+`results/acceptance_20261016/final/` 保存对原 `joint_curves_20261016/iteration14` 的只读复评。
+安全、方向、主体构图和终帧均为 6/6；严格曲线形状为 5/6，正式自动验收 **5/6**。
+上升镜头保持数值形状未通过（总转角约4.765 rad、最大相邻转角约0.888 rad）；
+用户对六个视频的观感认可单独记录，不作为自动门槛豁免。历史完整 reference 评分仍为1/6。
+原始日志与视频哈希保持一致，没有重新执行机器人、生成新轨迹或调用 Jev。
+
+```bash
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /usr/bin/python3 \
+  ros2_ws/jev_agent_wbc/scripts/reevaluate_shot_acceptance.py \
+  --runs ros2_ws/jev_agent_wbc/results/joint_curves_20261016/iteration14 \
+  --video ros2_ws/jev_agent_wbc/results/joint_curves_20261016/final_stable_joint_curves_six_demos.mp4 \
+  --output <新的复评目录>
+```
+
+下文记录历史版本的验收口径和实验结果，不覆盖以上现行执行验收标准。
+
 ## 整体曲线与联合分配优化（2026-10-16）
 
 本轮将整机搜索改为少量完整曲线：全局单拱曲线和保持空间形状的单调时间重参数化；

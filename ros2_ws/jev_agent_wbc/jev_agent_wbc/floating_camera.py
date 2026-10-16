@@ -567,6 +567,20 @@ def run_case(case,output,mode,budget,radius,model,api_url,pace):
                 [row['camera_quaternion_xyzw'] for row in rows]),
             observed_visual_source='current simulated LiDAR subject returns fitted to calibrated cylinder; RGB/SAM not run',
             whole_body_execution='not_run')
+        if rows:
+            from .shot_acceptance import evaluate_shot
+            acceptance=evaluate_shot(original,subject_model,[row['t'] for row in rows],
+                positions,rotations,true_measurements,[row['progress_s'] for row in rows],
+                safety_pass=safe and limits_pass,execution_ok=not failure,
+                intrinsics=intrinsics,motion_end_s=agent.active.duration,legacy_intent=intent,
+                safety_source='camera_sphere_and_camera_kinematic_limits_only; not_whole_body')
+            summary.update(shot_acceptance=acceptance,
+                legacy_camera_intent_success=summary['camera_intent_success'],
+                legacy_within_budget_success=summary['within_budget_success'],
+                camera_intent_success=acceptance['accepted'],
+                within_budget_success=bool(acceptance['accepted'] and
+                    elapsed<=POLICY.max_duration_factor*original.duration+POLICY.terminal_hold_s),
+                intent_role='legacy_reference_fidelity_diagnostic_only')
         save_json(output/'summary.json',summary);save_json(output/'telemetry.json',rows)
     print(json.dumps(dict(case=runtime.document['name'],mode=mode,completed=completed,safe=safe,
         intent=intent['intent_complete'],coverage=intent['effective_coverage'],duration_s=elapsed,
