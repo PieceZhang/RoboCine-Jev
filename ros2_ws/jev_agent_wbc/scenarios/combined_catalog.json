@@ -1,0 +1,1751 @@
+{
+  "version": "graded_combo/v3_height_interference",
+  "cases": [
+    "combo_01_easy",
+    "combo_02_easy",
+    "combo_03_medium",
+    "combo_04_medium",
+    "combo_05_hard",
+    "combo_06_hard"
+  ],
+  "description": "六个组合均有低、中、高三个障碍物；每个障碍物必须与同一时刻的名义整机运动发生实际几何干涉。",
+  "main_action_limit_s": 10.0,
+  "transition_duration_s": 2.0,
+  "transition_endpoint_distance_limit_m": 0.2,
+  "reference_sample_interval_s": 0.2,
+  "transition_contract": {
+    "authoring": "shot_phase 只有主动作；衔接窗口没有阶段定义和内部轨迹样本。",
+    "agent_responsibility": "由 Agent 自行设计 arc；不指定弧面、圆心、半径、控制点或方向。",
+    "loader_behavior": "当前完整任务校验要求阶段连续。此组合文件是待补全的设计输入；逐段预览可读取，不能直接作为完整闭环任务。"
+  },
+  "obstacle_design": "三个固定高度的独立移动球形代理；横穿底盘、中部机械臂、上部机械臂/相机；起止与衔接窗口不安排接触。",
+  "difficulty_definition": {
+    "easy": {
+      "obstacle_count": 3,
+      "penetration_m": 0.025,
+      "crossing_speed_m_s": 0.34,
+      "overlap": false
+    },
+    "medium": {
+      "obstacle_count": 3,
+      "penetration_m": 0.055,
+      "crossing_speed_m_s": 0.27,
+      "overlap": false
+    },
+    "hard": {
+      "obstacle_count": 3,
+      "penetration_m": 0.085,
+      "crossing_speed_m_s": 0.2,
+      "overlap": true
+    }
+  },
+  "validation_scope": "10 ms 同时刻整机 signed-distance 干涉证据；每个障碍物有见证时间、部件、持续时间。不是 Agent 闭环避障验证。",
+  "scenarios": [
+    {
+      "number": 1,
+      "name": "combo_01_easy",
+      "difficulty": "easy",
+      "difficulty_zh": "简单",
+      "title": "01 简单 · 推进 → 左移",
+      "main_action_count": 2,
+      "obstacle_count": 3,
+      "duration_s": 16.0,
+      "main_actions": [
+        {
+          "phase": "action_01_movein",
+          "motion": "movein",
+          "start_s": 0.0,
+          "end_s": 7.0,
+          "duration_s": 7.0,
+          "start_position_m": [
+            0.2528628157727242,
+            -0.0015000000000000013,
+            0.816679490613355
+          ],
+          "end_position_m": [
+            0.6028628157727242,
+            -0.0015000000000000013,
+            0.841679490613355
+          ]
+        },
+        {
+          "phase": "action_02_truck_left",
+          "motion": "truck_left",
+          "start_s": 9.0,
+          "end_s": 16.0,
+          "duration_s": 7.0,
+          "start_position_m": [
+            0.607719536158331,
+            0.10635425903761328,
+            0.841679490613355
+          ],
+          "end_position_m": [
+            0.607719536158331,
+            0.5063542590376133,
+            0.841679490613355
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "id": "gap_01",
+          "role": "unfilled_transition_window",
+          "start_s": 7.0,
+          "end_s": 9.0,
+          "from_position_m": [
+            0.6028628157727242,
+            -0.0015000000000000013,
+            0.841679490613355
+          ],
+          "to_position_m": [
+            0.607719536158331,
+            0.10635425903761328,
+            0.841679490613355
+          ],
+          "endpoint_gap_m": 0.10796355369038459,
+          "interior_samples_authored": false
+        }
+      ],
+      "obstacle_events": [
+        {
+          "obstacle_id": "low_crossing",
+          "height_level": "low",
+          "height_label": "低",
+          "center_height_m": 0.16,
+          "target_action": "action_01_movein",
+          "intended_crossing_time_s": 2.3,
+          "moving_interval_s": [
+            0.0,
+            6.1
+          ],
+          "target_penetration_m": 0.025,
+          "crossing_speed_m_s": 0.34,
+          "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+          "min_surface_clearance_m": -0.02499984570964206,
+          "witness_time_s": 2.16,
+          "witness_body_index": 0,
+          "witness_obstacle_center_m": [
+            -0.15385780755438816,
+            -0.13576732007828818,
+            0.16
+          ],
+          "interference_interval_s": [
+            1.93,
+            2.44
+          ],
+          "interference_duration_s": 0.52,
+          "interference_verified": true
+        },
+        {
+          "obstacle_id": "middle_crossing",
+          "height_level": "middle",
+          "height_label": "中",
+          "center_height_m": 0.48,
+          "target_action": "action_01_movein",
+          "intended_crossing_time_s": 5.1,
+          "moving_interval_s": [
+            1.2999999999999998,
+            8.899999999999999
+          ],
+          "target_penetration_m": 0.025,
+          "crossing_speed_m_s": 0.34,
+          "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+          "min_surface_clearance_m": -0.02506091926226811,
+          "witness_time_s": 5.07,
+          "witness_body_index": 2,
+          "witness_obstacle_center_m": [
+            0.1332798965836643,
+            -0.0068228155506339615,
+            0.48
+          ],
+          "interference_interval_s": [
+            4.8500000000000005,
+            5.29
+          ],
+          "interference_duration_s": 0.45,
+          "interference_verified": true
+        },
+        {
+          "obstacle_id": "high_crossing",
+          "height_level": "high",
+          "height_label": "高",
+          "center_height_m": 0.8066026927192774,
+          "target_action": "action_02_truck_left",
+          "intended_crossing_time_s": 12.5,
+          "moving_interval_s": [
+            8.7,
+            16.0
+          ],
+          "target_penetration_m": 0.025,
+          "crossing_speed_m_s": 0.34,
+          "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+          "min_surface_clearance_m": -0.02499665483386805,
+          "witness_time_s": 12.56,
+          "witness_body_index": 7,
+          "witness_obstacle_center_m": [
+            0.5491147007084296,
+            0.44465587536244855,
+            0.8066026927192774
+          ],
+          "interference_interval_s": [
+            12.379999999999999,
+            12.92
+          ],
+          "interference_duration_s": 0.55,
+          "interference_verified": true
+        }
+      ],
+      "interference_audit": {
+        "case": "combo_01_easy",
+        "difficulty": "easy",
+        "obstacle_count": 3,
+        "sample_step_s": 0.01,
+        "nominal_main_min_surface_clearance_m": -0.02506091926226811,
+        "all_obstacles_interfere": true,
+        "verified_obstacle_count": 3,
+        "max_simultaneous_interfering_obstacles": 1,
+        "obstacle_pair_min_surface_clearance_m": 0.08093624041528585,
+        "gap_endpoint_envelope_min_surface_clearance_m": 0.3957338175845331,
+        "initial_min_surface_clearance_m": 0.7953304953167134,
+        "final_min_surface_clearance_m": 0.4867142138616929,
+        "max_obstacle_speed_m_s": 0.7721777777777777,
+        "obstacles": [
+          {
+            "obstacle_id": "low_crossing",
+            "height_level": "low",
+            "height_label": "低",
+            "center_height_m": 0.16,
+            "target_action": "action_01_movein",
+            "intended_crossing_time_s": 2.3,
+            "moving_interval_s": [
+              0.0,
+              6.1
+            ],
+            "target_penetration_m": 0.025,
+            "crossing_speed_m_s": 0.34,
+            "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+            "min_surface_clearance_m": -0.02499984570964206,
+            "witness_time_s": 2.16,
+            "witness_body_index": 0,
+            "witness_obstacle_center_m": [
+              -0.15385780755438816,
+              -0.13576732007828818,
+              0.16
+            ],
+            "interference_interval_s": [
+              1.93,
+              2.44
+            ],
+            "interference_duration_s": 0.52,
+            "interference_verified": true
+          },
+          {
+            "obstacle_id": "middle_crossing",
+            "height_level": "middle",
+            "height_label": "中",
+            "center_height_m": 0.48,
+            "target_action": "action_01_movein",
+            "intended_crossing_time_s": 5.1,
+            "moving_interval_s": [
+              1.2999999999999998,
+              8.899999999999999
+            ],
+            "target_penetration_m": 0.025,
+            "crossing_speed_m_s": 0.34,
+            "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+            "min_surface_clearance_m": -0.02506091926226811,
+            "witness_time_s": 5.07,
+            "witness_body_index": 2,
+            "witness_obstacle_center_m": [
+              0.1332798965836643,
+              -0.0068228155506339615,
+              0.48
+            ],
+            "interference_interval_s": [
+              4.8500000000000005,
+              5.29
+            ],
+            "interference_duration_s": 0.45,
+            "interference_verified": true
+          },
+          {
+            "obstacle_id": "high_crossing",
+            "height_level": "high",
+            "height_label": "高",
+            "center_height_m": 0.8066026927192774,
+            "target_action": "action_02_truck_left",
+            "intended_crossing_time_s": 12.5,
+            "moving_interval_s": [
+              8.7,
+              16.0
+            ],
+            "target_penetration_m": 0.025,
+            "crossing_speed_m_s": 0.34,
+            "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+            "min_surface_clearance_m": -0.02499665483386805,
+            "witness_time_s": 12.56,
+            "witness_body_index": 7,
+            "witness_obstacle_center_m": [
+              0.5491147007084296,
+              0.44465587536244855,
+              0.8066026927192774
+            ],
+            "interference_interval_s": [
+              12.379999999999999,
+              12.92
+            ],
+            "interference_duration_s": 0.55,
+            "interference_verified": true
+          }
+        ],
+        "metric": "signed obstacle-sphere surface clearance to full 8-body robot collision geometry; negative means geometric interference",
+        "scope": "offline nominal per-action WBC at matching physical timestamps; no avoidance or PhysX collision response; gaps excluded from hit evidence"
+      }
+    },
+    {
+      "number": 2,
+      "name": "combo_02_easy",
+      "difficulty": "easy",
+      "difficulty_zh": "简单",
+      "title": "02 简单 · 右移 → 升高",
+      "main_action_count": 2,
+      "obstacle_count": 3,
+      "duration_s": 16.0,
+      "main_actions": [
+        {
+          "phase": "action_01_truck_right",
+          "motion": "truck_right",
+          "start_s": 0.0,
+          "end_s": 7.0,
+          "duration_s": 7.0,
+          "start_position_m": [
+            0.19931523567243073,
+            -0.08883832128602065,
+            0.816679490613355
+          ],
+          "end_position_m": [
+            0.19931523567243073,
+            -0.48883832128602067,
+            0.816679490613355
+          ]
+        },
+        {
+          "phase": "action_02_pedestal_up",
+          "motion": "pedestal_up",
+          "start_s": 9.0,
+          "end_s": 16.0,
+          "duration_s": 7.0,
+          "start_position_m": [
+            0.24153991918304407,
+            -0.6265311657477355,
+            0.816679490613355
+          ],
+          "end_position_m": [
+            0.42153991918304407,
+            -0.6265311657477355,
+            0.916679490613355
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "id": "gap_01",
+          "role": "unfilled_transition_window",
+          "start_s": 7.0,
+          "end_s": 9.0,
+          "from_position_m": [
+            0.19931523567243073,
+            -0.48883832128602067,
+            0.816679490613355
+          ],
+          "to_position_m": [
+            0.24153991918304407,
+            -0.6265311657477355,
+            0.816679490613355
+          ],
+          "endpoint_gap_m": 0.14402167654047585,
+          "interior_samples_authored": false
+        }
+      ],
+      "obstacle_events": [
+        {
+          "obstacle_id": "low_crossing",
+          "height_level": "low",
+          "height_label": "低",
+          "center_height_m": 0.16,
+          "target_action": "action_01_truck_right",
+          "intended_crossing_time_s": 2.3,
+          "moving_interval_s": [
+            0.0,
+            6.1
+          ],
+          "target_penetration_m": 0.025,
+          "crossing_speed_m_s": 0.34,
+          "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+          "min_surface_clearance_m": -0.025005610788038396,
+          "witness_time_s": 2.09,
+          "witness_body_index": 0,
+          "witness_obstacle_center_m": [
+            -0.1765211335935161,
+            0.07973888593708624,
+            0.16
+          ],
+          "interference_interval_s": [
+            1.8800000000000001,
+            2.41
+          ],
+          "interference_duration_s": 0.54,
+          "interference_verified": true
+        },
+        {
+          "obstacle_id": "middle_crossing",
+          "height_level": "middle",
+          "height_label": "中",
+          "center_height_m": 0.48,
+          "target_action": "action_01_truck_right",
+          "intended_crossing_time_s": 5.1,
+          "moving_interval_s": [
+            1.2999999999999998,
+            8.899999999999999
+          ],
+          "target_penetration_m": 0.025,
+          "crossing_speed_m_s": 0.34,
+          "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+          "min_surface_clearance_m": -0.025104072416079648,
+          "witness_time_s": 5.21,
+          "witness_body_index": 3,
+          "witness_obstacle_center_m": [
+            -0.15645636717560224,
+            -0.3897162279775684,
+            0.48
+          ],
+          "interference_interval_s": [
+            5.0200000000000005,
+            5.4
+          ],
+          "interference_duration_s": 0.39,
+          "interference_verified": true
+        },
+        {
+          "obstacle_id": "high_crossing",
+          "height_level": "high",
+          "height_label": "高",
+          "center_height_m": 0.8310901312507416,
+          "target_action": "action_02_pedestal_up",
+          "intended_crossing_time_s": 12.5,
+          "moving_interval_s": [
+            8.7,
+            16.0
+          ],
+          "target_penetration_m": 0.025,
+          "crossing_speed_m_s": 0.34,
+          "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+          "min_surface_clearance_m": -0.025160450208820254,
+          "witness_time_s": 12.5,
+          "witness_body_index": 7,
+          "witness_obstacle_center_m": [
+            0.32132243238332103,
+            -0.768665961191453,
+            0.8310901312507416
+          ],
+          "interference_interval_s": [
+            12.27,
+            12.67
+          ],
+          "interference_duration_s": 0.41000000000000003,
+          "interference_verified": true
+        }
+      ],
+      "interference_audit": {
+        "case": "combo_02_easy",
+        "difficulty": "easy",
+        "obstacle_count": 3,
+        "sample_step_s": 0.01,
+        "nominal_main_min_surface_clearance_m": -0.025160450208820254,
+        "all_obstacles_interfere": true,
+        "verified_obstacle_count": 3,
+        "max_simultaneous_interfering_obstacles": 1,
+        "obstacle_pair_min_surface_clearance_m": 1.023113392439284,
+        "gap_endpoint_envelope_min_surface_clearance_m": 0.5225869117053432,
+        "initial_min_surface_clearance_m": 0.7865659693561071,
+        "final_min_surface_clearance_m": 0.8199662725688819,
+        "max_obstacle_speed_m_s": 0.7721777777777781,
+        "obstacles": [
+          {
+            "obstacle_id": "low_crossing",
+            "height_level": "low",
+            "height_label": "低",
+            "center_height_m": 0.16,
+            "target_action": "action_01_truck_right",
+            "intended_crossing_time_s": 2.3,
+            "moving_interval_s": [
+              0.0,
+              6.1
+            ],
+            "target_penetration_m": 0.025,
+            "crossing_speed_m_s": 0.34,
+            "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+            "min_surface_clearance_m": -0.025005610788038396,
+            "witness_time_s": 2.09,
+            "witness_body_index": 0,
+            "witness_obstacle_center_m": [
+              -0.1765211335935161,
+              0.07973888593708624,
+              0.16
+            ],
+            "interference_interval_s": [
+              1.8800000000000001,
+              2.41
+            ],
+            "interference_duration_s": 0.54,
+            "interference_verified": true
+          },
+          {
+            "obstacle_id": "middle_crossing",
+            "height_level": "middle",
+            "height_label": "中",
+            "center_height_m": 0.48,
+            "target_action": "action_01_truck_right",
+            "intended_crossing_time_s": 5.1,
+            "moving_interval_s": [
+              1.2999999999999998,
+              8.899999999999999
+            ],
+            "target_penetration_m": 0.025,
+            "crossing_speed_m_s": 0.34,
+            "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+            "min_surface_clearance_m": -0.025104072416079648,
+            "witness_time_s": 5.21,
+            "witness_body_index": 3,
+            "witness_obstacle_center_m": [
+              -0.15645636717560224,
+              -0.3897162279775684,
+              0.48
+            ],
+            "interference_interval_s": [
+              5.0200000000000005,
+              5.4
+            ],
+            "interference_duration_s": 0.39,
+            "interference_verified": true
+          },
+          {
+            "obstacle_id": "high_crossing",
+            "height_level": "high",
+            "height_label": "高",
+            "center_height_m": 0.8310901312507416,
+            "target_action": "action_02_pedestal_up",
+            "intended_crossing_time_s": 12.5,
+            "moving_interval_s": [
+              8.7,
+              16.0
+            ],
+            "target_penetration_m": 0.025,
+            "crossing_speed_m_s": 0.34,
+            "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+            "min_surface_clearance_m": -0.025160450208820254,
+            "witness_time_s": 12.5,
+            "witness_body_index": 7,
+            "witness_obstacle_center_m": [
+              0.32132243238332103,
+              -0.768665961191453,
+              0.8310901312507416
+            ],
+            "interference_interval_s": [
+              12.27,
+              12.67
+            ],
+            "interference_duration_s": 0.41000000000000003,
+            "interference_verified": true
+          }
+        ],
+        "metric": "signed obstacle-sphere surface clearance to full 8-body robot collision geometry; negative means geometric interference",
+        "scope": "offline nominal per-action WBC at matching physical timestamps; no avoidance or PhysX collision response; gaps excluded from hit evidence"
+      }
+    },
+    {
+      "number": 3,
+      "name": "combo_03_medium",
+      "difficulty": "medium",
+      "difficulty_zh": "中等",
+      "title": "03 中等 · 推进 → 环绕 → 升高",
+      "main_action_count": 3,
+      "obstacle_count": 3,
+      "duration_s": 26.0,
+      "main_actions": [
+        {
+          "phase": "action_01_movein",
+          "motion": "movein",
+          "start_s": 0.0,
+          "end_s": 7.0,
+          "duration_s": 7.0,
+          "start_position_m": [
+            0.2528628157727242,
+            -0.0015000000000000013,
+            0.816679490613355
+          ],
+          "end_position_m": [
+            0.6528628157727242,
+            -0.0015000000000000013,
+            0.841679490613355
+          ]
+        },
+        {
+          "phase": "action_02_orbit",
+          "motion": "orbit",
+          "start_s": 9.0,
+          "end_s": 17.0,
+          "duration_s": 8.0,
+          "start_position_m": [
+            0.6575171728089308,
+            0.10186033157771271,
+            0.841679490613355
+          ],
+          "end_position_m": [
+            0.7392173969368143,
+            0.4357166773916356,
+            0.841679490613355
+          ]
+        },
+        {
+          "phase": "action_03_pedestal_up",
+          "motion": "pedestal_up",
+          "start_s": 19.0,
+          "end_s": 26.0,
+          "duration_s": 7.0,
+          "start_position_m": [
+            0.7775592843480961,
+            0.5193192281859285,
+            0.841679490613355
+          ],
+          "end_position_m": [
+            0.957559284348096,
+            0.5193192281859285,
+            0.941679490613355
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "id": "gap_01",
+          "role": "unfilled_transition_window",
+          "start_s": 7.0,
+          "end_s": 9.0,
+          "from_position_m": [
+            0.6528628157727242,
+            -0.0015000000000000013,
+            0.841679490613355
+          ],
+          "to_position_m": [
+            0.6575171728089308,
+            0.10186033157771271,
+            0.841679490613355
+          ],
+          "endpoint_gap_m": 0.10346507228661854,
+          "interior_samples_authored": false
+        },
+        {
+          "id": "gap_02",
+          "role": "unfilled_transition_window",
+          "start_s": 17.0,
+          "end_s": 19.0,
+          "from_position_m": [
+            0.7392173969368143,
+            0.4357166773916356,
+            0.841679490613355
+          ],
+          "to_position_m": [
+            0.7775592843480961,
+            0.5193192281859285,
+            0.841679490613355
+          ],
+          "endpoint_gap_m": 0.09197546862925854,
+          "interior_samples_authored": false
+        }
+      ],
+      "obstacle_events": [
+        {
+          "obstacle_id": "low_crossing",
+          "height_level": "low",
+          "height_label": "低",
+          "center_height_m": 0.16,
+          "target_action": "action_01_movein",
+          "intended_crossing_time_s": 3.5,
+          "moving_interval_s": [
+            0.0,
+            7.3
+          ],
+          "target_penetration_m": 0.055,
+          "crossing_speed_m_s": 0.27,
+          "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+          "min_surface_clearance_m": -0.05502307311838099,
+          "witness_time_s": 3.27,
+          "witness_body_index": 0,
+          "witness_obstacle_center_m": [
+            -0.017350591510389753,
+            -0.11120846973931127,
+            0.16
+          ],
+          "interference_interval_s": [
+            2.74,
+            3.8000000000000003
+          ],
+          "interference_duration_s": 1.07,
+          "interference_verified": true
+        },
+        {
+          "obstacle_id": "middle_crossing",
+          "height_level": "middle",
+          "height_label": "中",
+          "center_height_m": 0.48,
+          "target_action": "action_02_orbit",
+          "intended_crossing_time_s": 13.0,
+          "moving_interval_s": [
+            9.2,
+            16.8
+          ],
+          "target_penetration_m": 0.055,
+          "crossing_speed_m_s": 0.27,
+          "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+          "min_surface_clearance_m": -0.05500004825815688,
+          "witness_time_s": 12.96,
+          "witness_body_index": 3,
+          "witness_obstacle_center_m": [
+            0.4146837223389472,
+            0.2289824278190739,
+            0.48
+          ],
+          "interference_interval_s": [
+            12.47,
+            13.4
+          ],
+          "interference_duration_s": 0.9400000000000001,
+          "interference_verified": true
+        },
+        {
+          "obstacle_id": "high_crossing",
+          "height_level": "high",
+          "height_label": "高",
+          "center_height_m": 0.8559159565823936,
+          "target_action": "action_03_pedestal_up",
+          "intended_crossing_time_s": 22.5,
+          "moving_interval_s": [
+            18.7,
+            26.0
+          ],
+          "target_penetration_m": 0.055,
+          "crossing_speed_m_s": 0.27,
+          "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+          "min_surface_clearance_m": -0.05507837000954338,
+          "witness_time_s": 22.51,
+          "witness_body_index": 7,
+          "witness_obstacle_center_m": [
+            0.8953525868627495,
+            0.4098520728833299,
+            0.8559159565823936
+          ],
+          "interference_interval_s": [
+            22.18,
+            22.82
+          ],
+          "interference_duration_s": 0.65,
+          "interference_verified": true
+        }
+      ],
+      "interference_audit": {
+        "case": "combo_03_medium",
+        "difficulty": "medium",
+        "obstacle_count": 3,
+        "sample_step_s": 0.01,
+        "nominal_main_min_surface_clearance_m": -0.05507837000954338,
+        "all_obstacles_interfere": true,
+        "verified_obstacle_count": 3,
+        "max_simultaneous_interfering_obstacles": 1,
+        "obstacle_pair_min_surface_clearance_m": 0.08311717585980644,
+        "gap_endpoint_envelope_min_surface_clearance_m": 0.5974270100701683,
+        "initial_min_surface_clearance_m": 0.7973897459741053,
+        "final_min_surface_clearance_m": 0.774640822842913,
+        "max_obstacle_speed_m_s": 0.4201171875000003,
+        "obstacles": [
+          {
+            "obstacle_id": "low_crossing",
+            "height_level": "low",
+            "height_label": "低",
+            "center_height_m": 0.16,
+            "target_action": "action_01_movein",
+            "intended_crossing_time_s": 3.5,
+            "moving_interval_s": [
+              0.0,
+              7.3
+            ],
+            "target_penetration_m": 0.055,
+            "crossing_speed_m_s": 0.27,
+            "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+            "min_surface_clearance_m": -0.05502307311838099,
+            "witness_time_s": 3.27,
+            "witness_body_index": 0,
+            "witness_obstacle_center_m": [
+              -0.017350591510389753,
+              -0.11120846973931127,
+              0.16
+            ],
+            "interference_interval_s": [
+              2.74,
+              3.8000000000000003
+            ],
+            "interference_duration_s": 1.07,
+            "interference_verified": true
+          },
+          {
+            "obstacle_id": "middle_crossing",
+            "height_level": "middle",
+            "height_label": "中",
+            "center_height_m": 0.48,
+            "target_action": "action_02_orbit",
+            "intended_crossing_time_s": 13.0,
+            "moving_interval_s": [
+              9.2,
+              16.8
+            ],
+            "target_penetration_m": 0.055,
+            "crossing_speed_m_s": 0.27,
+            "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+            "min_surface_clearance_m": -0.05500004825815688,
+            "witness_time_s": 12.96,
+            "witness_body_index": 3,
+            "witness_obstacle_center_m": [
+              0.4146837223389472,
+              0.2289824278190739,
+              0.48
+            ],
+            "interference_interval_s": [
+              12.47,
+              13.4
+            ],
+            "interference_duration_s": 0.9400000000000001,
+            "interference_verified": true
+          },
+          {
+            "obstacle_id": "high_crossing",
+            "height_level": "high",
+            "height_label": "高",
+            "center_height_m": 0.8559159565823936,
+            "target_action": "action_03_pedestal_up",
+            "intended_crossing_time_s": 22.5,
+            "moving_interval_s": [
+              18.7,
+              26.0
+            ],
+            "target_penetration_m": 0.055,
+            "crossing_speed_m_s": 0.27,
+            "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+            "min_surface_clearance_m": -0.05507837000954338,
+            "witness_time_s": 22.51,
+            "witness_body_index": 7,
+            "witness_obstacle_center_m": [
+              0.8953525868627495,
+              0.4098520728833299,
+              0.8559159565823936
+            ],
+            "interference_interval_s": [
+              22.18,
+              22.82
+            ],
+            "interference_duration_s": 0.65,
+            "interference_verified": true
+          }
+        ],
+        "metric": "signed obstacle-sphere surface clearance to full 8-body robot collision geometry; negative means geometric interference",
+        "scope": "offline nominal per-action WBC at matching physical timestamps; no avoidance or PhysX collision response; gaps excluded from hit evidence"
+      }
+    },
+    {
+      "number": 4,
+      "name": "combo_04_medium",
+      "difficulty": "medium",
+      "difficulty_zh": "中等",
+      "title": "04 中等 · 左移 → 推进 → 下降",
+      "main_action_count": 3,
+      "obstacle_count": 3,
+      "duration_s": 25.0,
+      "main_actions": [
+        {
+          "phase": "action_01_truck_left",
+          "motion": "truck_left",
+          "start_s": 0.0,
+          "end_s": 7.0,
+          "duration_s": 7.0,
+          "start_position_m": [
+            0.19931523567243076,
+            0.08583832128602066,
+            0.816679490613355
+          ],
+          "end_position_m": [
+            0.19931523567243076,
+            0.5358383212860207,
+            0.816679490613355
+          ]
+        },
+        {
+          "phase": "action_02_movein",
+          "motion": "movein",
+          "start_s": 9.0,
+          "end_s": 16.0,
+          "duration_s": 7.0,
+          "start_position_m": [
+            0.2460338466429448,
+            0.6733288023983353,
+            0.816679490613355
+          ],
+          "end_position_m": [
+            0.5460338466429449,
+            0.6733288023983353,
+            0.841679490613355
+          ]
+        },
+        {
+          "phase": "action_03_pedestal_down",
+          "motion": "pedestal_down",
+          "start_s": 18.0,
+          "end_s": 25.0,
+          "duration_s": 7.0,
+          "start_position_m": [
+            0.5029331719177608,
+            0.5752899713322303,
+            0.841679490613355
+          ],
+          "end_position_m": [
+            0.6829331719177607,
+            0.5752899713322303,
+            0.741679490613355
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "id": "gap_01",
+          "role": "unfilled_transition_window",
+          "start_s": 7.0,
+          "end_s": 9.0,
+          "from_position_m": [
+            0.19931523567243076,
+            0.5358383212860207,
+            0.816679490613355
+          ],
+          "to_position_m": [
+            0.2460338466429448,
+            0.6733288023983353,
+            0.816679490613355
+          ],
+          "endpoint_gap_m": 0.14521109120005246,
+          "interior_samples_authored": false
+        },
+        {
+          "id": "gap_02",
+          "role": "unfilled_transition_window",
+          "start_s": 16.0,
+          "end_s": 18.0,
+          "from_position_m": [
+            0.5460338466429449,
+            0.6733288023983353,
+            0.841679490613355
+          ],
+          "to_position_m": [
+            0.5029331719177608,
+            0.5752899713322303,
+            0.841679490613355
+          ],
+          "endpoint_gap_m": 0.10709472703440819,
+          "interior_samples_authored": false
+        }
+      ],
+      "obstacle_events": [
+        {
+          "obstacle_id": "low_crossing",
+          "height_level": "low",
+          "height_label": "低",
+          "center_height_m": 0.16,
+          "target_action": "action_01_truck_left",
+          "intended_crossing_time_s": 3.5,
+          "moving_interval_s": [
+            0.0,
+            7.3
+          ],
+          "target_penetration_m": 0.055,
+          "crossing_speed_m_s": 0.27,
+          "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+          "min_surface_clearance_m": -0.05500483651345607,
+          "witness_time_s": 3.37,
+          "witness_body_index": 0,
+          "witness_obstacle_center_m": [
+            -0.11945720546133515,
+            0.23838273626704035,
+            0.16
+          ],
+          "interference_interval_s": [
+            2.22,
+            5.01
+          ],
+          "interference_duration_s": 2.58,
+          "interference_verified": true
+        },
+        {
+          "obstacle_id": "middle_crossing",
+          "height_level": "middle",
+          "height_label": "中",
+          "center_height_m": 0.48,
+          "target_action": "action_02_movein",
+          "intended_crossing_time_s": 12.5,
+          "moving_interval_s": [
+            8.7,
+            16.3
+          ],
+          "target_penetration_m": 0.055,
+          "crossing_speed_m_s": 0.27,
+          "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+          "min_surface_clearance_m": -0.05502462644646844,
+          "witness_time_s": 12.67,
+          "witness_body_index": 2,
+          "witness_obstacle_center_m": [
+            0.07171965142426362,
+            0.6667038157490511,
+            0.48
+          ],
+          "interference_interval_s": [
+            12.21,
+            12.99
+          ],
+          "interference_duration_s": 0.79,
+          "interference_verified": true
+        },
+        {
+          "obstacle_id": "high_crossing",
+          "height_level": "high",
+          "height_label": "高",
+          "center_height_m": 0.7570598090490813,
+          "target_action": "action_03_pedestal_down",
+          "intended_crossing_time_s": 21.5,
+          "moving_interval_s": [
+            17.7,
+            25.0
+          ],
+          "target_penetration_m": 0.055,
+          "crossing_speed_m_s": 0.27,
+          "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+          "min_surface_clearance_m": -0.05517389668690659,
+          "witness_time_s": 21.58,
+          "witness_body_index": 7,
+          "witness_obstacle_center_m": [
+            0.645253546193179,
+            0.47318655824121697,
+            0.7570598090490813
+          ],
+          "interference_interval_s": [
+            21.2,
+            21.89
+          ],
+          "interference_duration_s": 0.7000000000000001,
+          "interference_verified": true
+        }
+      ],
+      "interference_audit": {
+        "case": "combo_04_medium",
+        "difficulty": "medium",
+        "obstacle_count": 3,
+        "sample_step_s": 0.01,
+        "nominal_main_min_surface_clearance_m": -0.05517389668690659,
+        "all_obstacles_interfere": true,
+        "verified_obstacle_count": 3,
+        "max_simultaneous_interfering_obstacles": 1,
+        "obstacle_pair_min_surface_clearance_m": 0.4154983271314656,
+        "gap_endpoint_envelope_min_surface_clearance_m": 0.23412181599690235,
+        "initial_min_surface_clearance_m": 0.5367544127341255,
+        "final_min_surface_clearance_m": 0.4227478780702608,
+        "max_obstacle_speed_m_s": 0.4201171875000003,
+        "obstacles": [
+          {
+            "obstacle_id": "low_crossing",
+            "height_level": "low",
+            "height_label": "低",
+            "center_height_m": 0.16,
+            "target_action": "action_01_truck_left",
+            "intended_crossing_time_s": 3.5,
+            "moving_interval_s": [
+              0.0,
+              7.3
+            ],
+            "target_penetration_m": 0.055,
+            "crossing_speed_m_s": 0.27,
+            "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+            "min_surface_clearance_m": -0.05500483651345607,
+            "witness_time_s": 3.37,
+            "witness_body_index": 0,
+            "witness_obstacle_center_m": [
+              -0.11945720546133515,
+              0.23838273626704035,
+              0.16
+            ],
+            "interference_interval_s": [
+              2.22,
+              5.01
+            ],
+            "interference_duration_s": 2.58,
+            "interference_verified": true
+          },
+          {
+            "obstacle_id": "middle_crossing",
+            "height_level": "middle",
+            "height_label": "中",
+            "center_height_m": 0.48,
+            "target_action": "action_02_movein",
+            "intended_crossing_time_s": 12.5,
+            "moving_interval_s": [
+              8.7,
+              16.3
+            ],
+            "target_penetration_m": 0.055,
+            "crossing_speed_m_s": 0.27,
+            "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+            "min_surface_clearance_m": -0.05502462644646844,
+            "witness_time_s": 12.67,
+            "witness_body_index": 2,
+            "witness_obstacle_center_m": [
+              0.07171965142426362,
+              0.6667038157490511,
+              0.48
+            ],
+            "interference_interval_s": [
+              12.21,
+              12.99
+            ],
+            "interference_duration_s": 0.79,
+            "interference_verified": true
+          },
+          {
+            "obstacle_id": "high_crossing",
+            "height_level": "high",
+            "height_label": "高",
+            "center_height_m": 0.7570598090490813,
+            "target_action": "action_03_pedestal_down",
+            "intended_crossing_time_s": 21.5,
+            "moving_interval_s": [
+              17.7,
+              25.0
+            ],
+            "target_penetration_m": 0.055,
+            "crossing_speed_m_s": 0.27,
+            "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+            "min_surface_clearance_m": -0.05517389668690659,
+            "witness_time_s": 21.58,
+            "witness_body_index": 7,
+            "witness_obstacle_center_m": [
+              0.645253546193179,
+              0.47318655824121697,
+              0.7570598090490813
+            ],
+            "interference_interval_s": [
+              21.2,
+              21.89
+            ],
+            "interference_duration_s": 0.7000000000000001,
+            "interference_verified": true
+          }
+        ],
+        "metric": "signed obstacle-sphere surface clearance to full 8-body robot collision geometry; negative means geometric interference",
+        "scope": "offline nominal per-action WBC at matching physical timestamps; no avoidance or PhysX collision response; gaps excluded from hit evidence"
+      }
+    },
+    {
+      "number": 5,
+      "name": "combo_05_hard",
+      "difficulty": "hard",
+      "difficulty_zh": "困难",
+      "title": "05 困难 · 环绕 → 推进 → 右移",
+      "main_action_count": 3,
+      "obstacle_count": 3,
+      "duration_s": 26.0,
+      "main_actions": [
+        {
+          "phase": "action_01_orbit",
+          "motion": "orbit",
+          "start_s": 0.0,
+          "end_s": 8.0,
+          "duration_s": 8.0,
+          "start_position_m": [
+            0.21578059266324928,
+            0.07526603714349334,
+            0.816679490613355
+          ],
+          "end_position_m": [
+            0.3381360519587773,
+            0.6788644677219016,
+            0.816679490613355
+          ]
+        },
+        {
+          "phase": "action_02_movein",
+          "motion": "movein",
+          "start_s": 10.0,
+          "end_s": 17.0,
+          "duration_s": 7.0,
+          "start_position_m": [
+            0.3909384623553587,
+            0.7910237592327918,
+            0.816679490613355
+          ],
+          "end_position_m": [
+            0.6909384623553587,
+            0.7910237592327918,
+            0.841679490613355
+          ]
+        },
+        {
+          "phase": "action_03_truck_right",
+          "motion": "truck_right",
+          "start_s": 19.0,
+          "end_s": 26.0,
+          "duration_s": 7.0,
+          "start_position_m": [
+            0.6309573697880122,
+            0.6915216453437968,
+            0.841679490613355
+          ],
+          "end_position_m": [
+            0.6309573697880122,
+            0.29152164534379676,
+            0.841679490613355
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "id": "gap_01",
+          "role": "unfilled_transition_window",
+          "start_s": 8.0,
+          "end_s": 10.0,
+          "from_position_m": [
+            0.3381360519587773,
+            0.6788644677219016,
+            0.816679490613355
+          ],
+          "to_position_m": [
+            0.3909384623553587,
+            0.7910237592327918,
+            0.816679490613355
+          ],
+          "endpoint_gap_m": 0.1239669359785659,
+          "interior_samples_authored": false
+        },
+        {
+          "id": "gap_02",
+          "role": "unfilled_transition_window",
+          "start_s": 17.0,
+          "end_s": 19.0,
+          "from_position_m": [
+            0.6909384623553587,
+            0.7910237592327918,
+            0.841679490613355
+          ],
+          "to_position_m": [
+            0.6309573697880122,
+            0.6915216453437968,
+            0.841679490613355
+          ],
+          "endpoint_gap_m": 0.1161826240620822,
+          "interior_samples_authored": false
+        }
+      ],
+      "obstacle_events": [
+        {
+          "obstacle_id": "low_crossing",
+          "height_level": "low",
+          "height_label": "低",
+          "center_height_m": 0.16,
+          "target_action": "action_02_movein",
+          "intended_crossing_time_s": 13.3,
+          "moving_interval_s": [
+            9.5,
+            17.1
+          ],
+          "target_penetration_m": 0.085,
+          "crossing_speed_m_s": 0.2,
+          "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+          "min_surface_clearance_m": -0.08506955306463652,
+          "witness_time_s": 12.77,
+          "witness_body_index": 0,
+          "witness_obstacle_center_m": [
+            0.4992216958628975,
+            0.8661848219849877,
+            0.16
+          ],
+          "interference_interval_s": [
+            12.280000000000001,
+            14.2
+          ],
+          "interference_duration_s": 1.93,
+          "interference_verified": true
+        },
+        {
+          "obstacle_id": "middle_crossing",
+          "height_level": "middle",
+          "height_label": "中",
+          "center_height_m": 0.48,
+          "target_action": "action_02_movein",
+          "intended_crossing_time_s": 13.7,
+          "moving_interval_s": [
+            9.899999999999999,
+            17.5
+          ],
+          "target_penetration_m": 0.085,
+          "crossing_speed_m_s": 0.2,
+          "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+          "min_surface_clearance_m": -0.08501400681604157,
+          "witness_time_s": 13.85,
+          "witness_body_index": 2,
+          "witness_obstacle_center_m": [
+            0.2844214877837306,
+            0.8075327772213687,
+            0.48
+          ],
+          "interference_interval_s": [
+            13.16,
+            14.41
+          ],
+          "interference_duration_s": 1.26,
+          "interference_verified": true
+        },
+        {
+          "obstacle_id": "high_crossing",
+          "height_level": "high",
+          "height_label": "高",
+          "center_height_m": 0.8066823581612109,
+          "target_action": "action_03_truck_right",
+          "intended_crossing_time_s": 22.5,
+          "moving_interval_s": [
+            18.7,
+            26.0
+          ],
+          "target_penetration_m": 0.085,
+          "crossing_speed_m_s": 0.2,
+          "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+          "min_surface_clearance_m": -0.08499913047689181,
+          "witness_time_s": 22.92,
+          "witness_body_index": 7,
+          "witness_obstacle_center_m": [
+            0.6663337321457259,
+            0.37250395939112213,
+            0.8066823581612109
+          ],
+          "interference_interval_s": [
+            21.64,
+            23.759999999999998
+          ],
+          "interference_duration_s": 2.13,
+          "interference_verified": true
+        }
+      ],
+      "interference_audit": {
+        "case": "combo_05_hard",
+        "difficulty": "hard",
+        "obstacle_count": 3,
+        "sample_step_s": 0.01,
+        "nominal_main_min_surface_clearance_m": -0.08506955306463652,
+        "all_obstacles_interfere": true,
+        "verified_obstacle_count": 3,
+        "max_simultaneous_interfering_obstacles": 2,
+        "obstacle_pair_min_surface_clearance_m": 0.08732174448547159,
+        "gap_endpoint_envelope_min_surface_clearance_m": 0.5766762304202446,
+        "initial_min_surface_clearance_m": 0.6480275298482299,
+        "final_min_surface_clearance_m": 0.7104911020497495,
+        "max_obstacle_speed_m_s": 0.47552777777777805,
+        "obstacles": [
+          {
+            "obstacle_id": "low_crossing",
+            "height_level": "low",
+            "height_label": "低",
+            "center_height_m": 0.16,
+            "target_action": "action_02_movein",
+            "intended_crossing_time_s": 13.3,
+            "moving_interval_s": [
+              9.5,
+              17.1
+            ],
+            "target_penetration_m": 0.085,
+            "crossing_speed_m_s": 0.2,
+            "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+            "min_surface_clearance_m": -0.08506955306463652,
+            "witness_time_s": 12.77,
+            "witness_body_index": 0,
+            "witness_obstacle_center_m": [
+              0.4992216958628975,
+              0.8661848219849877,
+              0.16
+            ],
+            "interference_interval_s": [
+              12.280000000000001,
+              14.2
+            ],
+            "interference_duration_s": 1.93,
+            "interference_verified": true
+          },
+          {
+            "obstacle_id": "middle_crossing",
+            "height_level": "middle",
+            "height_label": "中",
+            "center_height_m": 0.48,
+            "target_action": "action_02_movein",
+            "intended_crossing_time_s": 13.7,
+            "moving_interval_s": [
+              9.899999999999999,
+              17.5
+            ],
+            "target_penetration_m": 0.085,
+            "crossing_speed_m_s": 0.2,
+            "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+            "min_surface_clearance_m": -0.08501400681604157,
+            "witness_time_s": 13.85,
+            "witness_body_index": 2,
+            "witness_obstacle_center_m": [
+              0.2844214877837306,
+              0.8075327772213687,
+              0.48
+            ],
+            "interference_interval_s": [
+              13.16,
+              14.41
+            ],
+            "interference_duration_s": 1.26,
+            "interference_verified": true
+          },
+          {
+            "obstacle_id": "high_crossing",
+            "height_level": "high",
+            "height_label": "高",
+            "center_height_m": 0.8066823581612109,
+            "target_action": "action_03_truck_right",
+            "intended_crossing_time_s": 22.5,
+            "moving_interval_s": [
+              18.7,
+              26.0
+            ],
+            "target_penetration_m": 0.085,
+            "crossing_speed_m_s": 0.2,
+            "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+            "min_surface_clearance_m": -0.08499913047689181,
+            "witness_time_s": 22.92,
+            "witness_body_index": 7,
+            "witness_obstacle_center_m": [
+              0.6663337321457259,
+              0.37250395939112213,
+              0.8066823581612109
+            ],
+            "interference_interval_s": [
+              21.64,
+              23.759999999999998
+            ],
+            "interference_duration_s": 2.13,
+            "interference_verified": true
+          }
+        ],
+        "metric": "signed obstacle-sphere surface clearance to full 8-body robot collision geometry; negative means geometric interference",
+        "scope": "offline nominal per-action WBC at matching physical timestamps; no avoidance or PhysX collision response; gaps excluded from hit evidence"
+      }
+    },
+    {
+      "number": 6,
+      "name": "combo_06_hard",
+      "difficulty": "hard",
+      "difficulty_zh": "困难",
+      "title": "06 困难 · 升高 → 左移 → 下降",
+      "main_action_count": 3,
+      "obstacle_count": 3,
+      "duration_s": 25.0,
+      "main_actions": [
+        {
+          "phase": "action_01_pedestal_up",
+          "motion": "pedestal_up",
+          "start_s": 0.0,
+          "end_s": 7.0,
+          "duration_s": 7.0,
+          "start_position_m": [
+            0.2528628157727242,
+            -0.0015000000000000013,
+            0.816679490613355
+          ],
+          "end_position_m": [
+            0.4528628157727242,
+            -0.0015000000000000013,
+            0.936679490613355
+          ]
+        },
+        {
+          "phase": "action_02_truck_left",
+          "motion": "truck_left",
+          "start_s": 9.0,
+          "end_s": 16.0,
+          "duration_s": 7.0,
+          "start_position_m": [
+            0.458326626206532,
+            0.11983604141731492,
+            0.936679490613355
+          ],
+          "end_position_m": [
+            0.458326626206532,
+            0.5698360414173149,
+            0.936679490613355
+          ]
+        },
+        {
+          "phase": "action_03_pedestal_down",
+          "motion": "pedestal_down",
+          "start_s": 18.0,
+          "end_s": 25.0,
+          "duration_s": 7.0,
+          "start_position_m": [
+            0.4169687029240985,
+            0.4605605428373038,
+            0.936679490613355
+          ],
+          "end_position_m": [
+            0.6169687029240984,
+            0.4605605428373038,
+            0.816679490613355
+          ]
+        }
+      ],
+      "transitions": [
+        {
+          "id": "gap_01",
+          "role": "unfilled_transition_window",
+          "start_s": 7.0,
+          "end_s": 9.0,
+          "from_position_m": [
+            0.4528628157727242,
+            -0.0015000000000000013,
+            0.936679490613355
+          ],
+          "to_position_m": [
+            0.458326626206532,
+            0.11983604141731492,
+            0.936679490613355
+          ],
+          "endpoint_gap_m": 0.12145899790168264,
+          "interior_samples_authored": false
+        },
+        {
+          "id": "gap_02",
+          "role": "unfilled_transition_window",
+          "start_s": 16.0,
+          "end_s": 18.0,
+          "from_position_m": [
+            0.458326626206532,
+            0.5698360414173149,
+            0.936679490613355
+          ],
+          "to_position_m": [
+            0.4169687029240985,
+            0.4605605428373038,
+            0.936679490613355
+          ],
+          "endpoint_gap_m": 0.11684011472155299,
+          "interior_samples_authored": false
+        }
+      ],
+      "obstacle_events": [
+        {
+          "obstacle_id": "low_crossing",
+          "height_level": "low",
+          "height_label": "低",
+          "center_height_m": 0.16,
+          "target_action": "action_02_truck_left",
+          "intended_crossing_time_s": 12.3,
+          "moving_interval_s": [
+            8.5,
+            16.1
+          ],
+          "target_penetration_m": 0.085,
+          "crossing_speed_m_s": 0.2,
+          "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+          "min_surface_clearance_m": -0.08501350670386201,
+          "witness_time_s": 11.49,
+          "witness_body_index": 0,
+          "witness_obstacle_center_m": [
+            0.24698595298111004,
+            0.0013200844856688116,
+            0.16
+          ],
+          "interference_interval_s": [
+            10.69,
+            12.66
+          ],
+          "interference_duration_s": 1.98,
+          "interference_verified": true
+        },
+        {
+          "obstacle_id": "middle_crossing",
+          "height_level": "middle",
+          "height_label": "中",
+          "center_height_m": 0.48,
+          "target_action": "action_02_truck_left",
+          "intended_crossing_time_s": 12.7,
+          "moving_interval_s": [
+            8.899999999999999,
+            16.5
+          ],
+          "target_penetration_m": 0.085,
+          "crossing_speed_m_s": 0.2,
+          "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+          "min_surface_clearance_m": -0.0850004818789371,
+          "witness_time_s": 12.64,
+          "witness_body_index": 2,
+          "witness_obstacle_center_m": [
+            0.4194923852330068,
+            0.34135550900718753,
+            0.48
+          ],
+          "interference_interval_s": [
+            12.15,
+            13.129999999999999
+          ],
+          "interference_duration_s": 0.99,
+          "interference_verified": true
+        },
+        {
+          "obstacle_id": "high_crossing",
+          "height_level": "high",
+          "height_label": "高",
+          "center_height_m": 0.8424033430307876,
+          "target_action": "action_03_pedestal_down",
+          "intended_crossing_time_s": 21.5,
+          "moving_interval_s": [
+            17.7,
+            25.0
+          ],
+          "target_penetration_m": 0.085,
+          "crossing_speed_m_s": 0.2,
+          "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+          "min_surface_clearance_m": -0.08507951183858166,
+          "witness_time_s": 21.77,
+          "witness_body_index": 7,
+          "witness_obstacle_center_m": [
+            0.5767913283328392,
+            0.3986475374140349,
+            0.8424033430307876
+          ],
+          "interference_interval_s": [
+            20.91,
+            22.28
+          ],
+          "interference_duration_s": 1.3800000000000001,
+          "interference_verified": true
+        }
+      ],
+      "interference_audit": {
+        "case": "combo_06_hard",
+        "difficulty": "hard",
+        "obstacle_count": 3,
+        "sample_step_s": 0.01,
+        "nominal_main_min_surface_clearance_m": -0.08507951183858166,
+        "all_obstacles_interfere": true,
+        "verified_obstacle_count": 3,
+        "max_simultaneous_interfering_obstacles": 2,
+        "obstacle_pair_min_surface_clearance_m": 0.12365613155202387,
+        "gap_endpoint_envelope_min_surface_clearance_m": 0.4284138973186489,
+        "initial_min_surface_clearance_m": 0.7174639684374977,
+        "final_min_surface_clearance_m": 0.5237582276527716,
+        "max_obstacle_speed_m_s": 0.475527777777778,
+        "obstacles": [
+          {
+            "obstacle_id": "low_crossing",
+            "height_level": "low",
+            "height_label": "低",
+            "center_height_m": 0.16,
+            "target_action": "action_02_truck_left",
+            "intended_crossing_time_s": 12.3,
+            "moving_interval_s": [
+              8.5,
+              16.1
+            ],
+            "target_penetration_m": 0.085,
+            "crossing_speed_m_s": 0.2,
+            "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+            "min_surface_clearance_m": -0.08501350670386201,
+            "witness_time_s": 11.49,
+            "witness_body_index": 0,
+            "witness_obstacle_center_m": [
+              0.24698595298111004,
+              0.0013200844856688116,
+              0.16
+            ],
+            "interference_interval_s": [
+              10.69,
+              12.66
+            ],
+            "interference_duration_s": 1.98,
+            "interference_verified": true
+          },
+          {
+            "obstacle_id": "middle_crossing",
+            "height_level": "middle",
+            "height_label": "中",
+            "center_height_m": 0.48,
+            "target_action": "action_02_truck_left",
+            "intended_crossing_time_s": 12.7,
+            "moving_interval_s": [
+              8.899999999999999,
+              16.5
+            ],
+            "target_penetration_m": 0.085,
+            "crossing_speed_m_s": 0.2,
+            "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+            "min_surface_clearance_m": -0.0850004818789371,
+            "witness_time_s": 12.64,
+            "witness_body_index": 2,
+            "witness_obstacle_center_m": [
+              0.4194923852330068,
+              0.34135550900718753,
+              0.48
+            ],
+            "interference_interval_s": [
+              12.15,
+              13.129999999999999
+            ],
+            "interference_duration_s": 0.99,
+            "interference_verified": true
+          },
+          {
+            "obstacle_id": "high_crossing",
+            "height_level": "high",
+            "height_label": "高",
+            "center_height_m": 0.8424033430307876,
+            "target_action": "action_03_pedestal_down",
+            "intended_crossing_time_s": 21.5,
+            "moving_interval_s": [
+              17.7,
+              25.0
+            ],
+            "target_penetration_m": 0.085,
+            "crossing_speed_m_s": 0.2,
+            "description": "固定高度独立横穿路线；与同一时刻的名义整机轨迹发生几何干涉。",
+            "min_surface_clearance_m": -0.08507951183858166,
+            "witness_time_s": 21.77,
+            "witness_body_index": 7,
+            "witness_obstacle_center_m": [
+              0.5767913283328392,
+              0.3986475374140349,
+              0.8424033430307876
+            ],
+            "interference_interval_s": [
+              20.91,
+              22.28
+            ],
+            "interference_duration_s": 1.3800000000000001,
+            "interference_verified": true
+          }
+        ],
+        "metric": "signed obstacle-sphere surface clearance to full 8-body robot collision geometry; negative means geometric interference",
+        "scope": "offline nominal per-action WBC at matching physical timestamps; no avoidance or PhysX collision response; gaps excluded from hit evidence"
+      }
+    }
+  ]
+}
