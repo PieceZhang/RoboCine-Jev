@@ -22,7 +22,7 @@ from .camera_intent import POLICY,IntentSpec
 from .shot_acceptance import evaluate_shot, attach_acceptance
 
 
-def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, budget=None, model='perplexity', disable_wbc_avoidance=False, target_replay=None, planning_wbc_avoidance=False, planner_model="floating_camera", representation_boxes=3, geometry_preferences=True):
+def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, budget=None, model='perplexity', disable_wbc_avoidance=False, target_replay=None, planning_wbc_avoidance=False, planner_model="floating_camera", representation_boxes=3, geometry_preferences=True,preplan=False):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     scene = RuntimeScene(Path(case)/'runtime_scene.json')
@@ -65,7 +65,12 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
     rows, failure, failure_diagnostics = [], '', None
     begin = time.monotonic()
     dt = .02
+    startup=None
     try:
+        if preplan:
+            from .initial_planning import prepare
+            startup=prepare(engine,state,observed,z)
+            begin=time.monotonic()
         for i in range(round((original.duration+POLICY.terminal_hold_s)/dt)+1):
             t = i*dt
             if i % 5 == 0:
@@ -82,8 +87,10 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
                     candidate_id=card['id'],cards=[card],new_model_decision=False,
                     source_installed_at=installed_at,revalidation='not performed: fixed-target CPU ablation')
             # Exact velocity of this CPU constant-control integration model.
+            control_started=time.monotonic()
             command, info = engine.step(state, observed, t, dt, base_z=z, commanded_q=state[3:],
                                         measured_control=engine.wbc.previous.copy())
+            info['control_thread_wall_s']=time.monotonic()-control_started
             p, r, _ = whole_body_kinematics(state, z)
             truth = DynamicCollision(scene.truth_collision(t), t, uncertainty_rate=0.)
             clearance = float(truth.clearance(state, z).min())
@@ -126,7 +133,7 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
                 safety_source='runner_execution_checks; independent_sweep_audit_is_separate')
             attach_acceptance(summary,acceptance)
             save_json(output/'camera_history.json',history)
-        summary.update(backend='kinematic_integration', obstacle_avoidance_enabled=not disable_wbc_avoidance, wall_s=time.monotonic()-begin,
+        summary.update(startup_planning=startup,backend='kinematic_integration', obstacle_avoidance_enabled=not disable_wbc_avoidance, wall_s=time.monotonic()-begin,
                        observation_source='synthetic_sparse_lidar_raycast', measured_physical_constraints=False,
                        camera_model='configured 384x288 pinhole, 55deg vertical FOV; no RGB observations')
         summary['planning_obstacle_avoidance_enabled'] = engine.planning_limits.obstacle_avoidance
@@ -163,6 +170,8 @@ def main():
     parser.add_argument('--agent-period', type=float, default=.5, help='minimum event spacing, independent of WBC')
     parser.add_argument('--activation-lead', type=float, default=4., help='exact candidate activation lead; never rebased')
     parser.add_argument('--candidate-proposals', type=int, default=6, help='maximum local numerical proposals')
+    parser.add_argument('--single-candidate', action='store_true',help='Jev chooses one construction before generation; no fallback candidates')
+    parser.add_argument('--preplan',action='store_true',help='approve one measured-start candidate before starting the shot clock')
     parser.add_argument('--candidate-budget', type=int, default=2, help='maximum full counterfactual branches')
     parser.add_argument('--candidate-wall-budget',type=float,default=2.,help='cooperative candidate search budget in wall seconds')
     parser.add_argument('--prediction-horizon', type=float, default=8., help='bounded prediction lease in seconds')
@@ -170,11 +179,13 @@ def main():
     parser.add_argument('--no-preview', action='store_true', help='ablate the inherited allocation MPC; retain dynamic safety and bounded task planner')
     parser.add_argument('--allocation-preview', action='store_true', help='enable inherited shot-specific base-allocation MPC for ablation')
     args = parser.parse_args()
+    if args.preplan and (not args.single_candidate or args.mode!='jev' or args.planner_model!='floating_camera'):
+        parser.error('--preplan requires --single-candidate --mode jev --planner-model floating_camera')
     if args.target_replay_root and args.mode != "strict":
         parser.error("--target-replay-root requires --mode strict")
     if args.disable_wbc_avoidance and args.allocation_preview:
         parser.error("tracking-only WBC cannot enable allocation preview")
-    budget = SearchBudget(max_proposals=args.candidate_proposals,decision_period_s=args.agent_period, activation_lead_s=args.activation_lead,
+    budget = SearchBudget(single_candidate=args.single_candidate,max_proposals=args.candidate_proposals,decision_period_s=args.agent_period, activation_lead_s=args.activation_lead,
                           max_rollouts=args.candidate_budget, max_horizon_s=args.prediction_horizon,
                           prediction_step_s=args.prediction_step,candidate_wall_budget_s=args.candidate_wall_budget)
     args.output.mkdir(parents=True, exist_ok=True)
@@ -192,7 +203,7 @@ def main():
                               args.allocation_preview and not args.no_preview, budget, args.model, args.disable_wbc_avoidance,
                               None if args.target_replay_root is None else args.target_replay_root/f"{name}_jev",
                               planning_wbc_avoidance=args.planning_wbc_avoidance, planner_model=args.planner_model,
-                              representation_boxes=args.representation_boxes,geometry_preferences=args.geometry_preferences=='on')
+                              representation_boxes=args.representation_boxes,geometry_preferences=args.geometry_preferences=='on',preplan=args.preplan)
             results.append(dict(case=name, **result))
             save_json(args.output/'runs.json', results)
     return 0 if all(r['completed'] for r in results) else 2

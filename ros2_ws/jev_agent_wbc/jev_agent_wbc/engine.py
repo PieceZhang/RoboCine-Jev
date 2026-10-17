@@ -19,6 +19,32 @@ from .subject_state import compare_subject_evidence
 from .shot_preview_worker import initialize_worker
 from .whole_body_qp import Limits, whole_body_kinematics
 from .safety import solve_with_certificate
+from .kinematic_feasibility import POLICY as KINEMATIC_POLICY
+
+
+def needs_configuration_confirmation(diagnosis, feedback, t):
+    """Allow one fresh diagnosis for transient local-model disagreement.
+
+    The command still passes the independent per-step safety certificate. New
+    geometry/visual risks always escalate immediately. Hard actuator or safety
+    failures raise before feedback is queued. camera_actuator_feasible means
+    exact camera-twist feasibility, not whether the issued command is safe.
+    This gate expires after 0.8 s, including a stalled diagnosis worker.
+    """
+    if (diagnosis['report']['issues'] or not diagnosis.get('kinematics',{}).get('feasible')
+            or diagnosis['report'].get('actual_tracking_error_m',float('inf'))>KINEMATIC_POLICY.position_tolerance_m
+            or not feedback):
+        return False
+    for item in feedback:
+        local=item.get('wbc_feasibility',{})
+        stamp=item.get('time_s',-float('inf'))
+        if (item.get('error')!='trajectory_preserving_configuration_degraded'
+                or 'barrier_mode' not in local
+                or local.get('first_predicted_conflict_s') is not None
+                or local.get('pairs') or t-stamp>=.8
+                or diagnosis['snapshot_time_s']-stamp>=.3):
+            return False
+    return True
 
 
 class CinematicEngine:
@@ -151,7 +177,12 @@ class CinematicEngine:
             guide = getattr(self.wbc,'geometry_guidance',None)
             if guide is not None:
                 geometry['execution_feedback'] = guide.feedback(observation,'measured')
-        return dict(planner_model=self.planner_model, actual_robot_feedback=self.actual_feedback,
+        construction={}
+        if self.budget.single_candidate and self.planner_model=='floating_camera' and self.geometry_scene is not None:
+            from .directed_search import construction_evidence
+            construction=construction_evidence(self.original,self.active,self.geometry_scene,t,t+self.budget.activation_lead_s,
+                mount_height_m=None if geometry is None else geometry['world_from_mount']['translation_m'][2])
+        return dict(planner_model=self.planner_model, actual_robot_feedback=self.actual_feedback,construction=construction,
             robot_geometry=geometry,
             camera_task=TaskContext(self.original.sha256,t,self.original.duration,
                 earliest_change,self.report.get('kinematics',{}).get('first_failure_s'),
@@ -322,7 +353,16 @@ class CinematicEngine:
                     kept=[]
                     for feedback in self.pending_feedback:
                         report=feedback.get('wbc_feasibility',{})
-                        recovered=(result['report'].get('actual_tracking_error_m',float('inf'))<.005
+                        # Use the existing FK tracking tolerance for a local
+                        # task-velocity disagreement with no reported proximity
+                        # conflict. A hard 5 mm recovery threshold
+                        # used to contradict a fresh, feasible 15 mm gate and
+                        # replace a safe curve for a 5.4 mm transient error.
+                        local_only=(feedback.get('error')=='trajectory_preserving_configuration_degraded'
+                            and 'barrier_mode' in report
+                            and report.get('first_predicted_conflict_s') is None and not report.get('pairs'))
+                        recovery_limit=KINEMATIC_POLICY.position_tolerance_m if local_only else .005
+                        recovered=(result['report'].get('actual_tracking_error_m',float('inf'))<recovery_limit
                             and result.get('kinematics',{}).get('feasible')
                             and result['snapshot_time_s']-feedback.get('time_s',t)>=.3
                             and feedback.get('error') in ('trajectory_preserving_configuration_degraded',
@@ -340,6 +380,12 @@ class CinematicEngine:
                     self.pending_feedback=kept
                 if t-result['snapshot_time_s'] > self.budget.max_prediction_age_s:
                     self._feedback('diagnosis_expired', t)
+                elif (self.active is not self.original and
+                        needs_configuration_confirmation(result,self.pending_feedback,t)):
+                    self._write('configuration_confirmation_pending',t,
+                        snapshot_time_s=result['snapshot_time_s'],
+                        reason='transient_local_model_disagreement_requires_fresh_diagnosis',
+                        feedback=self.pending_feedback)
                 elif (result['report']['issues'] or self.pending_feedback):
                     self.context = self._evidence(t)
                     signature = (self.context['event'], self.context['phase']['name'],
@@ -360,7 +406,8 @@ class CinematicEngine:
                 self._write('candidate_set', t, cards=[c.card() for c in candidates],
                     evaluations=result['evaluations'], planner_wall_s=result['wall_s'],
                     untested_proposals=result.get('untested_proposals'), search_exhausted=result.get('search_exhausted'),
-                    kinematic_prior=result.get('kinematic_prior'))
+                    kinematic_prior=result.get('kinematic_prior'),construction_plan=result.get('construction_plan'),
+                    generated_proposals=result.get('generated_proposals'))
                 if not self.pending_candidates:
                     self.rejected_stale += 1
                     self._feedback('all_candidates_expired_before_selection', t)
@@ -440,6 +487,7 @@ class CinematicEngine:
                     semantic['strategy'],scene,np.asarray(state).copy(),self.wbc.previous.copy(),
                     t,base_z,self.planning_limits,evidence=self.perception.snapshot(t),
                     intrinsics=self.intrinsics,budget=self.budget,search_config=semantic['search_config'],
+                    **({'construction_plan':semantic['construction_plan']} if 'construction_plan' in semantic else {}),
                     commanded_q=None if commanded_q is None else np.asarray(commanded_q).copy())
             elif semantic['stage'] == 'selection':
                 candidate = self.pending_candidates.get(semantic['candidate_id'])

@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import json
 import os
+import socket
 from pathlib import Path
 import time
 import urllib.request
@@ -136,6 +137,14 @@ class JevError(RuntimeError):
     pass
 
 
+class JevTransportUnavailable(JevError):
+    """No semantic answer was obtained; never a negative planning result."""
+
+
+class JevProtocolError(JevError):
+    """A reply arrived but failed the declared typed protocol."""
+
+
 class _NoAuthRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise JevError('authenticated API redirects are refused')
@@ -163,6 +172,27 @@ class SystemOneClient:
             self.journal.parent.mkdir(parents=True, exist_ok=True)
 
     def ask(self, state, questions):
+        # Retry transport failures on the SAME typed question. A missing reply
+        # is not evidence that a geometric proposal or Jev decision failed.
+        delay = 2.
+        protocol_attempts = 0
+        while True:
+            try:
+                return self._ask_once(state, questions)
+            except JevProtocolError:
+                protocol_attempts += 1
+                if not self._api_key or protocol_attempts>=3 or self.closed:
+                    raise
+                time.sleep(.5)
+            except JevTransportUnavailable:
+                until = time.monotonic()+delay
+                while not self.closed and time.monotonic()<until:
+                    time.sleep(min(.2, max(0., until-time.monotonic())))
+                if self.closed:
+                    raise JevTransportUnavailable('shot ended during API retry; unverified') from None
+                delay = min(30., delay*2.)
+
+    def _ask_once(self, state, questions):
         if self.closed:
             raise JevError('shot ended; remaining semantic requests cancelled')
         payload = dict(model=self.model, state=self.policy+('\nRobot geometry has only mobile_platform and camera_manipulator. Occupancy boxes are conservative approximations, not free-space or safety certificates. Snapshot frames are frozen; mount/camera preference frames move. Choose the entire candidate including its soft geometry preferences. Backend owns motion solving.\n' if state.get('robot_geometry') else '')+'\nRUNTIME EVIDENCE:\n'+json.dumps(compact_evidence(state), ensure_ascii=False, separators=(',', ':')),
@@ -181,23 +211,25 @@ class SystemOneClient:
                 data = json.load(response)
             # Preserve rejected replies too, so protocol failures can be audited.
             record['response'] = data
+            if self._api_key and self.model.startswith('jev-1.') and data.get('model')!=self.model:
+                raise JevProtocolError('response model does not match the pinned official model')
             answers = data.get('answers', {})
             if not isinstance(answers, dict) or set(questions)-set(answers):
-                raise JevError('missing requested answers')
+                raise JevProtocolError('missing requested answers')
             for key, q in questions.items():
                 answer = answers[key]
                 if not isinstance(answer, dict) or answer.get('type') != q['type']:
-                    raise JevError(f'{key}: wrong answer type')
+                    raise JevProtocolError(f'{key}: wrong answer type')
                 if q['type'] == 'choice':
                     if answer.get('choice') not in q['criteria']:
-                        raise JevError(f'{key}: invalid choice')
+                        raise JevProtocolError(f'{key}: invalid choice')
                     probabilities = answer.get('probabilities', {})
                     if set(probabilities) != set(q['criteria']) or not all(_prob(v) for v in probabilities.values()):
-                        raise JevError(f'{key}: invalid option probabilities')
+                        raise JevProtocolError(f'{key}: invalid option probabilities')
                     if abs(sum(probabilities.values())-1.) > .001:
-                        raise JevError(f'{key}: option probabilities do not sum to one')
+                        raise JevProtocolError(f'{key}: option probabilities do not sum to one')
                 elif q['type'] == 'noul' and not _prob(answer.get('noul')):
-                    raise JevError(f'{key}: invalid noul probability')
+                    raise JevProtocolError(f'{key}: invalid noul probability')
             return answers
         except Exception as error:
             if isinstance(error, urllib.error.HTTPError):
@@ -207,7 +239,12 @@ class SystemOneClient:
                 for field in ('error', 'server_detail'):
                     if field in record:
                         record[field] = record[field].replace(self._api_key, '[REDACTED]')
-            raise JevError(record['error']) from (None if self._api_key else error)
+            transient = isinstance(error, (TimeoutError, socket.timeout, ConnectionError)) or (
+                isinstance(error, urllib.error.URLError) and not isinstance(error, urllib.error.HTTPError)) or (
+                isinstance(error, urllib.error.HTTPError) and error.code in (408, 429, 500, 502, 503, 504))
+            record['status'] = 'transport_unverified_retry' if transient else 'invalid_protocol_reply' if isinstance(error,JevProtocolError) else 'request_failed'
+            kind = JevTransportUnavailable if transient else JevProtocolError if isinstance(error,JevProtocolError) else JevError
+            raise kind(record['error']) from (None if self._api_key else error)
         finally:
             record['wall_s'] = time.monotonic()-started
             self.calls += 1
@@ -486,6 +523,40 @@ class CandidateDecider:
         if intent_mode:
             from .intent_paths import STRATEGIES
         stage = evidence['stage']
+        if evidence.get('construction',{}).get('protocol')=='single_candidate/v1' and stage in ('strategy','configuration'):
+            from .directed_search import FAMILIES, options
+            self.client.policy = (
+                'Choose one cinematic construction using only the supplied observed geometry and intent. '
+                'Your choices directly restrict generation; there is no search over alternatives afterward. '
+                'Preserve primary motion direction, a smooth broad curve, subject framing and terminal image. '
+                'Occlusion and exact reference progress are diagnostics, not grounds for a detour. '
+                'All actuator, FK and collision gates remain independent and immutable. '
+                'A local camera-clear route may still collide with the manipulator; favor joint construction '
+                'when coordinated body clearance is uncertain. The mobile platform supplies planar travel; '
+                'vertical detours consume the camera manipulator workspace and wrist reserve. Prefer a '
+                'horizontal seed compatible with the primary shot direction when observed planar space '
+                'is available. Choose a vertical seed when the observed geometry justifies that extra '
+                'manipulator demand. Never claim a numerical certificate.')
+            if stage=='strategy':
+                allowed=evidence['construction'].get('allowed_directions')
+                families={k:v for k,v in FAMILIES.items()
+                          if allowed is None or set(options(k))&set(allowed)}
+                answer=self.client.ask(evidence,{'generator':choice(
+                    'Select the ONE generator and displacement plane that should construct the executable repair.',families)})
+                return dict(stage=stage,strategy=answer['generator']['choice'],single_candidate=True)
+            family=evidence['search_options']['selected_family']
+            plans=options(family)
+            allowed=evidence['construction'].get('allowed_directions',plans)
+            plans={k:v for k,v in plans.items() if k in allowed}
+            descriptions={k:(('Let the single joint fit choose a small coupled displacement from a neutral seed.'
+                if family=='joint_curve' else 'Preserve the spatial chord; adjust only passage time.') if k=='adaptive' else
+                f"Seed one broad {k} displacement along construction.axes_world.{k}; amplitude {v['amplitude_m']} m.")
+                for k,v in plans.items()}
+            answer=self.client.ask(evidence,{'construction':choice(
+                'Fix the single spatial seed inside the already selected generator. '
+                'Use obstacle motion and camera-manipulator geometry; avoid introducing a bend along the primary shot axis.',descriptions)})
+            plan=plans[answer['construction']['choice']]
+            return dict(stage=stage,strategy=family,search_config=plan['search_config'],construction_plan=plan)
         if stage == 'strategy':
             self.client.policy = INTENT_POLICY if intent_mode else CANDIDATE_POLICY
             strategies = {k: v for k, v in STRATEGIES.items()

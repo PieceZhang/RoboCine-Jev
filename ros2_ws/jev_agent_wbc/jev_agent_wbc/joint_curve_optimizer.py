@@ -27,7 +27,8 @@ def refine(path,search,seconds=5.,max_iterations=12):
     if 'shape_basis' in path.geometry:
         basis=np.column_stack([np.interp(ts,path.geometry['times'],np.asarray(path.geometry['shape_basis'])[:,j],left=0.) for j in range(3)])
     target=np.array([path.sample(t)[0] for t in ts]);initial_offset=search.p-target[0]
-    join=1-(10*np.clip((ts-search.t)/(activation-search.t),0,1)**3-15*np.clip((ts-search.t)/(activation-search.t),0,1)**4+6*np.clip((ts-search.t)/(activation-search.t),0,1)**5)
+    join=(1-(10*np.clip((ts-search.t)/(activation-search.t),0,1)**3-15*np.clip((ts-search.t)/(activation-search.t),0,1)**4+6*np.clip((ts-search.t)/(activation-search.t),0,1)**5)
+          if activation>search.t else np.zeros_like(ts))
     target+=join[:,None]*initial_offset
     states=np.tile(search.state,(n,1));xcurve=np.zeros(9)
     if path.program.get('joint_branch')=='opposite':
@@ -42,6 +43,22 @@ def refine(path,search,seconds=5.,max_iterations=12):
         if abs(delta)>np.pi/2:delta-=np.sign(delta)*np.pi
         w=np.clip((ts-search.t)/max(1.5,activation-search.t),0.,1.);w=10*w**3-15*w**4+6*w**5
         yaw=search.state[2]+w*delta
+        if path.program.get('construction_contract'):
+            # Seed the platform from the actual curve tangent, which can
+            # differ greatly from the endpoint chord on an avoidance arch.
+            # Choose one forward/reverse branch from the measured heading;
+            # this is a continuous allocation seed, not an alternate path.
+            planar_steps=np.diff(target[:,:2],axis=0)
+            heading=np.unwrap(np.arctan2(planar_steps[:,1],planar_steps[:,0]))
+            first=int(np.argmax(np.linalg.norm(planar_steps,axis=1)>1e-5))
+            offset_angle=(heading[first]-search.state[2]+np.pi)%(2*np.pi)-np.pi
+            branch=heading[first]-offset_angle-search.state[2]
+            if abs(offset_angle)>np.pi/2:branch+=np.sign(offset_angle)*np.pi
+            desired=np.r_[heading,heading[-1]]-branch
+            desired=search.state[2]+w*(desired-search.state[2])
+            yaw[0]=search.state[2]
+            for k in range(1,n):
+                yaw[k]=yaw[k-1]+np.clip(desired[k]-yaw[k-1],-.7*dt,.7*dt)
         offset=search.p[:2]-search.state[:2]
         for k in range(1,n):
             a=yaw[k]-search.state[2];rot=np.array([[np.cos(a),-np.sin(a)],[np.sin(a),np.cos(a)]])
@@ -75,11 +92,12 @@ def refine(path,search,seconds=5.,max_iterations=12):
                 centers,radii=obstacle_state(camera_observed,float(ts[k]))
                 relative=poses[k]-centers;distance=np.linalg.norm(relative,axis=1)
                 clear=distance-radii-.06
-                mask=clear<.045
+                directed=bool(path.program.get('construction_contract'))
+                mask=clear<(.08 if directed else .045)
                 if np.any(mask):
                     C=np.zeros((sum(mask),size))
                     C[:,-9:]=(relative[mask]/np.maximum(distance[mask,None],1e-9))@np.kron(basis[k:k+1],np.eye(3))
-                    residual(C,clear[mask]-.045,220.)
+                    residual(C,clear[mask]-(.065 if directed else .045),3000. if directed else 220.)
             x=states[k];p,r,j=search.fk(x)
             j9=np.column_stack([np.r_[1.,0,0,0,0,0],np.r_[0.,1,0,0,0,0],j[:,1:]])
             tr=path.sample(ts[k])[1]
@@ -93,7 +111,7 @@ def refine(path,search,seconds=5.,max_iterations=12):
                     rr=look_at(pp,original.subject)@look_at(poses[k],original.subject).T@tr
                     jr[:,a]=Rotation.from_matrix(rr@tr.T).as_rotvec()/eps
                 J[:,-9:]=-np.vstack([np.eye(3),jr])@np.kron(basis[k:k+1],np.eye(3))
-            residual(J,err,120.)
+            residual(J,err,500. if path.program.get('construction_contract') else 120.)
             sigma=search.sigma(j)
             if k and sigma<.045:
                 gradient=np.zeros(9);eps=2e-4
@@ -149,9 +167,27 @@ def refine(path,search,seconds=5.,max_iterations=12):
             axis=original.sample(0.)[1][:,1];axis*=np.sign(chord@axis);axes=[axis]
         for axis in axes:
             for k in range(n-1):
+                # The fixed incoming prefix cannot be changed by any curve
+                # coefficient. Measured initial pose error can temporarily
+                # oppose the authored direction while it converges. Do not
+                # turn that immutable observation into an impossible zero-row
+                # constraint in the suffix optimizer. Full execution direction
+                # and curve checks still report this deviation independently.
+                if ts[k+1]<=activation:continue
                 C=np.zeros((1,size));C[0,-9:]=np.kron(basis[k+1]-basis[k],axis)
                 constraint(C,-(poses[k+1]-poses[k])@axis,np.inf)
         # Low-dimensional curve regularity and continuous endpoint freedom.
+        if path.program.get('construction_axis_world') is not None:
+            selected_axis=np.asarray(path.program['construction_axis_world'])
+            normals=np.asarray(path.program['construction_plane_normal_world'])[None]
+            initial=np.asarray(path.program.get('shape_coefficients',path.program.get('unverified_seed_direction',[0.,0.,0.])+[0.,0.,0.]))
+            for j in range(2):
+                C=np.zeros((1,size));C[:,-9+3*j:-6+3*j]=normals
+                fixed=-normals@(initial[3*j:3*j+3]+xcurve[3*j:3*j+3])
+                width=path.program['construction_plane_tolerance_m']
+                constraint(C,fixed-width,fixed+width)
+            C=np.zeros((1,size));C[0,-9:-6]=selected_axis
+            constraint(C,-selected_axis@(initial[:3]+xcurve[:3]),np.inf)
         J=np.zeros((9,size));J[:,-9:]=np.eye(9)
         residual(J,xcurve,.5)
         C=np.zeros((3,size));C[:,-6:-3]=np.eye(3)
@@ -166,15 +202,20 @@ def refine(path,search,seconds=5.,max_iterations=12):
         lower=np.full(size,-trust);upper=np.full(size,trust)
         lower[:9]=upper[:9]=0.
         for k in range(1,n):
-            lower[9*k+3:9*k+9]=np.maximum(lower[9*k+3:9*k+9],JOINT_LOWER+.02-states[k,3:])
-            upper[9*k+3:9*k+9]=np.minimum(upper[9*k+3:9*k+9],JOINT_UPPER-.02-states[k,3:])
-        lower[-9:]=-.06;upper[-9:]=.06
+            reserve=.12 if path.program.get('construction_contract') else .02
+            lower[9*k+3:9*k+9]=np.maximum(lower[9*k+3:9*k+9],JOINT_LOWER+reserve-states[k,3:])
+            upper[9*k+3:9*k+9]=np.minimum(upper[9*k+3:9*k+9],JOINT_UPPER-reserve-states[k,3:])
+        curve_trust=.6 if path.program.get('construction_contract') and iteration<2 else .06
+        lower[-9:]=-curve_trust;upper[-9:]=curve_trust
         constraint(np.eye(size),lower,upper)
         qp=osqp.OSQP();qp.setup(P=H,q=g,A=sparse.csc_matrix(np.vstack(cons)),l=np.concatenate(los),u=np.concatenate(his),verbose=False,eps_abs=2e-5,eps_rel=2e-5,max_iter=4000,polish=False)
         result=qp.solve()
         if (result.x is None or not np.isfinite(result.x).all() or result.info.status_val in (3,4,5,6) or
                 (result.info.status_val not in (1,2) and result.info.prim_res>.005)):
-            last=dict(reason='coarse_qp_'+result.info.status,iteration=iteration);break
+            matrix=np.vstack(cons);lower_all=np.concatenate(los);upper_all=np.concatenate(his)
+            zero_rows=np.max(np.abs(matrix),axis=1)<1e-12
+            last=dict(reason='coarse_qp_'+result.info.status,iteration=iteration,
+                contradictory_constant_rows=int(np.sum(zero_rows&((lower_all>1e-8)|(upper_all< -1e-8)))));break
         step=result.x;states+=step[:9*n].reshape(n,9);xcurve+=step[-9:]
         last=dict(reason='coarse_sqp_seed',iteration=iteration+1,max_step=float(abs(step).max()),objective=float(e@e),qp_status=result.info.status,qp_residual=float(result.info.prim_res))
         best=(states.copy(),xcurve.copy())
@@ -196,7 +237,21 @@ def refine(path,search,seconds=5.,max_iterations=12):
         trace.append(dict(t=float(t),state=states[k].tolist(),control=np.asarray(c).tolist(),position=p.tolist(),quaternion_xyzw=Rotation.from_matrix(r).as_quat().tolist()))
     geometry=dict(path.geometry,positions=points.tolist(),joint_seed=trace,joint_seed_preference_only=False)
     program=dict(path.program,whole_body_search='sparse_joint_curve_sqp',endpoint_offset_m=(points[-1]-original.sample(original.duration)[0]).tolist())
+    if path.program.get('construction_axis_world') is not None:
+        initial=np.asarray(path.program.get('shape_coefficients',path.program.get('unverified_seed_direction',[0.,0.,0.])+[0.,0.,0.]))
+        coefficients=(initial+xcurve[:6]).reshape(2,3)
+        selected_axis=np.asarray(path.program['construction_axis_world'])
+        perpendicular=coefficients@np.asarray(path.program['construction_plane_normal_world'])
+        if np.max(np.abs(perpendicular))>path.program['construction_plane_tolerance_m']+1e-4 or coefficients[0]@selected_axis< -1e-4:
+            return None,dict(last,reason='construction_direction_contract',wall_s=time.monotonic()-start)
+        program['shape_coefficients']=coefficients.ravel().tolist()
     fitted=IntentPath(original,path.previous,activation,program,path.model,path.intrinsics,geometry=geometry)
+    residuals=[]
+    for k,t in enumerate(ts):
+        p,r,_=search.fk(states[k]);tp,tr=fitted.sample(float(t))[:2]
+        residuals.append([float(np.linalg.norm(p-tp)),float(Rotation.from_matrix(r@tr.T).magnitude())])
+    last['coarse_max_position_error_m']=max(row[0] for row in residuals)
+    last['coarse_max_orientation_error_rad']=max(row[1] for row in residuals)
     quality=curve_quality(fitted)
     if not quality['direction_pass'] or not quality['regular_curve_pass']:return None,dict(last,reason='joint_curve_shape',quality=quality,wall_s=time.monotonic()-start)
     return fitted,dict(last,wall_s=time.monotonic()-start,quality=quality)

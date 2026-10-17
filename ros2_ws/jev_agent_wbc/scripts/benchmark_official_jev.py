@@ -29,6 +29,9 @@ def main():
     p.add_argument('--candidate-seconds', type=float, default=12.)
     p.add_argument('--proposals', type=int, default=6)
     p.add_argument('--shortlist', type=int, default=2)
+    p.add_argument('--single-candidate',action='store_true')
+    p.add_argument('--preplan',action='store_true')
+    p.add_argument('--scenarios',type=Path,default=ROOT/'scenarios')
     a = p.parse_args()
     a.output.mkdir(parents=True, exist_ok=False)
     os.environ.update(TYPESAFE_API_KEY_FILE=str(a.key_file.resolve()),
@@ -43,11 +46,12 @@ def main():
                   pace=a.pace, activation_lead_s=a.lead, candidate_wall_budget_s=a.candidate_seconds,
                   max_proposals=a.proposals,max_rollouts=a.shortlist,parallel_cases=len(names), planner_model='floating_camera',
                   representation_boxes=3, geometry_preferences=True,
-                  obstacle_avoidance_enabled=True)
+                  obstacle_avoidance_enabled=True,single_candidate=a.single_candidate,preplan=a.preplan,
+                  scenarios_source=str(a.scenarios.resolve()))
     (a.output/'provenance.json').write_text(json.dumps(source_manifest(ROOT, config), indent=2))
     shutil.copytree(ROOT/'jev_agent_wbc', a.output/'frozen_code'/'jev_agent_wbc',
                     ignore=shutil.ignore_patterns('__pycache__'))
-    shutil.copytree(ROOT/'scenarios', a.output/'frozen_code'/'scenarios')
+    shutil.copytree(a.scenarios, a.output/'frozen_code'/'scenarios')
     # Workers and their spawned numerical processes execute the same snapshot,
     # even while the next tuning iteration edits the working tree.
     os.environ['PYTHONPATH'] = str((a.output/'frozen_code').resolve())
@@ -61,6 +65,8 @@ def main():
                        '--pace', str(a.pace), '--activation-lead', str(a.lead),
                        '--candidate-wall-budget', str(a.candidate_seconds), '--candidate-proposals',str(a.proposals),
                        '--candidate-budget',str(a.shortlist), '--output', str(a.output/name)]
+            if a.single_candidate:command.append('--single-candidate')
+            if a.preplan:command.append('--preplan')
             futures.append(pool.submit(run_one, command, a.output/(name+'.log')))
         for future in as_completed(futures):
             result = future.result(); results.append(result)

@@ -240,7 +240,10 @@ class DynamicLidarMap(LidarCollisionMap):
                 continue
             # Walls/furniture networks remain static surfels. Compact objects
             # are associated in odom, so robot ego-motion is already removed.
-            if np.max(high[:2] - low[:2]) > .85 or high[2] - low[2] < .10:
+            current=getattr(self,'current_points',selected)
+            packet=current[np.all((current>=low-.08)&(current<=high+.08),axis=1)]
+            round_fit=measured_sphere(packet,min(.005,.2*self.voxel_size))
+            if np.max(high[:2] - low[:2]) > .85 or (high[2] - low[2] < .10 and round_fit is None):
                 continue
             span = high - low
             # Rotating partial scans translate the visible packet along a
@@ -330,9 +333,11 @@ class DynamicLidarMap(LidarCollisionMap):
                 times = np.array(times) - np.mean(times)
                 centers = np.array(centers)
                 velocity = times @ centers / max(times @ times, 1e-9)
-                # These demos use horizontal translation. Vertical centroid
-                # changes from scan coverage must not become flying objects.
-                velocity[2] = 0.
+                # A well-conditioned rigid sphere fit separates actual 3-D
+                # translation from changing surface coverage. Generic partial
+                # boxes still lack that vertical-motion evidence.
+                sphere_observed='sphere' in detection
+                if not sphere_observed:velocity[2] = 0.
                 speed = np.linalg.norm(velocity)
                 if speed > self.maximum_speed:
                     velocity *= self.maximum_speed / speed
@@ -343,12 +348,13 @@ class DynamicLidarMap(LidarCollisionMap):
                     if length > .3 * interval:
                         velocity = track['velocity'] + change * (.3 * interval / length)
                 track['velocity'] = velocity
-                displacement = np.linalg.norm(detection['center'][:2] - track['anchor'][:2])
-                residual = centers[:, :2] - centers[:, :2].mean(axis=0) - times[:, None] * velocity[:2]
-                energy = np.sum((centers[:, :2] - centers[:, :2].mean(axis=0)) ** 2)
+                dimensions=3 if sphere_observed else 2
+                displacement = np.linalg.norm(detection['center'][:dimensions] - track['anchor'][:dimensions])
+                residual = centers[:, :dimensions] - centers[:, :dimensions].mean(axis=0) - times[:, None] * velocity[:dimensions]
+                energy = np.sum((centers[:, :dimensions] - centers[:, :dimensions].mean(axis=0)) ** 2)
                 consistency = 1. - np.sum(residual ** 2) / max(energy, 1e-9)
-                evidence = (len(detection['points']) >= 12 and displacement > .09 and speed > .055 and np.ptp(times) > .3
-                            and consistency > .65 and novelty > .25 and static_fraction < .25)
+                evidence = (len(detection['points']) >= (6 if sphere_observed else 12) and displacement > .09 and speed > .055 and np.ptp(times) > .3
+                            and consistency > .65 and (novelty > .25 or sphere_observed) and static_fraction < .25)
                 track['motion_votes'] = track['motion_votes'] + 1 if evidence else 0
                 if not track['moving'] and track['motion_votes'] >= 2:
                     track['moving'] = True

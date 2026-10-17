@@ -13,10 +13,12 @@ from .jvs_kinematics import CAMERA_OFFSET
 from .cinematic_geometry import curve_quality
 
 
-def timed_curves(original,active,scene,activation,model,intrinsics,count=3,diagnostics=None):
+def timed_curves(original,active,scene,activation,model,intrinsics,count=3,diagnostics=None,displacement=None,skew=.2,initial_boundary=None):
     end=active.duration;span=end-activation
     if span<1.5:return []
     p0,_,v0=active.sample(activation);pe=original.sample(original.duration)[0]
+    if initial_boundary is not None:
+        p0=np.asarray(initial_boundary['position']);v0=np.asarray(initial_boundary['twist'])
     chord=pe-p0;length=np.linalg.norm(chord);axis=chord/max(length,1e-8)
     side=np.cross(axis,[0.,0.,1.]);side/=max(np.linalg.norm(side),1e-8)
     n=max(12,int(np.ceil(span/.16))+1);ts=np.linspace(activation,end,n);dt=ts[1]-ts[0]
@@ -29,6 +31,8 @@ def timed_curves(original,active,scene,activation,model,intrinsics,count=3,diagn
     vertical=np.array([0.,0.,1.])
     directions=[(np.zeros(3),1.),(.2*side,.2),(-.2*side,.2),
         ((-.3*vertical if 'pedestal' not in motion else .55*side),1.),(.4*side,1.),(-.4*side,1.)]
+    if displacement is not None:
+        directions=[(np.asarray(displacement,float),float(skew))]
     def arch(q,skew):
         w=q/(skew+(1-skew)*q)
         return (256./27.)*w**3*(1-w)
@@ -81,11 +85,15 @@ def timed_curves(original,active,scene,activation,model,intrinsics,count=3,diagn
         q=result.x;bow=arch(q,skew)
         pts=p0+q[:,None]*chord+bow[:,None]*displacement
         h=.001;a0=(active.sample(activation+h)[2][:3]-active.sample(activation-h)[2][:3])/(2*h)
+        if initial_boundary is not None:a0=np.zeros(3)
         basis=np.column_stack([64*q**3*(1-q)**3,64*q**3*(1-q)**3*(2*q-1),10*q**3-15*q**4+6*q**5])
         geometry=dict(times=ts.tolist(),positions=pts.tolist(),start_velocity=v0[:3].tolist(),start_acceleration=a0.tolist(),shape_basis=basis.tolist())
         program=dict(route='timing' if not np.any(displacement) else 'right' if displacement@side>0 else 'left',amplitude_m=float(np.linalg.norm(displacement)),
             extension_s=0.,regular_curve=True,curve_family='progress_lattice_curve',endpoint_offset_m=[0.,0.,0.],
             clock='monotone_collision_tunnel',shape_skew=skew,search_role='coordinated_clearance')
+        if initial_boundary is not None:
+            program['measured_initial_boundary']=True
+            geometry['initial_rotation_xyzw']=initial_boundary['quaternion_xyzw']
         path=IntentPath(original,active,activation,program,model,intrinsics,geometry=geometry)
         quality=curve_quality(path)
         diagnostics[-1]['quality']=quality

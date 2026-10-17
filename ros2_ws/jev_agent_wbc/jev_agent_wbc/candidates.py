@@ -46,6 +46,7 @@ class SearchBudget:
     scale_slack: float = .04
     angle_slack_rad: float = .03
     progress_slack: float = .04
+    single_candidate: bool = False
 
     def __post_init__(self):
         if any(isinstance(v, bool) or not isinstance(v, int) for v in (self.max_proposals, self.max_rollouts)):
@@ -386,7 +387,9 @@ def installation_guard(result, active, scene, state, t, budget, *, measured_cont
         return 'approval_binding_mismatch'
     if path_hash(active) != approval.parent_id:
         return 'active_parent_changed'
-    if t >= candidate.path.activation_s or not 0 <= t-result['snapshot_time_s'] <= budget.max_install_age_s:
+    startup=bool(getattr(candidate.path,'program',{}).get('measured_initial_boundary') and
+                 t==candidate.snapshot_time_s==candidate.path.activation_s==result['snapshot_time_s']==0.)
+    if (t >= candidate.path.activation_s and not startup) or not 0 <= t-result['snapshot_time_s'] <= budget.max_install_age_s:
         return 'latest_verification_expired'
     if not -1e-8 <= t-float(scene['observation_stamp']) <= .6:
         return 'scene_stale'

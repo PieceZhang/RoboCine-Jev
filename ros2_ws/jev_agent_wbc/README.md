@@ -1,5 +1,41 @@
 # Jev 相机意图规划与独立执行层
 
+## 单候选构造实验（2026-10-17）
+
+`runner --single-candidate --preplan --mode jev` 在镜头时钟启动前，以实测相机位姿为
+起始边界调用官方 TypeSafe Jev。第一次 Choice 限定生成器及位移平面，第二次 Choice 固定唯一
+空间种子和分配策略；只生成、优化、检查这一条曲线，失败即结束本次初始规划。
+第三次 Choice 绑定通过检查的完整候选。它不做多候选排序，也不会悄悄换方向重试。
+原始镜头、终态与 `shot_acceptance/v1` 门槛不变。默认旧入口仍保留供对照。
+联合曲线的选定绕行方向不得反转，形状系数的平面法向调整限制在 2.5 cm，
+终点仍在原构图误差带内。生成前仅用观测点和机械臂链长必要条件收紧选项，
+不预先生成多条候选再交给 Jev 选择。
+
+随机输入默认只扰动机器人冗余构型，再通过 FK 投影保持原相机的起始位置和姿态；
+障碍位置及三维速度独立扰动。`--initial-mode independent` 是额外压力测试，
+不属于本次保持相机起始位姿的验收范围。
+
+API 连接超时采用相同请求退避重试，记为 `transport_unverified_retry`，不计规划失败；
+官方返回类型、选项概率或模型不匹配会单独记录协议错误。密钥只从文件/环境读取。
+完整记录、随机扰动范围与验收结果见 `DIRECTED_SEARCH_REPORT.txt`。
+
+```bash
+# 创建固定种子的六组扰动输入，并验证单条候选。三个种子均使用独立新目录。
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /usr/bin/python3 \
+  ros2_ws/jev_agent_wbc/scripts/benchmark_directed_jev.py \
+  --output /tmp/jev_single_seed --key-file "$PWD/typesafe_Jev_api_key" \
+  --seed 20261017 --startup --diagnose --candidate-seconds 30
+# 完整 CPU 闭环。pace 是调试等待，不能用于宣称 50 Hz 实时性能。
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /usr/bin/python3 \
+  ros2_ws/jev_agent_wbc/scripts/benchmark_official_jev.py \
+  --output /tmp/jev_single_closed --key-file "$PWD/typesafe_Jev_api_key" \
+  --scenarios /tmp/jev_single_seed/scenarios --single-candidate --preplan \
+  --candidate-seconds 30 --pace .05
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /usr/bin/python3 \
+  ros2_ws/jev_agent_wbc/scripts/analyze_directed_jev.py \
+  --runs /tmp/jev_single_closed --independent
+```
+
 ## 闭环视频默认展示统一 Representation（2026-10-16）
 
 后续交付的 **CPU 整机闭环和 PhysX 整机闭环视频都默认展示**统一 `jev_geometry/v1`：

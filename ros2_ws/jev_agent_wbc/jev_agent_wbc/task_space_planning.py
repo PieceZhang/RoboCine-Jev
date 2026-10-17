@@ -5,6 +5,7 @@ IK screens complete timed candidates. WBC execution and collision safety remain
 independent. Jev never computes or relaxes these numerical constraints.
 """
 import time
+from dataclasses import asdict
 import numpy as np
 from scipy.spatial.transform import Rotation, Slerp
 
@@ -17,6 +18,12 @@ from .kinematic_feasibility import KinematicSearch, summary
 
 RADIUS = .06
 CAPS = dict(radial_m=1.5,lateral_m=1.5,height_m=.65,yaw_rad=np.pi,pitch_rad=np.pi/2,roll_rad=np.pi/2)
+
+
+def verification_snapshot(scene,state,previous,t,base_z,limits,measured_control,commanded_q,base_rotation):
+    return digest(dict(scene=scene,state=np.asarray(state),previous=np.asarray(previous),time_s=t,
+        base_z=base_z,limits=asdict(limits),measured_control=measured_control,
+        commanded_q=commanded_q,base_rotation=base_rotation))
 
 
 class WitnessCameraPrediction:
@@ -163,17 +170,27 @@ def screen(path,search,spec,observed,budget,history):
 
 def build(original,active,strategy,scene,state,previous,t,base_z,limits,
           evidence=None,intrinsics=None,budget=None,commanded_q=None,history=(),
-          measured_control=None,base_rotation=None,search_config=None,representation_boxes=3,geometry_preferences=True):
+          measured_control=None,base_rotation=None,search_config=None,representation_boxes=3,geometry_preferences=True,
+          construction_plan=None,initial_boundary=False):
     budget=budget or SearchBudget();start=time.monotonic()
+    if budget.single_candidate and construction_plan is None:
+        return dict(error='missing_jev_construction_contract',evaluations=[],generated_proposals=0,
+                    wall_s=time.monotonic()-start)
+    if initial_boundary and (t!=0. or active is not original or construction_plan is None):
+        raise ValueError('measured boundary requires a Jev construction before shot startup')
     observed=camera_scene(scene,t,active.duration)
     observed['intrinsics']=intrinsics or observed.get('intrinsics')
     search=KinematicSearch(state,previous,t,base_z,limits,measured_control=measured_control,
         commanded_q=commanded_q,base_rotation=base_rotation,scene=scene,search_config=search_config)
+    if construction_plan is not None:
+        search.config=dict(search.config or {}, allocations=(construction_plan['allocation'],))
     spec=IntentSpec(original,observed.get('subject_model'),observed.get('intrinsics'))
     def project(path):
         if path.program.get('curve_family')=='global_endpoint_polynomial':
             from .joint_curve_optimizer import refine
-            fitted,diagnostics=refine(path,search,seconds=min(8.,budget.candidate_wall_budget_s*.5),max_iterations=30)
+            fitted,diagnostics=refine(path,search,
+                seconds=min(24.,budget.candidate_wall_budget_s*.8) if construction_plan is not None else min(8.,budget.candidate_wall_budget_s*.5),
+                max_iterations=80 if construction_plan is not None else 30)
             if fitted is None:return dict(error='joint_curve_search:'+diagnostics['reason'],summary=diagnostics)
             return dict(path=fitted,summary=diagnostics)
         from .cinematic_geometry import regularize_lift,smooth_lift
@@ -197,7 +214,9 @@ def build(original,active,strategy,scene,state,previous,t,base_z,limits,
         # Functional geometry preferences must not disable the backend's
         # ability to generate a realizable camera proposal. The final exact
         # path (including every deviation) still requires Agent selection.
-        proposal_transform=project if search_config is not None else None)
+        proposal_transform=project if search_config is not None else None,construction_plan=construction_plan,
+        initial_boundary=(dict(position=search.p.tolist(),quaternion_xyzw=Rotation.from_matrix(search.r).as_quat().tolist(),
+                               twist=(search.j@search.velocity).tolist()) if initial_boundary else None))
     from .representation_jvs import JVSGeometryBackend, candidate_geometry
     backend = JVSGeometryBackend(representation_boxes)
     observation = backend.observe(state,t,base_z=base_z,base_rotation=base_rotation)
@@ -216,8 +235,11 @@ def build(original,active,strategy,scene,state,previous,t,base_z,limits,
         geometry = candidate_geometry(candidate,backend,observation,base_z,base_rotation,geometry_preferences)
         geometry['box_budget'] = representation_boxes
         candidate.consequences['geometry'] = geometry
+        if initial_boundary:
+            candidate.consequences['initial_verification_snapshot']=verification_snapshot(
+                scene,state,previous,t,base_z,limits,measured_control,commanded_q,base_rotation)
     result.update(wall_s=time.monotonic()-start,snapshot_time_s=t,kinematic_prior=search.prior(),search_config=search_config,
-                  activation_s=t+budget.activation_lead_s)
+                  activation_s=0. if initial_boundary else t+budget.activation_lead_s)
     return result
 
 
@@ -244,7 +266,9 @@ def verify(candidate,approval,original,scene,state,previous,t,base_z,limits,
     checks['target_authorized']='pass'
     error=support_violation(approval,evidence)
     if error:return dict(error=error,checks=checks)
-    if not 0<=t-candidate.snapshot_time_s<=budget.max_prediction_age_s or t>=candidate.path.activation_s:
+    startup=bool(getattr(candidate.path,'program',{}).get('measured_initial_boundary') and
+                 t==candidate.snapshot_time_s==candidate.path.activation_s==0.)
+    if not 0<=t-candidate.snapshot_time_s<=budget.max_prediction_age_s or (t>=candidate.path.activation_s and not startup):
         return dict(error='candidate_expired_requires_new_program',checks=checks)
     if not -1e-8<=t-float(scene['observation_stamp'])<=.6:return dict(error='scene_stale',checks=checks)
     checks['state_fresh']='pass'
@@ -253,7 +277,19 @@ def verify(candidate,approval,original,scene,state,previous,t,base_z,limits,
     search=KinematicSearch(state,previous,t,base_z,limits,measured_control=measured_control,
         commanded_q=commanded_q,base_rotation=base_rotation,scene=scene,
         search_config=candidate.consequences.get('search_config'))
-    screened=screen(candidate.path,search,spec,observed,budget,history)
+    identical_startup=(startup and candidate.kinematics is not None and candidate.kinematics.get('feasible') and
+        candidate.consequences.get('initial_verification_snapshot')==verification_snapshot(
+            scene,state,previous,t,base_z,limits,measured_control,commanded_q,base_rotation))
+    if identical_startup:
+        # The fully screened continuous witness is part of the exact approved
+        # candidate. Re-solving the SAME initial state can switch redundancy
+        # branches and reject a valid witness. No reuse across changed time,
+        # observations, state, velocity, limits or base pose is permitted.
+        screened=dict(kinematics=candidate.kinematics,value=candidate.validation,
+                      metrics=candidate.consequences['intent'])
+        checks['initial_witness_reused']='identical_snapshot_and_approved_binding'
+    else:
+        screened=screen(candidate.path,search,spec,observed,budget,history)
     checks['kinematic_feasibility']='pass' if screened['kinematics']['feasible'] else 'fail'
     if screened.get('error'):
         return dict(error=screened['error'],checks=checks,kinematics=screened['kinematics'])

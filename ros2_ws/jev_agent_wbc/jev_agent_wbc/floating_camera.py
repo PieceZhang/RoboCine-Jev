@@ -149,7 +149,8 @@ def intent_prediction(spec, path, scene, t, history=(), step=.05):
 
 
 def camera_candidates(original, active, strategy, scene, t, budget, radius, history=(), allow_time_extension=True,
-                      kinematic_search=None, numerical_gate=None, search_config=None, proposal_transform=None):
+                      kinematic_search=None, numerical_gate=None, search_config=None, proposal_transform=None,
+                      construction_plan=None,initial_boundary=None):
     start = time.monotonic()
     if active.duration-t-budget.activation_lead_s < .3:
         return dict(error='insufficient_time_for_exact_plan_activation')
@@ -157,13 +158,17 @@ def camera_candidates(original, active, strategy, scene, t, budget, radius, hist
     observation_error=subject_observation_error(observation,original,t)
     if observation_error:return dict(error=observation_error)
     spec = IntentSpec(original, scene.get('subject_model'), scene.get('intrinsics'))
-    if numerical_gate is not None:
+    if construction_plan is not None:
+        from .directed_search import generate
+        paths=generate(original,active,scene,0. if initial_boundary is not None else t+budget.activation_lead_s,
+                       spec.model,spec.intrinsics,budget,construction_plan,initial_boundary=initial_boundary)
+    elif numerical_gate is not None:
         from .regular_curve_search import bounded_paths
         paths=bounded_paths(original,active,scene,t+budget.activation_lead_s,spec.model,spec.intrinsics,budget)
     else:
         paths = propose_intent_paths(original,active,strategy,t,budget,spec.model,spec.intrinsics,
                                      allow_time_extension,scene,kinematic_search,search_config)
-    if numerical_gate is not None:
+    if numerical_gate is not None and construction_plan is None:
         # Spend expensive continuous robot checks on camera programs that meet
         # the task first, rather than on the first nearly identical box-clear
         # detour. These are only ordering scores, never an execution approval.
@@ -193,9 +198,10 @@ def camera_candidates(original, active, strategy, scene, t, budget, radius, hist
     seed_wall_s=time.monotonic()-start
     ranked, evaluations = [], []
     attempts=[(path,False) for path in paths]
-    if proposal_transform is not None:
+    if proposal_transform is not None and construction_plan is None:
         attempts += [(path,True) for path in paths if not path.program.get('curve_family')]
     for path,project_pass in attempts:
+        construction_solver=None
         if project_pass and ranked:
             break
         if numerical_gate is not None and evaluations and time.monotonic()-start>=budget.candidate_wall_budget_s:
@@ -214,8 +220,10 @@ def camera_candidates(original, active, strategy, scene, t, budget, radius, hist
                     failure_class='unverified_numerical_search',kinematics=proposal.get('summary')))
                 continue
             path=proposal['path']
+            construction_solver=proposal.get('summary')
         seed_quality = curve_quality(path)
-        if numerical_gate is not None and (not seed_quality['direction_pass'] or not seed_quality['regular_curve_pass']):
+        if numerical_gate is not None and (not seed_quality['direction_pass'] or not seed_quality['regular_curve_pass'] or
+                (construction_plan is not None and not seed_quality['strict_full_curve_pass'])):
             evaluations.append(dict(id=path_hash(path),program=path.program,curve_quality=seed_quality,
                 physical=Validation(False,'cinematic_seed_shape').to_dict(),
                 rejected='cinematic_curve_direction_or_shape',failure_class='cinematic_geometry'))
@@ -236,7 +244,7 @@ def camera_candidates(original, active, strategy, scene, t, budget, radius, hist
                 evaluations.append(dict(id=path_hash(path),program=path.program,
                     physical=direct_gate.get('value',camera_value).to_dict(),
                     rejected=direct_gate['error'],failure_class='unverified_numerical_search',
-                    kinematics=direct_gate.get('summary')))
+                    kinematics=direct_gate.get('summary'),construction_solver=construction_solver))
                 continue
         if project_pass:
             proposal=proposal_transform(path)
@@ -249,11 +257,12 @@ def camera_candidates(original, active, strategy, scene, t, budget, radius, hist
             path=proposal['path']
             direct_gate = None
         value, _ = evaluate_path(path,scene,t,path.duration+POLICY.terminal_hold_s,radius)
-        detail = dict(id=path_hash(path), program=path.program, physical=value.to_dict())
+        detail = dict(id=path_hash(path), program=path.program, physical=value.to_dict(),construction_solver=construction_solver)
         from .cinematic_geometry import curve_quality
         quality = curve_quality(path)
         detail['curve_quality'] = quality
-        if numerical_gate is not None and (not quality['direction_pass'] or not quality['regular_curve_pass']):
+        if numerical_gate is not None and (not quality['direction_pass'] or not quality['regular_curve_pass'] or
+                (construction_plan is not None and not quality['strict_full_curve_pass'])):
             detail.update(rejected='cinematic_curve_direction_or_shape', failure_class='cinematic_geometry')
             evaluations.append(detail)
             continue
@@ -301,6 +310,7 @@ def camera_candidates(original, active, strategy, scene, t, budget, radius, hist
             break
     candidates = [c for _,c in sorted(ranked,key=lambda pair:pair[0])[:budget.max_rollouts]]
     return dict(candidates=candidates,evaluations=evaluations,wall_s=time.monotonic()-start,seed_wall_s=seed_wall_s,
+                construction_plan=construction_plan,generated_proposals=len(paths),
                 search_exhausted=len(evaluations)==len(attempts), untested_proposals=max(0,len(attempts)-len(evaluations)),
                 error='' if candidates else 'no_verified_executable_candidate')
 

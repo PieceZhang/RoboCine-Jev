@@ -25,7 +25,7 @@ def positions_at(path, times):
     if isinstance(path, IntentPath):
         if path.program['route'] == 'continuation':
             return positions_at(path.previous,times)
-        before = times <= path.activation_s
+        before = times < path.activation_s if path.program.get('measured_initial_boundary') else times <= path.activation_s
         positions = np.empty((len(times), 3))
         positions[before] = positions_at(path.previous, times[before])
         positions[~before] = path.translation(np.clip(times[~before], path.activation_s, path.duration))
@@ -115,6 +115,14 @@ class IntentPath:
         self.translation = make_interp_spline(g['times'], g['positions'], k=5,
             bc_type=([(1, np.array(g['start_velocity'])), (2, np.array(g['start_acceleration']))],
                      [(1, np.zeros(3)), (2, np.zeros(3))]))
+        self.initial_rotation_residual=None
+        if self.program.get('measured_initial_boundary'):
+            if self.activation_s!=0.:
+                raise ValueError('measured initial boundary is only valid before the shot starts')
+            measured=Rotation.from_quat(g['initial_rotation_xyzw']).as_matrix()
+            p,r=pose_at(previous,0.)
+            nominal=look_at(self.translation(0.),self.subject)@look_at(p,self.subject).T@r
+            self.initial_rotation_residual=Rotation.from_matrix(measured@nominal.T).as_rotvec()
         self._cache = {}
 
     def parent_time(self, t):
@@ -307,7 +315,7 @@ class IntentPath:
         return p+correction+endpoint_blend*endpoint+bow*self.program['amplitude_m']*direction
 
     def pose(self, t):
-        if t <= self.activation_s or self.program['route'] == 'continuation':
+        if (t < self.activation_s or (t == self.activation_s and not self.program.get('measured_initial_boundary'))) or self.program['route'] == 'continuation':
             return pose_at(self.previous,t)
         p = self.translation(np.clip(t, self.activation_s, self.duration))
         base_p, base_r = pose_at(self.previous,self.parent_time(t))
@@ -317,10 +325,12 @@ class IntentPath:
             base_p=base_p+blend*(target_p-base_p)
             base_r=Rotation.from_rotvec(blend*Rotation.from_matrix(target_r@base_r.T).as_rotvec()).as_matrix()@base_r
         r = look_at(p, self.subject)@look_at(base_p, self.subject).T@base_r
+        if self.initial_rotation_residual is not None:
+            r=Rotation.from_rotvec((1.-smoothstep(np.clip(t/self.duration,0.,1.)))*self.initial_rotation_residual).as_matrix()@r
         return p, r
 
     def sample(self, t):
-        if t <= self.activation_s or self.program['route'] == 'continuation':
+        if (t < self.activation_s or (t == self.activation_s and not self.program.get('measured_initial_boundary'))) or self.program['route'] == 'continuation':
             return self.previous.sample(t)
         key = float(t)
         if key in self._cache:

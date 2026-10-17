@@ -13,13 +13,15 @@ from .reference import look_at
 from .jvs_kinematics import CAMERA_OFFSET
 
 
-def global_curves(original, active, scene, activation, model, intrinsics, count=6, seconds=3., diagnostics=None, tempo=2.):
+def global_curves(original, active, scene, activation, model, intrinsics, count=6, seconds=3., diagnostics=None, tempo=2., seed_direction=None, initial_boundary=None, seed_amplitude=.3, construction_axis=None, plane_tolerance=.025, fit_seed=True):
     started=time.monotonic()
     intrinsics=default_intrinsics() if intrinsics is None else intrinsics
     end=active.duration; span=end-activation
     if span<.5:return []
     p0,_,v0=active.sample(activation);h=.001
     a0=(active.sample(activation+h)[2][:3]-active.sample(activation-h)[2][:3])/(2*h)
+    if initial_boundary is not None:
+        p0=np.asarray(initial_boundary['position']);v0=np.asarray(initial_boundary['twist']);a0=np.zeros(3)
     pe=original.sample(original.duration)[0]
     times=np.linspace(activation,end,65);u=(times-activation)/span
     from scipy.special import comb
@@ -36,7 +38,11 @@ def global_curves(original, active, scene, activation, model, intrinsics, count=
     base+=(u-6*u**3+8*u**4-3*u**5)[:,None]*span*(v0[:3]-vstart*axis)
     base+=.5*(u**2-3*u**3+3*u**4-u**5)[:,None]*span**2*(a0-astart*axis)
     q=s/(.2+.8*s)
-    bow=(256./27.)*q**3*(1-q)
+    # At startup the measured velocity and acceleration are zero. A single
+    # parabolic arch in progress can therefore start in its own natural
+    # tangent while remaining C2 in physical time. The old ninth-order onset
+    # first follows the chord then turns sharply into a large avoidance arch.
+    bow=4*s*(1-s) if initial_boundary is not None else (256./27.)*q**3*(1-q)
     basis=np.column_stack([bow,bow*(2*s-1),10*u**3-15*u**4+6*u**5])
     centers=[];radii=[]
     for t in times:
@@ -83,16 +89,29 @@ def global_curves(original, active, scene, activation, model, intrinsics, count=
         pts=positions(x);d2=np.diff(pts,n=2,axis=0)
         return float(8*np.sum(d2*d2)+.025*np.sum(x[:3]**2)+.12*np.sum(x[3:6]**2)+.03*np.sum(x[6:]**2))
     directions=[np.zeros(3),vertical,-vertical,side,-side,(side-vertical)/np.sqrt(2)]
+    if seed_direction is not None:
+        directions=[np.asarray(seed_direction if construction_axis is None else construction_axis,float)]
+    if not fit_seed:directions=[]
     results=[]
     diagnostics=[] if diagnostics is None else diagnostics
     for d in directions:
         if diagnostics and time.monotonic()-started>=seconds:break
-        x=np.r_[.3*d,np.zeros(3),np.zeros(3)]
+        x=np.r_[seed_amplitude*d,np.zeros(3),np.zeros(3)]
+        equal_axis=np.asarray(axis)[None]
+        shape_constraints=[{'type':'eq','fun':lambda x:(x[:6].reshape(2,3)@equal_axis.T).ravel()}]
+        if construction_axis is not None:
+            selected_axis=np.asarray(construction_axis,float)
+            normal=np.cross(selected_axis,axis);normal/=max(np.linalg.norm(normal),1e-8)
+            equal_axis=normal[None]
+            shape_constraints=[{'type':'ineq','fun':lambda x:np.r_[x[:3]@selected_axis,
+                plane_tolerance-np.abs(x[:6].reshape(2,3)@equal_axis.T).ravel()]}]
         fit=minimize(objective,x,method='SLSQP',bounds=[(-.65,.65)]*6+list(zip(-extent,extent)),
-            constraints=[{'type':'ineq','fun':constraints},{'type':'eq','fun':lambda x:x[:6].reshape(2,3)@axis}],options={'maxiter':35,'ftol':1e-7})
+            constraints=[{'type':'ineq','fun':constraints}]+shape_constraints,options={'maxiter':35,'ftol':1e-7})
         gap=float(np.min(constraints(fit.x)))
         diagnostics.append(dict(seed=d.tolist(),success=bool(fit.success),min_constraint=gap,min_index=int(np.argmin(constraints(fit.x))),parameters=fit.x.tolist(),objective=float(fit.fun)))
         if gap < -1e-4:continue
+        if construction_axis is not None and (np.max(np.abs(fit.x[:6].reshape(2,3)@equal_axis.T))>plane_tolerance+1e-5
+                or fit.x[:3]@selected_axis< -1e-5):continue
         endpoint=pe+fit.x[6:]
         if not inside_terminal_band(terminal_error(original,endpoint,model,intrinsics),.8):
             # Ray-contract the optimized endpoint against actual image errors,
@@ -113,6 +132,9 @@ def global_curves(original, active, scene, activation, model, intrinsics, count=
             curve_family='global_endpoint_polynomial',endpoint_offset_m=fit.x[6:].tolist(),
             shape_coefficients=fit.x[:6].tolist(),curve_tempo=tempo,endpoint_region='continuous_image_checked',search_role='coordinated_clearance')
         geometry=dict(times=times.tolist(),positions=pts.tolist(),shape_basis=basis.tolist(),start_velocity=v0[:3].tolist(),start_acceleration=a0.tolist())
+        if initial_boundary is not None:
+            program['measured_initial_boundary']=True
+            geometry['initial_rotation_xyzw']=initial_boundary['quaternion_xyzw']
         path=IntentPath(original,active,activation,program,model,intrinsics,geometry=geometry)
         q=curve_quality(path)
         diagnostics[-1]['quality']=q
@@ -124,8 +146,18 @@ def global_curves(original, active, scene, activation, model, intrinsics, count=
         program=dict(route='timing',amplitude_m=0.,extension_s=0.,regular_curve=True,
             curve_family='global_endpoint_polynomial',curve_tempo=tempo,
             endpoint_offset_m=[0.,0.,0.],search_role='coordinated_clearance')
-        geometry=dict(times=times.tolist(),positions=base.tolist(),shape_basis=basis.tolist(),
+        # A directed request must retain its selected seed even when the
+        # camera-only solve has no certificate. Silently replacing every
+        # failed direction with the same straight line defeats Jev's choice.
+        seed=np.zeros(3) if seed_direction is None else seed_amplitude*np.asarray(seed_direction if construction_axis is None else construction_axis,float)
+        if construction_axis is None:seed-=axis*(seed@axis)
+        program['unverified_seed_direction']=seed.tolist()
+        if not fit_seed:program['seed_kind']='directed_analytic_arch'
+        geometry=dict(times=times.tolist(),positions=(base+basis[:,:1]*seed).tolist(),shape_basis=basis.tolist(),
             start_velocity=v0[:3].tolist(),start_acceleration=a0.tolist())
+        if initial_boundary is not None:
+            program['measured_initial_boundary']=True
+            geometry['initial_rotation_xyzw']=initial_boundary['quaternion_xyzw']
         results.append(IntentPath(original,active,activation,program,model,intrinsics,geometry=geometry))
     return results
 
