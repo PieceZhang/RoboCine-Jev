@@ -2,9 +2,10 @@
 """Headless, lockstep PhysX suite; one Kit startup, short independent shots.
 
 Sparse dual LiDAR uses real PhysX closest-hit queries (not obstacle truth).
-Robot/camera poses and contact audits come from PhysX. Reference RGB renders the
-original static scene without movers/robot; execution RGB includes both. SAM is
-run separately after Kit exits so the two large GPU consumers never overlap.
+Robot/camera poses and contact audits come from PhysX. The detached reference
+camera follows the original path in the same live scene and render pass. The
+stabilized virtual camera supplies Agent camera feedback by default. SAM is run
+separately after Kit exits so the two large GPU consumers never overlap.
 """
 import argparse
 import json
@@ -16,6 +17,9 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+NUMERIC_SITE=os.environ.get('JEV_PHYSX_NUMERIC_SITE')
+if NUMERIC_SITE:
+    sys.path.insert(0,str(Path(NUMERIC_SITE).resolve()))
 
 import jvs_isaac_sim as backend
 
@@ -23,7 +27,9 @@ import jvs_isaac_sim as backend
 def arguments():
     parser = backend.build_parser()
     parser.set_defaults(headless=True, physics_hz=1000., enable_lidar=False,
-                        actuator_armature=.05, wheel_drive_damping=20.,
+                        actuator_armature=0., arm_drive_stiffness=1800.,
+                        arm_drive_damping=100000., wheel_drive_damping=100000.,
+                        solver_velocity_iterations=128, caster_friction=0.,
                         xacro=str(ROOT/'urdf/jev_agent_wbc.urdf.xacro'))
     # The inherited xacro option was originally required; this package supplies its own.
     for action in parser._actions:
@@ -37,29 +43,43 @@ def arguments():
     parser.add_argument('--api-url', default='http://127.0.0.1:8000/v1/systemone')
     from jev_agent_wbc.camera_output import add_camera_arguments
     add_camera_arguments(parser)
+    parser.set_defaults(camera_output='stabilized')
     parser.add_argument('--virtual-stabilizer-ros', action='store_true', help='independent reference-aware virtual camera via timestamped ROS batches')
     parser.add_argument('--skip-reference-video', action='store_true', help='record raw/stabilized/overview only')
     parser.add_argument('--record', action='store_true')
     parser.add_argument('--record-fps', type=float, default=8.)
     parser.add_argument('--width', type=int, default=384)
     parser.add_argument('--height', type=int, default=288)
-    parser.add_argument('--pace', type=float, default=1., help='maximum sim/wall rate; 0 means unpaced')
+    parser.add_argument('--pace', type=float, default=.025, help='maximum sim/wall rate; 0 means unpaced')
     parser.add_argument('--agent-period', type=float, default=.5)
-    parser.add_argument('--activation-lead', type=float, default=4.)
-    parser.add_argument('--candidate-budget', type=int, default=3)
+    parser.add_argument('--activation-lead', type=float, default=.9)
+    parser.add_argument('--candidate-budget', type=int, default=2)
+    parser.add_argument('--candidate-proposals', type=int, default=6)
+    parser.add_argument('--candidate-wall-budget', type=float, default=18.)
     parser.add_argument('--prediction-horizon', type=float, default=8.)
     parser.add_argument('--prediction-step', type=float, default=.1)
     parser.add_argument('--audit-prediction', action='store_true', help='save bounded observation snapshots for offline predictor diagnostics')
+    parser.add_argument('--lidar-static-input',choices=['cpu_fixture','full_raycast'],default='cpu_fixture',
+                        help='CPU calibrated static background + real moving ray hits, or full observed surfaces')
+    parser.add_argument('--motor-targets',choices=['cpu_hold','physical_slew'],default='physical_slew',
+                        help='physical drive interface; shared WBC still uses the unmodified CPU endpoint command contract')
+    parser.add_argument('--duration-limit',type=float,help='diagnostic executed prefix only; never a completed-shot result')
+    parser.add_argument('--base-support',choices=['upright','free'],default='upright',
+                        help='upright matches CPU planar-base roll/pitch assumptions; XYZ and yaw remain dynamic')
+    parser.add_argument('--solver-position-iterations',type=int,default=255)
     parser.add_argument('--no-preview', action='store_true', help='ablate inherited allocation MPC, retaining safety and bounded task planner')
     parser.add_argument('--allocation-preview', action='store_true', help='enable inherited shot-specific base-allocation MPC for ablation')
     parser.add_argument('--async-coordination', action='store_true',
                         help='run the cross-phase allocation in its live nonblocking worker instead of lockstep')
-    parser.add_argument('--acceleration-reserve', type=float, default=.4,
+    parser.add_argument('--acceleration-reserve', type=float, default=1.,
                         help='operating acceleration / physical acceleration; evaluation limits stay fixed')
-    parser.add_argument('--yaw-acceleration-reserve', type=float, default=.1,
+    parser.add_argument('--yaw-acceleration-reserve', type=float, default=None,
                         help='optional separate operating fraction for chassis yaw acceleration')
     args = parser.parse_args()
     backend.validate_args(args)
+    if args.arm_drive_stiffness<=0 or args.wheel_drive_damping<=0:
+        parser.error('physical inverse-dynamics drive requires positive stiffness and damping')
+    if not 1<=args.solver_position_iterations<=255:parser.error('solver position iterations must be in [1,255]')
     if args.physics_hz < 200 or abs(args.physics_hz/50-round(args.physics_hz/50)) > 1e-8:
         parser.error('physics-hz must be a multiple of 50 and at least 200')
     if not 0 < args.acceleration_reserve <= 1:
@@ -80,7 +100,9 @@ def run_case(args, app, name, mode, output):
     import omni.kit.app
     from jev_agent_wbc.scenarios import RuntimeScene
     from jev_agent_wbc.reference import OriginalReference
-    from jev_agent_wbc.sensors import RuntimeLidar, RAYS, estimate_subject_from_points
+    from jev_agent_wbc.sensors import RuntimeLidar, RAYS
+    from physx_compat import install_worker_adapter, subject_from_returns, MotorTargets, configure_rolling_contacts, generalized_gravity
+    install_worker_adapter()
     from jev_agent_wbc.engine import CinematicEngine
     from jev_agent_wbc.candidates import SearchBudget
     from jev_agent_wbc.evaluation import EVALUATION_PROTOCOL, save_json, trajectory_summary
@@ -88,6 +110,9 @@ def run_case(args, app, name, mode, output):
     from jev_agent_wbc.whole_body_qp import Limits, whole_body_kinematics
     from jev_agent_wbc.wbc_metrics import PhysicsAudit
     from jev_agent_wbc.actuation import certify_control_ramp
+    from jev_agent_wbc.camera_intent import POLICY, IntentSpec, visibility, progress_at
+    from jev_agent_wbc.task_space_planning import camera_scene
+    from jev_agent_wbc.contracts import native
 
     output.mkdir(parents=True, exist_ok=False)
     runtime_scene = RuntimeScene(args.scenarios/name/'runtime_scene.json')
@@ -109,12 +134,19 @@ def run_case(args, app, name, mode, output):
     prediction_snapshots = []
     recording_error = ''
     physical_summary = None
+    physical_limits = limits = Limits()
+    gravity_max = np.zeros(8)
+    feedforward_max = np.zeros(8)
+    mover_audit = dict(samples=0, max_target_error_m=0., max_display_error_m=0.)
     begin = time.monotonic()
     dt = .02
     sim = None
     try:
         SimulationContext.clear_instance()
         stage = backend.prepare_stage(args, app)
+        if args.add_ground_plane:
+            from isaacsim.core.api.objects import GroundPlane
+            ground=GroundPlane(prim_path='/World/groundPlane',z_position=float(fixture['base_z']))
         with tempfile.TemporaryDirectory(prefix='jev_robot_') as folder:
             urdf = Path(folder)/'robot.urdf'
             backend.expand_xacro(args, urdf)
@@ -123,6 +155,18 @@ def run_case(args, app, name, mode, output):
                       backend.isolate_urdf_templates(stage, robot_path))
             app.update()
             backend.configure_articulation(stage, robot_path, args, urdf)
+            PhysxSchema.PhysxArticulationAPI.Apply(stage.GetPrimAtPath(robot_path)).CreateSolverPositionIterationCountAttr(args.solver_position_iterations)
+            save_json(output/'wheel_contact_audit.json',configure_rolling_contacts(stage,robot_path))
+        if args.base_support=='upright':
+            support=UsdPhysics.Joint.Define(stage,'/World/UprightBaseSupport')
+            support.CreateBody1Rel().SetTargets([robot_path])
+            support.CreateExcludeFromArticulationAttr(True)
+            for axis in ('rotX','rotY'):
+                bound=UsdPhysics.LimitAPI.Apply(support.GetPrim(),axis)
+                # USD/PhysX uses low > high for a locked degree of freedom.
+                # Equal limits instead create two unsupported pyramid limits.
+                bound.CreateLowAttr(1.)
+                bound.CreateHighAttr(-1.)
         backend.configure_physics_rate(stage, args.physics_hz, args.solver_type)
         robot_scope = str(Path(robot_path).parent)
         dome = UsdLux.DomeLight.Define(stage, '/World/SoftFill')
@@ -147,16 +191,24 @@ def run_case(args, app, name, mode, output):
         top.AddTranslateOp().Set(Gf.Vec3d(*top_position))
         top.CreateDisplayColorAttr([Gf.Vec3f(.95, .68, .03)])
         # Visual subject identity: cylinder+cap. The fixed runtime association is not a SAM decision input.
-        obstacle_ops = {}
+        display_ops = {}
         for obj in runtime_scene.obstacles(0.):
             root = UsdGeom.Xform.Define(stage, '/World/Moving/'+obj['id'])
-            obstacle_ops[obj['id']] = root.AddTranslateOp()
-            obstacle_ops[obj['id']].Set(Gf.Vec3d(*obj['center']))
+            root.AddTranslateOp().Set(Gf.Vec3d(*obj['center']))
             UsdPhysics.RigidBodyAPI.Apply(root.GetPrim()).CreateKinematicEnabledAttr(True)
             shape = UsdGeom.Sphere.Define(stage, str(root.GetPath())+'/Shape')
             shape.CreateRadiusAttr(obj['radius'])
             shape.CreateDisplayColorAttr([Gf.Vec3f(.9, .14, .035)])
             UsdPhysics.CollisionAPI.Apply(shape.GetPrim())
+            # Never write USD transforms back to an active kinematic collider:
+            # that can overwrite its next PhysX target. Render a separate,
+            # non-colliding copy driven exclusively by measured physical poses.
+            UsdGeom.Imageable(root.GetPrim()).MakeInvisible()
+            display = UsdGeom.Sphere.Define(stage, '/World/MovingDisplay/'+obj['id'])
+            display.CreateRadiusAttr(obj['radius'])
+            display.CreateDisplayColorAttr([Gf.Vec3f(.9, .14, .035)])
+            display_ops[obj['id']] = display.AddTranslateOp()
+            display_ops[obj['id']].Set(Gf.Vec3d(*obj['center']))
         for prim in stage.Traverse():
             if prim.HasAPI(UsdPhysics.RigidBodyAPI):
                 PhysxSchema.PhysxContactReportAPI.Apply(prim).CreateThresholdAttr(0.)
@@ -171,6 +223,11 @@ def run_case(args, app, name, mode, output):
         camera_body.initialize()
         names = list(robot.dof_names)
         indices = np.array([names.index(n) for n in ['left_wheel_joint', 'right_wheel_joint']+[f'joint{i}' for i in range(1, 7)]])
+        save_json(output/'physical_model.json',dict(dof_names=names,command_indices=indices,
+            dof_properties={name:robot.dof_properties[name] for name in robot.dof_properties.dtype.names},
+            gravity_raw=robot._articulation_view._physics_view.get_gravity_compensation_forces(),
+            gravity_api=robot._articulation_view.get_generalized_gravity_forces(),
+            mass_matrix=robot._articulation_view._physics_view.get_generalized_mass_matrices()))
         movers = RigidPrim('/World/Moving/*', name='jev_movers', reset_xform_properties=False)
         movers.initialize()
         targets = movers._physics_view.get_transforms().copy()
@@ -181,29 +238,99 @@ def run_case(args, app, name, mode, output):
             objects = {o['id']: o for o in runtime_scene.obstacles(t)}
             targets[:, :3] = np.array([objects[n]['center'] for n in mover_names])
             movers._physics_view.set_kinematic_targets(targets, mover_indices)
-            for key, op in obstacle_ops.items():
-                op.Set(Gf.Vec3d(*objects[key]['center']))
+
+        def audit_movers(t, display=False):
+            measured_positions = movers._physics_view.get_transforms()[:, :3].copy()
+            expected = {obj['id']: obj['center'] for obj in runtime_scene.obstacles(t)}
+            error = max(float(np.linalg.norm(p-np.asarray(expected[name])))
+                        for name, p in zip(mover_names, measured_positions))
+            mover_audit['samples'] += 1
+            mover_audit['max_target_error_m'] = max(mover_audit['max_target_error_m'], error)
+            if error > .001:
+                raise RuntimeError(f'PhysX obstacle target/readback mismatch: {error:.6f} m at {t:.3f} s')
+            if display:
+                for name, p in zip(mover_names, measured_positions):
+                    display_ops[name].Set(Gf.Vec3d(*map(float, p)))
+                    prim = stage.GetPrimAtPath('/World/MovingDisplay/'+name)
+                    shown = np.asarray(UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(0).ExtractTranslation())
+                    mover_audit['max_display_error_m'] = max(mover_audit['max_display_error_m'],
+                                                            float(np.linalg.norm(shown-p)))
+            return measured_positions
 
         q_command = np.asarray(fixture['initial_state'][3:]).copy()
         robot.set_joint_positions(q_command, joint_indices=indices[2:])
         command = np.zeros(8)
         physical_limits = Limits()
         limits = Limits(acceleration=physical_limits.acceleration*args.acceleration_reserve,
-                        wheel_acceleration=physical_limits.wheel_acceleration*args.acceleration_reserve,
-                        velocity=physical_limits.velocity*.95, wheel_speed=physical_limits.wheel_speed*.95,
-                        position_margin=.03, command_ramp=True)
+                        wheel_acceleration=physical_limits.wheel_acceleration*args.acceleration_reserve)
         if args.yaw_acceleration_reserve is not None:
             limits.acceleration[1] = physical_limits.acceleration[1]*args.yaw_acceleration_reserve
+        motors = MotorTargets(physical_limits)
+        drive_velocity = np.zeros(8)
+        gravity_max = np.zeros(8)
+        previous_drive_velocity = np.zeros(8)
+        previous_motor_control = np.zeros(8)
+        effort_caps=np.asarray(robot.dof_properties['maxEffort'][indices],float)
 
         def apply():
-            robot.apply_action(ArticulationAction(joint_positions=np.r_[0., 0., q_command],
-                joint_velocities=np.r_[limits.wheels@command, command[2:]], joint_indices=indices))
+            nonlocal previous_drive_velocity, previous_motor_control
+            raw_gravity=np.asarray(robot._articulation_view._physics_view.get_gravity_compensation_forces()[0])
+            gravity=generalized_gravity(raw_gravity,len(names),indices)
+            gravity_max[:]=np.maximum(gravity_max,np.abs(gravity))
+            mass=np.asarray(robot._articulation_view._physics_view.get_generalized_mass_matrices()[0]).copy()
+            if mass.shape!=(len(raw_gravity),len(raw_gravity)):
+                raise RuntimeError('inconsistent PhysX floating-base mass/force dimensions')
+            root_dofs=len(raw_gravity)-len(names)
+            acceleration=np.zeros(len(raw_gravity))
+            actual_joint_velocity=np.asarray(robot.get_joint_velocities(indices))
+            acceleration[root_dofs+indices]=(drive_velocity-actual_joint_velocity)*args.physics_hz
+            if root_dofs:
+                _,quat=robot.get_world_pose()
+                rotation=Rotation.from_quat(np.roll(quat,-1)).as_matrix()
+                yaw=np.arctan2(rotation[1,0],rotation[0,0])
+                forward=np.array([np.cos(yaw),np.sin(yaw),0.]);left=np.array([-forward[1],forward[0],0.])
+                actual_local=rotation.T@robot.get_linear_velocity()
+                actual_control=np.r_[actual_local[0],robot.get_angular_velocity()[2],actual_joint_velocity[2:]]
+                wl,wr=actual_joint_velocity[:2]
+                wheel_control=np.r_[(wl+wr)*limits.wheel_radius/2,
+                                   (wr-wl)*limits.wheel_radius/limits.wheel_separation,
+                                   actual_joint_velocity[2:]]
+                base_acc=(motors.control-wheel_control)*args.physics_hz
+                acceleration[:3]=base_acc[0]*forward+motors.control[0]*motors.control[1]*left
+                acceleration[5]=base_acc[1]
+            # PhysX mass caches may omit the explicitly authored armature.
+            controlled=root_dofs+indices
+            if np.min(np.diag(mass)[controlled[2:]])<args.actuator_armature-1e-8:
+                mass[controlled,controlled]+=args.actuator_armature
+            coriolis=np.asarray(robot._articulation_view._physics_view.get_coriolis_and_centrifugal_compensation_forces()[0])
+            generalized=raw_gravity+coriolis+mass@acceleration
+            feedforward=generalized[controlled].copy()
+            if root_dofs:
+                traction=float(generalized[:3]@forward)*limits.wheel_radius/2
+                turning=float(generalized[5])*limits.wheel_radius/limits.wheel_separation
+                feedforward[:2]+=np.array([traction-turning,traction+turning])
+            feedforward_max[:]=np.maximum(feedforward_max,np.abs(feedforward))
+            feedforward=np.clip(feedforward,-effort_caps,effort_caps)
+            previous_drive_velocity=drive_velocity.copy()
+            previous_motor_control=motors.control.copy()
+            # Feed forward dynamics through the position drive's single torque
+            # budget. URDF effort caps remain on the SAME drive; no unbounded
+            # external effort or state/velocity reset is applied.
+            compensated_q=q_command+feedforward[2:]/args.arm_drive_stiffness
+            compensated_velocity=drive_velocity.copy()
+            compensated_velocity[:2]+=feedforward[:2]/args.wheel_drive_damping
+            robot.apply_action(ArticulationAction(joint_positions=np.r_[0., 0., compensated_q],
+                joint_velocities=compensated_velocity, joint_indices=indices))
 
         apply()
         for k in range(int(args.physics_hz*1.5)):
             sim.step(render=False)
             if k % 100 == 0:
                 sim.render()
+        # Finalize the authored reset after the importer/solver warm-up, before
+        # timestamped pre-roll and before any Agent or runtime measurement.
+        robot.set_joint_positions(q_command,joint_indices=indices[2:])
+        robot.set_joint_velocities(np.zeros(len(names)))
 
         def observe():
             bp, bq = robot.get_world_pose()
@@ -247,25 +374,29 @@ def run_case(args, app, name, mode, output):
                             self_returns += 1
                             continue
                         point = hit['position']
-                        points.append(point)
+                        if args.lidar_static_input=='full_raycast' or any(
+                                str(hit.get(key,'')).startswith('/World/Moving/') for key in ('collision','rigidBody')):
+                            points.append(point)
                         if 'BlueSubject' in str(hit.get('collision', '')):
                             subject_returns.append(point)
-                returns.append(np.asarray(points).reshape(-1, 3))
-            previous_subject = subject_track
+                points=np.asarray(points).reshape(-1,3)
+                if args.lidar_static_input=='cpu_fixture':
+                    # Exactly the static calibration used by RuntimeLidar.synthetic_scan.
+                    # Moving position/velocity truth is never supplied to mapping.
+                    wall_points=np.array([[3.5,y,z] for y in np.linspace(-1.5,1.5,41)
+                                          for z in np.arange(.1,.8,.075)])
+                    points=np.vstack([points,wall_points])
+                returns.append(points)
             subject_track = dict(valid=False, orientation_valid=False, stamp_s=stamp,
                                  reason='no_current_subject_lidar_returns')
             if subject_returns:
-                estimate = estimate_subject_from_points(np.asarray(subject_returns), subject_data['position'],
-                    previous=previous_subject, stamp=stamp, symmetric=True)
+                estimate = subject_from_returns(np.asarray(subject_returns), subject_data, stamp)
                 if estimate['valid']:
-                    # This catalog's subject is stationary and rotationally symmetric.
-                    # Its fixed frame is calibrated at startup; no rotating-subject claim is made.
-                    estimate.update(rotation=np.eye(3).tolist(), orientation_valid=True,
-                                    heading_source='stationary_subject_calibration', stationary=True)
                     subject_track = estimate
             snapshot = lidar.integrate(state, bp[2], stamp, returns, origins)
             snapshot['sensor_diagnostics'] = dict(self_returns_discarded=self_returns,
-                total_returns=total_returns, self_filter='known_robot_collision_prim_prefix; first-hit occlusion retained')
+                total_returns=total_returns, static_input=args.lidar_static_input,
+                self_filter='known_robot_collision_prim_prefix; first-hit occlusion retained')
             if audit_hits is not None:
                 save_json(output/'initial_raycast_audit.json', dict(robot_scope=robot_scope,
                     returns=list(audit_hits.values()), role='offline sensor identity audit; not supplied to planner'))
@@ -278,6 +409,7 @@ def run_case(args, app, name, mode, output):
             move_obstacles(stamp)
             apply()
             sim.step(render=False)
+            audit_movers(stamp)
             if k % round(args.physics_hz/10) == 0:
                 state, bp, br, measured, wheels, lateral, cp, cr = observe()
                 observed = scan(state, bp, float(stamp))
@@ -286,11 +418,13 @@ def run_case(args, app, name, mode, output):
             raise RuntimeError('PhysX LiDAR startup produced no observed surface map')
         save_json(output/'initial_observed_scene.json', observed)
         engine = CinematicEngine(reference, observed, output, mode=mode, api_url=args.api_url, model=args.model, limits=limits,
+                                 subject_model=subject_data,
                                  preview=args.allocation_preview and not args.no_preview,
                                  coordination_async=args.async_coordination,
-                                 budget=SearchBudget(decision_period_s=args.agent_period,
+                                 budget=SearchBudget(max_proposals=args.candidate_proposals, decision_period_s=args.agent_period,
                                      activation_lead_s=args.activation_lead, max_rollouts=args.candidate_budget,
-                                     max_horizon_s=args.prediction_horizon, prediction_step_s=args.prediction_step),
+                                     max_horizon_s=args.prediction_horizon, prediction_step_s=args.prediction_step,
+                                     candidate_wall_budget_s=args.candidate_wall_budget),
                                  intrinsics=[.5/np.tan(np.deg2rad(27.5))*args.height/args.width,
                                              .5/np.tan(np.deg2rad(27.5)), .5, .5])
         audit = PhysicsAudit(str(output), physical_limits, 1/args.physics_hz)
@@ -345,9 +479,15 @@ def run_case(args, app, name, mode, output):
         next_frame = 0.
         substeps = round(args.physics_hz*dt)
         previous_command = np.zeros(8)
-        for k in range(round(reference.duration/dt)+1):
+        end_time = reference.duration+POLICY.terminal_hold_s
+        if args.duration_limit is not None:end_time=min(end_time,args.duration_limit)
+        for k in range(round(end_time/dt)+1):
             t = k*dt
+            mover_positions = audit_movers(t, display=True)
             state, bp, br, measured, wheels, lateral, cp, cr = observe()
+            # Match runner.py: a velocity command starts from the measured
+            # joint position. Reset the DRIVE reference, never physical state.
+            q_command=state[3:].copy()
             if k % 5 == 0:
                 observed = scan(state, bp, t)
                 if args.record:
@@ -372,22 +512,33 @@ def run_case(args, app, name, mode, output):
                 from dataclasses import asdict
                 save_json(output/'failure_snapshot.json', dict(t=t, dt=dt, state=state,
                     base_z=bp[2], base_rotation=br, commanded_q=q_command,
-                    previous_command=previous_command, limits=asdict(limits), scene=observed))
+                    previous_command=previous_command, measured_control=measured,
+                    measured_base_twist=np.r_[robot.get_linear_velocity(),robot.get_angular_velocity()],
+                    limits=asdict(limits), scene=observed))
                 raise
+            info['agent_camera_input']={key:engine.actual_feedback[key] for key in
+                ('camera_output_source','stamp_s','camera_position','camera_quaternion_xyzw')}
             info['motor_ramp_sweep_lower_m'] = certify_control_ramp(observed, state, previous_command, command,
                 t, dt, bp[2], steps=substeps, constant_certificate=info['command_sweep_lower_m'], base_rotation=br)
             truth = DynamicCollision(runtime_scene.truth_collision(t), t, uncertainty_rate=0.)
             clearance = float(truth.clearance(state, bp[2], br).min())
             fk, fr, _ = whole_body_kinematics(state, bp[2], br)
             info['fk_position_error_m'] = float(np.linalg.norm(fk-cp))
+            measured_scene = camera_scene(dict(observed, subject_model=subject_data,
+                                               intrinsics=engine.intrinsics), t, reference.duration)
             rows.append(dict(t=t, state=state.tolist(), command=command.tolist(), measured=measured.tolist(),
                 base_z=float(bp[2]), base_rotation=br.tolist(),
                 commanded_q=q_command.tolist(),
                 measured_wheels=wheels.tolist(), measured_lateral_velocity=float(lateral),
                 **{key:value for key,value in camera_output.latest.items() if key != 't'},
-                subject_track=subject_track, truth_clearance_m=clearance, info=info))
+                subject_track=subject_track, truth_clearance_m=clearance, info=info,
+                progress_s=progress_at(engine.active, t),
+                visual=visibility(output_p, output_r, measured_scene, t, subject_data, engine.intrinsics),
+                measured_obstacles=dict(zip(mover_names, mover_positions.tolist()))))
             rows[-1]['runtime_tracks'] = observed.get('tracks', [])
             rows[-1]['sensor_diagnostics'] = observed.get('sensor_diagnostics', {})
+            with (output/'execution.jsonl').open('a') as execution_journal:
+                execution_journal.write(json.dumps(native(rows[-1]), allow_nan=False)+'\n')
             if recorder and t+1e-8 >= next_frame:
                 rp, rr, _ = reference.sample(t)
                 recorder.capture(t, rp, rr, cp, cr, subject_track, stabilized_pose=stabilized_pose)
@@ -395,20 +546,29 @@ def run_case(args, app, name, mode, output):
             if k % 50 == 0:
                 print(json.dumps(dict(case=name, mode=mode, t=t, clearance=clearance, contacts=len(contacts),
                     jev_calls=engine.jev.decider.client.calls, installed=engine.installed_plans)), flush=True)
-            if t >= reference.duration:
+            if t >= end_time:
                 break
             requested_command = command.copy()
             physics_camera_batch = []
+            motor_feedback=measured.copy()
+            motor_wheel_feedback=wheels.copy()
             for j in range(substeps):
                 physical_t = t+(j+1)/args.physics_hz
-                # Interpolate the acceleration-bounded WBC command at physics rate.
-                # Position targets integrate that SAME ramp, avoiding 50 Hz servo steps.
-                command = previous_command+(j+.5)/substeps*(requested_command-previous_command)
-                q_command += command[2:]/args.physics_hz
+                # Match the CPU command contract: constant endpoint velocity
+                # throughout the control interval when command_ramp is false.
+                command = (previous_command+(j+.5)/substeps*(requested_command-previous_command)
+                           if limits.command_ramp else requested_command)
+                motor_positions=np.asarray(robot.get_joint_positions(indices[2:]))
+                drive_velocity = (motors.step(command,1/args.physics_hz,motor_feedback,motor_positions,motor_wheel_feedback) if args.motor_targets=='physical_slew'
+                                  else np.r_[limits.wheels@command,command[2:]])
+                q_command = np.asarray(robot.get_joint_positions(indices[2:])).copy()+drive_velocity[2:]/args.physics_hz
                 apply()
                 move_obstacles(physical_t)
                 sim.step(render=False)
+                audit_movers(physical_t)
                 measured_state = observe()
+                motor_feedback=measured_state[3].copy()
+                motor_wheel_feedback=measured_state[4].copy()
                 physics_camera_batch.append(camera_sample(physical_t, measured_state[6], measured_state[7]))
                 audit.record(physical_t, measured_state[0][3:], measured_state[3], measured_state[4], measured_state[5])
             stabilize_batch(physics_camera_batch)
@@ -422,6 +582,9 @@ def run_case(args, app, name, mode, output):
         del subscription
     except Exception as error:
         failure = f'{type(error).__name__}: {error}'
+        if engine:
+            engine._write('run_failed', len(rows)*dt, failure=failure,
+                          diagnostics=getattr(error, 'diagnostics', None))
         import traceback
         traceback.print_exc()
     finally:
@@ -446,9 +609,47 @@ def run_case(args, app, name, mode, output):
             camera_output_role='primary Agent and visual evaluation input',
             raw_camera_role='intermediate physical diagnostic',
             sensor_limitation='PhysX first-hit raycasting; no RTX material/noise/motion-distortion simulation',
+            lidar_static_input=args.lidar_static_input, motor_targets=args.motor_targets,
+            diagnostic_duration_limit_s=args.duration_limit,
+            base_support=args.base_support,
             measured_physical_constraints=physical_summary is not None, recording_error=recording_error)
         if contact_count:
             summary['safety_pass'] = summary['within_budget_success'] = False
+        summary['obstacle_pose_audit'] = mover_audit
+        from dataclasses import asdict
+        summary['control_limits'] = native(asdict(limits))
+        summary['gravity_feedforward_max_abs_nm']=gravity_max.tolist() if sim else None
+        summary['dynamics_feedforward_max_abs_nm']=feedforward_max.tolist() if sim else None
+        summary['cpu_parameter_parity'] = all(
+            np.array_equal(np.asarray(value), np.asarray(asdict(Limits())[key]))
+            for key,value in asdict(limits).items())
+        if engine:
+            from dataclasses import replace
+            runtime_limits=asdict(engine.wbc.limits)
+            expected=asdict(replace(Limits(),deadline_s=reference.duration))
+            summary['runtime_control_limits']=native(runtime_limits)
+            summary['cpu_runtime_parameter_parity']=all(
+                np.array_equal(np.asarray(value),np.asarray(expected[key])) for key,value in runtime_limits.items())
+        import osqp
+        summary['numeric_runtime']=dict(osqp_version=osqp.__version__,osqp_file=osqp.__file__,numeric_site=NUMERIC_SITE)
+        if rows and engine:
+            measured_intent = IntentSpec(reference, subject_data, engine.intrinsics).score(
+                np.array([r['t'] for r in rows]), [r['camera_position'] for r in rows],
+                [Rotation.from_quat(r['camera_quaternion_xyzw']).as_matrix() for r in rows],
+                [r['visual'] for r in rows], [r['progress_s'] for r in rows])
+            summary.update(executed_camera_intent=measured_intent,
+                terminal_confirmation_observed_s=max(0., rows[-1]['t']-reference.duration),
+                intent_success=bool(not failure and summary['safety_pass'] and measured_intent['intent_complete']),
+                intent_measurement='PhysX camera poses; observed-LiDAR geometric visibility, not SAM')
+            from jev_agent_wbc.shot_acceptance import evaluate_shot, attach_acceptance
+            acceptance=evaluate_shot(reference,subject_data,
+                [r['t'] for r in rows],[r['camera_position'] for r in rows],
+                [Rotation.from_quat(r['camera_quaternion_xyzw']).as_matrix() for r in rows],
+                [r['visual'] for r in rows],[r['progress_s'] for r in rows],
+                safety_pass=summary['safety_pass'],execution_ok=not failure,
+                intrinsics=engine.intrinsics,motion_end_s=engine.active.duration,
+                legacy_intent=measured_intent,safety_source='PhysX contacts and raw 1kHz actuator audit')
+            attach_acceptance(summary,acceptance)
         save_json(output/'summary.json', summary)
         save_json(output/'telemetry.json', rows)
         if prediction_snapshots:
@@ -462,6 +663,16 @@ def run_case(args, app, name, mode, output):
             engine.close()
         if sim:
             sim.stop()
+        if rows:
+            # User-requested PhysX reporting exclusions are applied only after
+            # execution and worker shutdown. Raw audits and control limits stay
+            # untouched; CPU and shared Agent acceptance remain unchanged.
+            from physx_acceptance import assess_physx
+            api_log=output/'jev_api.jsonl'
+            api_records=([json.loads(line) for line in api_log.read_text().splitlines() if line]
+                         if api_log.exists() else [])
+            summary=assess_physx(summary,rows,api_records)
+            save_json(output/'summary.json',summary)
         print('JEV_ISAAC_RESULT '+json.dumps(summary), flush=True)
     return summary
 
@@ -485,9 +696,7 @@ class RGBPair:
             from jev_agent_wbc.camera_output_ros import CameraPublisher
             self.camera_publisher = CameraPublisher(self.camera_output.source)
         self.subject = subject
-        self.hide_for_reference = [UsdGeom.Imageable(stage.GetPrimAtPath(path))
-            for path in (robot_scope, '/World/Moving', '/World/MovingDisplay')
-            if stage.GetPrimAtPath(path).IsValid()]
+        self.reference_frames_written = 0
         self.cameras, self.products, self.annotators, self.writers = {}, {}, {}, {}
         self.camera_prims = {}
         keys = ['execution', 'overview']
@@ -526,6 +735,8 @@ class RGBPair:
             recorded=self.recording,
             comparison=None if not self.recording or getattr(args, 'skip_reference_video', False) else 'comparison.mp4',
             views=[view for view in ('reference','execution','stabilized') if view in self.cameras],
+            delivery_views=['overview','reference','stabilized'],
+            reference_source='original_reference_floating_camera_same_scene_time',
             raw_role='intermediate physical diagnostic', fps=args.record_fps))+'\n')
         from jev_agent_wbc.reference import look_at
         import numpy as np
@@ -553,6 +764,10 @@ class RGBPair:
             stabilized_pose = (np.array(value['stabilized_camera_position']), Rotation.from_quat(value['stabilized_camera_quaternion_xyzw']).as_matrix())
         capture_clock_before = float(self.sim.current_time)
         self.pose('execution', ap, ar)
+        if 'reference' in self.cameras:
+            # A render-only camera is unconstrained by the robot. Its pose is
+            # the original reference, never the installed repair or physical FK.
+            self.pose('reference', rp, rr)
         if stabilized_pose is not None:
             self.pose('stabilized', *stabilized_pose)
             from pxr import Gf
@@ -562,11 +777,14 @@ class RGBPair:
             # explicitly logged plane is excluded from the virtual image.
             virtual_near_m = .05+float(np.linalg.norm(stabilized_pose[0]-ap))+.01
             self.camera_prims['stabilized'].GetClippingRangeAttr().Set(Gf.Vec2f(virtual_near_m, 50.))
-        # Keep all actors visible throughout execution. Repeatedly toggling USD
-        # visibility between render products can leave a delayed reference image
-        # containing the robot. Reference RGB is rendered in one isolated pass.
+        # All cameras observe the same current actors and simulation timestamp.
+        # Never toggle actor visibility or render reference images at a later
+        # scene time: that would corrupt the dynamic reference comparison.
         raw_rgb = self.capture_rgb('execution', len(self.frame_metadata))
         self.capture_rgb('overview', len(self.frame_metadata), advance_render=False)
+        if 'reference' in self.cameras:
+            self.capture_rgb('reference', len(self.frame_metadata), advance_render=False)
+            self.reference_frames_written += 1
         if stabilized_pose is not None:
             stabilized_rgb = self.capture_rgb('stabilized', len(self.frame_metadata), advance_render=False)
         output_p, output_r = stabilized_pose if self.camera_output.source == 'stabilized' else (ap, ar)
@@ -575,6 +793,8 @@ class RGBPair:
             raise RuntimeError('RGB capture advanced the physical simulation')
         record = dict(frame=len(self.frame_metadata), t=t, physical_time_before_capture=capture_clock_before, physical_time_after_capture=float(self.sim.current_time),
             reference_camera_position=rp, actual_camera_position=ap,
+            reference_camera_source='original_reference_floating_camera',
+            reference_scene_time_s=float(t),
             reference_camera_quaternion_xyzw=Rotation.from_matrix(rr).as_quat(),
             actual_camera_quaternion_xyzw=Rotation.from_matrix(ar).as_quat(), subject_track=subject_track,
             camera_output_source=self.camera_output.source,
@@ -661,38 +881,23 @@ class RGBPair:
 
     def close(self):
         from jev_agent_wbc.evaluation import save_json
-        from scipy.spatial.transform import Rotation
-        rendered = 0
         try:
-            if not self.recording or getattr(self.args, 'skip_reference_video', False):
-                return
-            if self.frame_metadata:
-                first = self.frame_metadata[0]
-                self.pose('reference', first['reference_camera_position'],
-                    Rotation.from_quat(first['reference_camera_quaternion_xyzw']).as_matrix())
-            for obj in self.hide_for_reference:
-                obj.MakeInvisible()
-            # Flush visibility changes once, outside the shot/control clock.
-            for _ in range(4):
-                self.rep.orchestrator.step(rt_subframes=2, delta_time=0.0, pause_timeline=False)
-            for row in self.frame_metadata:
-                self.pose('reference', row['reference_camera_position'],
-                          Rotation.from_quat(row['reference_camera_quaternion_xyzw']).as_matrix())
-                self.capture_rgb('reference', row['frame'])
-                rendered += 1
+            skipped=not self.recording or bool(getattr(self.args,'skip_reference_video',False))
+            if not skipped and self.reference_frames_written!=len(self.frame_metadata):
+                raise RuntimeError('live original-reference RGB frame count mismatch')
         finally:
-            for obj in self.hide_for_reference:
-                obj.MakeVisible()
             for writer in self.writers.values():
                 writer.release()
             save_json(self.root/'frames.json', self.frame_metadata)
             save_json(self.root/'reference_rendering.json', dict(
-                protocol='static_reference_separate_pass/v2',
+                protocol='original_reference_floating_camera_same_scene_time/v1',
                 skipped=not self.recording or bool(getattr(self.args, 'skip_reference_video', False)),
                 frames_expected=0 if not self.recording or getattr(self.args, 'skip_reference_video', False) else len(self.frame_metadata),
-                frames_written=rendered,
-                valid=None if not self.recording or getattr(self.args, 'skip_reference_video', False) else rendered == len(self.frame_metadata),
-                scope='stationary subject and background fixture; original-time camera poses; not online perception'))
+                frames_written=self.reference_frames_written,
+                valid=None if not self.recording or getattr(self.args, 'skip_reference_video', False) else self.reference_frames_written == len(self.frame_metadata),
+                camera_trajectory='original_reference',physics_body=False,
+                same_render_pass=True,actor_visibility_modified=False,
+                scope='detached original-reference camera in current physical scene; comparison only, not Agent input'))
             try:
                 if self.recording and not getattr(self.args, 'skip_reference_video', False):
                     from jev_agent_wbc.camera_output import write_three_camera_video

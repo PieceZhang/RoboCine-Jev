@@ -20,3 +20,11 @@ Raw RGB sensor streams are measurement artifacts; final films must pass through
 the Representation-enabled renderer. Save provenance and decode-check the film.
 Keep recording changes in the presentation layer and preserve concurrent edits
 to execution, planning, control and PhysX compatibility code.
+
+PhysX preference, updated 2026-10-17: use the virtual stabilized camera as the
+default Agent camera feedback, retaining measured physical robot state. Rerun
+the closed loop when changing this source. Delivered PhysX films show measured
+overview, a detached camera following the original reference in the same current
+scene/time, and `增稳相机（Agent输入）`; omit raw execution RGB from the film.
+Keep raw measurements for audit. Acceleration excess is diagnostic only for
+PhysX acceptance; network-only timeout trials are unverified, not failures.
