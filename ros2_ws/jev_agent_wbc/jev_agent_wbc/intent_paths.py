@@ -6,7 +6,7 @@ from scipy.interpolate import make_interp_spline
 from scipy.spatial.transform import Rotation
 
 from .camera_intent import POLICY, default_intrinsics, projected_area, progress_at
-from .reference import look_at, smoothstep
+from .reference import look_at, look_at_many, smoothstep
 
 
 STRATEGIES = {
@@ -22,6 +22,7 @@ def positions_at(path, times):
     """Vectorized geometry-only sampling; collision checks need no twist or FK."""
     from .reference import OriginalReference
     times = np.asarray(times)
+    if hasattr(path,'positions_at'):return path.positions_at(times)
     if isinstance(path, IntentPath):
         if path.program['route'] == 'continuation':
             return positions_at(path.previous,times)
@@ -37,7 +38,7 @@ def positions_at(path, times):
 
 def pose_at(path, t):
     from .reference import OriginalReference
-    if isinstance(path,IntentPath):return path.pose(t)
+    if hasattr(path,'pose'):return path.pose(t)
     if isinstance(path,OriginalReference):
         at=float(max(0.,min(t,path.duration)))
         cache=getattr(path,'_geometry_pose_cache',None)
@@ -49,6 +50,42 @@ def pose_at(path, t):
             cache[at]=(path.translation(at),path.rotation(at).as_matrix())
         return tuple(value.copy() for value in cache[at])
     return path.sample(t)[:2]
+
+
+def poses_at(path,times):
+    """The scalar pose formula evaluated in one spline/rotation batch."""
+    from .reference import OriginalReference
+    times=np.asarray(times,float)
+    if not len(times):return np.empty((0,3)),np.empty((0,3,3))
+    if hasattr(path,'poses_at'):return path.poses_at(times)
+    if isinstance(path,OriginalReference):
+        at=np.clip(times,0.,path.duration)
+        return path.translation(at),path.rotation(at).as_matrix()
+    values=[pose_at(path,float(t)) for t in times]
+    return np.array([p for p,_ in values]),np.array([r for _,r in values])
+
+
+def twists_at(path,times):
+    """Batch the same finite-difference angular twist used by sample()."""
+    from .reference import OriginalReference
+    times=np.asarray(times,float)
+    if not len(times):return np.empty((0,6))
+    if isinstance(path,OriginalReference):
+        at=np.clip(times,0.,path.duration);r=path.rotation(at).as_matrix()
+        values=np.column_stack([path.translation(at,1),np.einsum('nij,nj->ni',r,path.rotation(at,1))])
+        values[(times<0.)|(times>=path.duration)]=0.
+        return values
+    if type(path) is not IntentPath:return np.array([path.sample(float(t))[2] for t in times])
+    if path.program['route']=='continuation':return twists_at(path.previous,times)
+    before=times<path.activation_s if path.program.get('measured_initial_boundary') else times<=path.activation_s
+    result=np.zeros((len(times),6));result[before]=twists_at(path.previous,times[before])
+    mask=(~before)&(times<path.duration)
+    at=times[mask];a=np.maximum(path.activation_s,at-1e-4);b=np.minimum(path.duration,at+1e-4)
+    if len(at):
+        _,rotations=poses_at(path,np.r_[a,b]);ra,rb=np.split(rotations,2)
+        result[mask,:3]=path.translation(at,1)
+        result[mask,3:]=Rotation.from_matrix(rb@ra.transpose(0,2,1)).as_rotvec()/(b-a)[:,None]
+    return result
 
 
 class IntentPath:
@@ -124,6 +161,7 @@ class IntentPath:
             nominal=look_at(self.translation(0.),self.subject)@look_at(p,self.subject).T@r
             self.initial_rotation_residual=Rotation.from_matrix(measured@nominal.T).as_rotvec()
         self._cache = {}
+        self._pose_cache = {}
 
     def parent_time(self, t):
         if t <= self.activation_s:
@@ -174,6 +212,12 @@ class IntentPath:
                 delay=abs(self.extension_s)
             return min(self.previous.duration,self.activation_s+elapsed-np.sign(self.extension_s)*delay)
         return self.activation_s+elapsed-self.extension_s*smoothstep(u)
+
+    def __getstate__(self):
+        state=self.__dict__.copy()
+        state['_cache']={}
+        state['_pose_cache']={}
+        return state
 
     def progress_time(self, t):
         if t>self.activation_s and 'progress_times' in getattr(self,'geometry',{}):
@@ -315,6 +359,8 @@ class IntentPath:
         return p+correction+endpoint_blend*endpoint+bow*self.program['amplitude_m']*direction
 
     def pose(self, t):
+        key=float(t)
+        if key in self._pose_cache:return tuple(v.copy() for v in self._pose_cache[key])
         if (t < self.activation_s or (t == self.activation_s and not self.program.get('measured_initial_boundary'))) or self.program['route'] == 'continuation':
             return pose_at(self.previous,t)
         p = self.translation(np.clip(t, self.activation_s, self.duration))
@@ -327,7 +373,29 @@ class IntentPath:
         r = look_at(p, self.subject)@look_at(base_p, self.subject).T@base_r
         if self.initial_rotation_residual is not None:
             r=Rotation.from_rotvec((1.-smoothstep(np.clip(t/self.duration,0.,1.)))*self.initial_rotation_residual).as_matrix()@r
+        if len(self._pose_cache)>4096:self._pose_cache.clear()
+        self._pose_cache[key]=(p.copy(),r.copy())
         return p, r
+
+    def poses_at(self,times):
+        if self.program['route']=='continuation':return poses_at(self.previous,times)
+        before=times<self.activation_s if self.program.get('measured_initial_boundary') else times<=self.activation_s
+        positions=np.empty((len(times),3));rotations=np.empty((len(times),3,3))
+        positions[before],rotations[before]=poses_at(self.previous,times[before])
+        at=times[~before]
+        if len(at):
+            p=self.translation(np.clip(at,self.activation_s,self.duration))
+            bp,br=poses_at(self.previous,[self.parent_time(t) for t in at])
+            if self.program.get('restore_original') or self.program.get('regular_curve'):
+                tp,tr=poses_at(self.original,[self.progress_time(t) for t in at])
+                blend=smoothstep((at-self.activation_s)/(self.duration-self.activation_s))
+                bp=bp+blend[:,None]*(tp-bp)
+                br=Rotation.from_rotvec(blend[:,None]*Rotation.from_matrix(tr@br.transpose(0,2,1)).as_rotvec()).as_matrix()@br
+            r=look_at_many(p,self.subject)@look_at_many(bp,self.subject).transpose(0,2,1)@br
+            if self.initial_rotation_residual is not None:
+                r=Rotation.from_rotvec((1.-smoothstep(at/self.duration))[:,None]*self.initial_rotation_residual).as_matrix()@r
+            positions[~before],rotations[~before]=p,r
+        return positions,rotations
 
     def sample(self, t):
         if (t < self.activation_s or (t == self.activation_s and not self.program.get('measured_initial_boundary'))) or self.program['route'] == 'continuation':
@@ -335,12 +403,15 @@ class IntentPath:
         key = float(t)
         if key in self._cache:
             return tuple(v.copy() for v in self._cache[key])
-        p, r = self.pose(t)
         h = 1e-4
         a, b = max(self.activation_s, t-h), min(self.duration, t+h)
+        if t<self.duration and b>a:
+            poses,rotations=self.poses_at(np.array([t,a,b]))
+            p,r=poses[0],rotations[0]
+        else:p,r=self.pose(t)
         twist = np.zeros(6)
         if t < self.duration and b > a:
-            ra, rb = self.pose(a)[1], self.pose(b)[1]
+            ra, rb = rotations[1:]
             twist = np.r_[self.translation(t, 1), Rotation.from_matrix(rb@ra.T).as_rotvec()/(b-a)]
         result = p, r, twist
         if len(self._cache) > 2048:

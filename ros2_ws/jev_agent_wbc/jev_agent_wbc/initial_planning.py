@@ -47,7 +47,7 @@ def prepare(engine, state, scene, base_z):
         geometry_preferences=engine.geometry_preferences)
     candidates=result.get('candidates',[])
     engine._write('candidate_set',0.,cards=[c.card() for c in candidates],evaluations=result.get('evaluations',[]),
-        planner_wall_s=result['wall_s'],generated_proposals=result.get('generated_proposals'),
+        planner_wall_s=result['wall_s'],seed_wall_s=result.get('seed_wall_s'),generated_proposals=result.get('generated_proposals'),
         construction_plan=second['construction_plan'],startup=True)
     if result.get('error') or len(candidates)!=1 or len(result.get('evaluations',[]))!=1:
         raise RuntimeError('initial_single_candidate_rejected:'+result.get('error','invalid_count'))

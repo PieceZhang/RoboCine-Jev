@@ -65,7 +65,7 @@ def whole_body_kinematics(state, base_z=0., base_rotation=None):
     offset = rotation @ p
     jacobian = np.zeros((6, 8))
     jacobian[:3, 0] = [np.cos(yaw), np.sin(yaw), 0]
-    jacobian[:3, 1] = np.cross([0, 0, 1], offset)
+    jacobian[:3, 1] = [-offset[1],offset[0],0.]
     jacobian[5, 1] = 1
     jacobian[:3, 2:] = rotation @ arm_j[:3]
     jacobian[3:, 2:] = rotation @ arm_j[3:]

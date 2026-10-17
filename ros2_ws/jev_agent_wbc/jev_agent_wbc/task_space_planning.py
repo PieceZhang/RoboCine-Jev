@@ -5,7 +5,7 @@ IK screens complete timed candidates. WBC execution and collision safety remain
 independent. Jev never computes or relaxes these numerical constraints.
 """
 import time
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import numpy as np
 from scipy.spatial.transform import Rotation, Slerp
 
@@ -42,6 +42,12 @@ class WitnessCameraPrediction:
         return (np.array([np.interp(at,self.times,self.positions[:,j]) for j in range(3)]),
                 self.rotations(at).as_matrix(),np.zeros(6))
 
+    def positions_at(self,times):
+        return np.column_stack([np.interp(times,self.times,self.positions[:,j]) for j in range(3)])
+
+    def poses_at(self,times):
+        return self.positions_at(times),self.rotations(np.clip(times,self.times[0],self.times[-1])).as_matrix()
+
 
 class MeasuredCameraPrediction:
     def __init__(self,path,state,base_z,t,lead,base_rotation=None):
@@ -61,11 +67,28 @@ class MeasuredCameraPrediction:
     def progress_time(self,t):
         return progress_at(self.path,t)
 
-    def sample(self,t):
-        p,r,v=self.path.sample(t)
+    def pose(self,t):
+        from .intent_paths import pose_at
+        p,r=pose_at(self.path,t)
         u=np.clip((t-self.t)/self.lead,0.,1.)
         residual=1.-(10*u**3-15*u**4+6*u**5)
-        return p+residual*self.offset,Rotation.from_rotvec(residual*self.rotation_error).as_matrix()@r,v
+        return p+residual*self.offset,Rotation.from_rotvec(residual*self.rotation_error).as_matrix()@r
+
+    def sample(self,t):
+        p,r=self.pose(t)
+        return p,r,self.path.sample(t)[2]
+
+    def positions_at(self,times):
+        from .intent_paths import positions_at
+        from .reference import smoothstep
+        return positions_at(self.path,times)+(1.-smoothstep((times-self.t)/self.lead))[:,None]*self.offset
+
+    def poses_at(self,times):
+        from .intent_paths import poses_at
+        from .reference import smoothstep
+        p,r=poses_at(self.path,times)
+        residual=1.-smoothstep((times-self.t)/self.lead)
+        return p+residual[:,None]*self.offset,Rotation.from_rotvec(residual[:,None]*self.rotation_error).as_matrix()@r
 
 
 def camera_scene(scene,t,end):
@@ -90,7 +113,7 @@ def prediction(path,scene,state,base_z,t,end,lead,visual=False,base_rotation=Non
 
 
 def diagnose(original,scene,state,previous,t,base_z,limits,commanded_q=None,active=None,budget=None,history=(),
-             measured_control=None,base_rotation=None,accepted_intent=None):
+             measured_control=None,base_rotation=None,accepted_intent=None,encode_journal=False):
     budget=budget or SearchBudget()
     active=original if active is None else active
     observed=camera_scene(scene,t,active.duration)
@@ -99,9 +122,17 @@ def diagnose(original,scene,state,previous,t,base_z,limits,commanded_q=None,acti
     virtual=MeasuredCameraPrediction(active,state,base_z,t,budget.activation_lead_s,base_rotation)
     search=KinematicSearch(state,previous,t,base_z,limits,measured_control=measured_control,
         commanded_q=commanded_q,base_rotation=base_rotation)
+    if budget.single_candidate:search.policy=replace(search.policy,step_s=.1)
     from .search_configuration import capability
     robot_capability=capability(search,original.subject)
-    kinematics=search.lift(virtual,active.duration+POLICY.terminal_hold_s)
+    # The installed curve already has a complete, approved FK witness. Online
+    # diagnosis repairs the measured-state neighbourhood, while camera safety
+    # and shot intent below still inspect the entire remaining curve. Re-solving
+    # the full redundant trajectory here delayed confirmation of short-lived
+    # servo disagreement beyond its deadline.
+    local=bool(budget.single_candidate and active is not original and accepted_intent)
+    end=min(active.duration+POLICY.terminal_hold_s,t+max(2.,budget.activation_lead_s+.8)) if local else active.duration+POLICY.terminal_hold_s
+    kinematics=search.lift(virtual,end)
     metrics=intent_prediction(spec,virtual,observed,t,history,step=.1)
     issues=[]
     # The 105 mm warning starts proactive search on the original shot. A
@@ -127,12 +158,19 @@ def diagnose(original,scene,state,previous,t,base_z,limits,commanded_q=None,acti
         imminent=kinematics.get('first_failure_s',t)<=t+1.
         if active is original or actual_tracking_error>.015 or imminent:
             issues.append('numerical_kinematic_gate_failed')
-    return dict(snapshot_time_s=t,physical_caps=CAPS,kinematic_prior=search.prior(),robot_capability=robot_capability,
-        kinematics=summary(kinematics),report=dict(issues=issues,first_risk_s=risk,
+    result=dict(snapshot_time_s=t,physical_caps=CAPS,kinematic_prior=search.prior(),robot_capability=robot_capability,
+        kinematics=summary(kinematics),kinematic_horizon_s=end-t,
+        kinematic_scope='measured_state_rolling_confirmation' if local else 'complete_remaining_curve',
+        report=dict(issues=issues,first_risk_s=risk,
         min_clearance_m=value.min_clearance_m,joint_margin_rad=None,intent=metrics,
         accepted_intent_degradation_unchanged=accepted_degradation,
         low_clearance_warning_s=risk,actual_tracking_error_m=actual_tracking_error,
         local_repair_evidence='camera intent programs; numerical FK/actuator screening; no WBC rollout'))
+    if encode_journal:
+        import json
+        from .contracts import native
+        result['_encoded_journal']=json.dumps(native(result),ensure_ascii=False,allow_nan=False)
+    return result
 
 
 def screen(path,search,spec,observed,budget,history):
@@ -184,13 +222,16 @@ def build(original,active,strategy,scene,state,previous,t,base_z,limits,
         commanded_q=commanded_q,base_rotation=base_rotation,scene=scene,search_config=search_config)
     if construction_plan is not None:
         search.config=dict(search.config or {}, allocations=(construction_plan['allocation'],))
+        search.policy=replace(search.policy,step_s=.15)
     spec=IntentSpec(original,observed.get('subject_model'),observed.get('intrinsics'))
     def project(path):
         if path.program.get('curve_family')=='global_endpoint_polynomial':
             from .joint_curve_optimizer import refine
             fitted,diagnostics=refine(path,search,
                 seconds=min(24.,budget.candidate_wall_budget_s*.8) if construction_plan is not None else min(8.,budget.candidate_wall_budget_s*.5),
-                max_iterations=80 if construction_plan is not None else 30)
+                max_iterations=8 if construction_plan is not None else 30,
+                knots=13 if construction_plan is not None else 33,
+                step_tolerance=.01 if construction_plan is not None else 1e-4)
             if fitted is None:return dict(error='joint_curve_search:'+diagnostics['reason'],summary=diagnostics)
             return dict(path=fitted,summary=diagnostics)
         from .cinematic_geometry import regularize_lift,smooth_lift

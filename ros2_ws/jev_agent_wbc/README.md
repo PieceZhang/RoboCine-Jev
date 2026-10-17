@@ -25,16 +25,28 @@ OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /usr/bin/python3 \
   ros2_ws/jev_agent_wbc/scripts/benchmark_directed_jev.py \
   --output /tmp/jev_single_seed --key-file "$PWD/typesafe_Jev_api_key" \
   --seed 20261017 --startup --diagnose --candidate-seconds 30
-# 完整 CPU 闭环。pace 是调试等待，不能用于宣称 50 Hz 实时性能。
+# 完整 CPU 闭环。串行测量，实际逐步墙钟计时决定是否满足 20 ms。
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /usr/bin/python3 \
   ros2_ws/jev_agent_wbc/scripts/benchmark_official_jev.py \
   --output /tmp/jev_single_closed --key-file "$PWD/typesafe_Jev_api_key" \
   --scenarios /tmp/jev_single_seed/scenarios --single-candidate --preplan \
-  --candidate-seconds 30 --pace .05
+  --candidate-seconds 30 --proposals 1 --shortlist 1 --pace 1 --workers 1
 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /usr/bin/python3 \
   ros2_ws/jev_agent_wbc/scripts/analyze_directed_jev.py \
   --runs /tmp/jev_single_closed --independent
 ```
+
+单候选 CPU 模式使用约 58 个构型检查节点，保留每段中点 FK 和连续碰撞下界；
+只有无法判定的自碰撞区间继续细分。联合优化采用 13 个节点和独立的相机穿越探测。
+已批准轨迹的在线构型诊断使用向前 2 秒滚动窗口，全程相机/镜头检查与每步安全证书仍保留。
+预测、模拟传感器融合和周期几何反馈在独立进程中执行，日志有序异步落盘；
+后台进程以较低调度优先级运行，进程预热在镜头时钟之前完成。
+
+`analyze_directed_jev.py` 同时报告完整候选流程和完整主循环计时；阶段二严格标记使用
+规划 `<1 s`、**所有**主循环步骤 `<=20 ms`，不以均值或 P99 代替最大值。
+API 与预热时间单独记录。实现、失败轮次和最终证据见 [CPU_OPTIMIZATION_REPORT.txt](CPU_OPTIMIZATION_REPORT.txt)。
+离线数值性能回放入口 `scripts/benchmark_directed_cpu.py --sources <官方闭环目录...> --output <新目录>`
+不会调用 Jev，不能作为新的语义选择或闭环成功证据。
 
 ## 闭环视频默认展示统一 Representation（2026-10-16）
 

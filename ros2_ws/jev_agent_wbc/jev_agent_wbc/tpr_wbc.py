@@ -22,6 +22,22 @@ from .coordination import CoordinationPreview
 from .actuation import certify_control_ramp
 
 
+def task_margin_witness(command, J, desired, A, lo, hi, R, low, scale):
+    """A feasible exact-task point proves a lower bound on the margin LP.
+
+    Project away the task QP's numerical equality residual, then check every
+    actuator row again. Only a bound above the warning threshold can bypass
+    the LP; small/negative margins still need its optimum for classification.
+    """
+    point = command + np.linalg.lstsq(J, desired-J@command, rcond=None)[0]
+    values = A@point
+    if (np.max(np.abs(J@point-desired)) > 1e-10 or
+            np.any(values < lo-1e-10) or np.any(values > hi+1e-10)):
+        return None
+    lower = float(np.min((R@point-low)/scale))
+    return lower if lower >= .05+1e-8 else None
+
+
 def response_coefficients(tau, duration, ramp=True):
     """u_end = decay*u_measured + old_weight*cmd_old + gain*cmd_new."""
     tau=np.asarray(tau,float)
@@ -152,24 +168,26 @@ def qp(H, g, A, lo, hi, warm=None):
     return answer, residual
 
 
-def witnesses(collision, state, z=0., rotation=None):
+def witnesses(collision, state, z=0., rotation=None,with_motion=False):
     centers, radii = collision.active_obstacles(state, z, rotation, per_body=None)
     # Incoming movers must not be lost by a static nearest-neighbour selection.
     indices = np.unique(np.r_[collision.tree.query(centers, k=1)[1],
                              np.flatnonzero(collision.track_ids > 0)])
     centers, radii = collision.centers[indices], collision.radii[indices]
-    d, G = collision.geometry.primitive_distances(state, centers, z, rotation)
-    return centers, radii, indices, d-radii[:, None], G
+    result=collision.geometry.primitive_distances(state,centers,z,rotation,with_normals=with_motion)
+    d,G=result[:2]
+    values=centers,radii,indices,d-radii[:,None],G
+    if with_motion:
+        motion=np.einsum('npi,ni->np',result[2],collision.velocities[indices])-collision.radius_rates[indices,None]
+        motion[collision.track_ids[indices]<=0]=0.
+        return (*values,motion)
+    return values
 
 
 def primitive_values(geometry,state,centers,z=0.,rotation=None):
     """Distance-only curvature probes, avoiding unused point Jacobians."""
     frames=geometry.frames(state,z,rotation)[0]
-    values=[]
-    for body,_,kind,size,offset,local_rotation in geometry.shapes:
-        p,r=frames[body]
-        values.append(primitive_sdf((centers-(p+r@offset))@(r@local_rotation),kind,size))
-    return np.array(values).T
+    return geometry.primitive_arrays(frames,centers)
 
 
 class ReconfigurationPreview:
@@ -426,7 +444,9 @@ def compute_reconfiguration(preview, scene, physical_time, limits, state, veloci
     model = SimpleNamespace(collision=DynamicCollision(scene, physical_time), limits=limits,previous=previous_command,
                             self_collision=SelfCollision())
     preview.update(model, state, velocity, t, dt, z, rotation, commanded_q)
-    return preview
+    # Return only the result, not the trajectory and its growing pose caches.
+    return SimpleNamespace(**{name:getattr(preview,name) for name in
+        ('updated','times','controls','states','info','anchor')})
 
 
 class AsyncReconfigurationPreview(ReconfigurationPreview):
@@ -438,6 +458,15 @@ class AsyncReconfigurationPreview(ReconfigurationPreview):
         self.pending_generation = -1
         self.requested = -np.inf
         self.accepted = self.rejected = 0
+
+    def warm(self):
+        """Start the numerical worker before entering the control loop."""
+        if self.pool is None:
+            import multiprocessing
+            from concurrent.futures import ProcessPoolExecutor
+            from .shot_preview_worker import initialize_worker
+            self.pool=ProcessPoolExecutor(max_workers=1,mp_context=multiprocessing.get_context('spawn'),initializer=initialize_worker)
+            self.pool.submit(initialize_worker).result(timeout=30.)
 
     def reset(self, trajectory):
         if trajectory is not self.trajectory:
@@ -501,6 +530,10 @@ class AsyncReconfigurationPreview(ReconfigurationPreview):
 def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_rotation=None,
               commanded_q=None, brake=False, trajectory_time=0., preparing=False, **unused):
     started = time.perf_counter()
+    timings={};stage_started=started
+    def mark(name):
+        nonlocal stage_started
+        now=time.perf_counter();timings[name]=now-stage_started;stage_started=now
     if not np.isfinite(dt) or not 0 < dt <= .1:
         raise ValueError('control dt must be in (0, 0.1]')
     state = np.asarray(state, float)
@@ -541,7 +574,9 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
     if received is not None and not brake and not preparing:
         ta, tb = max(0., trajectory_time-eps), min(received.duration, trajectory_time+eps)
         if tb > ta:
-            ff_acc = (received.sample(tb)[2]-received.sample(ta)[2])/(tb-ta)
+            from .intent_paths import twists_at
+            va,vb=twists_at(received,[ta,tb])
+            ff_acc=(vb-va)/(tb-ta)
     frequency = min(float(getattr(c, 'tpr_servo_frequency', 12.)), .6/dt)
     desired_acc = ff_acc+2*frequency*(ff-camera_velocity)+frequency**2*error
     desired = J@measured+dt*(desired_acc-Jdot@measured)
@@ -583,14 +618,17 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
             c.limits=original_limits
         A, lo, hi = np.vstack([A, Am]), np.r_[lo, lm], np.r_[hi, hm]
     actuator_A, actuator_lo, actuator_hi = A.copy(), lo.copy(), hi.copy()
-    centers, radii, indices, distances, gradients = witnesses(c.collision, state, base_z, base_rotation)
+    centers, radii, indices, distances, gradients, motion = witnesses(c.collision, state, base_z, base_rotation,with_motion=True)
     rows = gradients@integration_matrix(state[2])
-    motion = c.collision.primitive_motion(state, centers, base_z, base_rotation)
     rate = rows@measured+motion
     cp = centers+c.collision.velocities[indices]*eps
     cm = centers-c.collision.velocities[indices]*eps
-    dp = primitive_values(c.collision.geometry,plus,cp,zp,rp)-radii[:, None]
-    dm = primitive_values(c.collision.geometry,minus,cm,zm,rm)-radii[:, None]
+    geometry=c.collision.geometry
+    # Reuse the two FK chains just evaluated for Jdot and batch their SDFs.
+    frame_pair=[geometry.frames(x,z,r)[0] for x,z,r in ((plus,zp,rp),(minus,zm,rm))]
+    pp=np.array([[p for p,_ in frames] for frames in frame_pair])
+    rr=np.array([[r for _,r in frames] for frames in frame_pair])
+    dp,dm=geometry._primitive_arrays(pp,rr,np.array([cp,cm]))-radii[None,:,None]
     if base_twist is not None:
         rate = (dp-dm)/(2*eps)-c.collision.radius_rates[indices,None]
     curvature = (dp-2*distances+dm)/eps**2
@@ -606,7 +644,8 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
     sd, sG = c.self_collision.terms(state)
     sR = sG@integration_matrix(state[2])
     srate = sR@measured
-    scurvature = (c.self_collision.distances(plus)-2*sd+c.self_collision.distances(minus))/eps**2
+    sd_plus,sd_minus=c.self_collision.distances_sequence([plus,minus])
+    scurvature = (sd_plus-2*sd+sd_minus)/eps**2
     smask = sd < .08
     self_velocity_low = -k*(sd[smask]-c.self_collision.margin-.002)
     slow = np.maximum(sR[smask]@measured+dt*(-scurvature[smask]-2*k*srate[smask]-k*k*(sd[smask]-c.self_collision.margin-.002)), self_velocity_low)
@@ -614,6 +653,7 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
     R, low = np.vstack([R, sR[smask]]), np.r_[low, slow]
     A, lo, hi = np.vstack([A, R]), np.r_[lo, low], np.r_[hi, np.full(len(R), np.inf)]
     preferred = measured.copy()
+    mark('task_and_barriers')
     kinematic_preference_active=False
     if not brake and not preparing:
         preferred = c.reconfiguration.update(c, state, measured, trajectory_time, dt, base_z, base_rotation, commanded_q)
@@ -637,6 +677,7 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
                 kinematic_preference_active=True
     elif brake:
         preferred = np.zeros(8)
+    mark('prediction')
     W = np.array([1., 1., 1., .35, .35, .35])
     JW = W[:, None]*J
     # First try exact task equality; this is also an exact level-one solution.
@@ -660,6 +701,7 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
         H = H + geometry_H
         g = g + geometry_g
         geometry_preference_active = True
+    mark('geometry_preferences')
     def hierarchy(bounds_lo):
         try:
             answer, residual = qp(H, g, np.vstack([A, J]), np.r_[bounds_lo, desired], np.r_[hi, desired], previous)
@@ -705,22 +747,30 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
     # Task-conditioned JOINT margin, a single LP over all active rows.
     rho = None
     actuator_task_feasible = None
+    rho_method = 'linear_program_optimum'
     if len(R):
         scale = np.maximum(np.linalg.norm(R, axis=1)*dt, 1e-5)
-        upper_mask, lower_mask = np.isfinite(actuator_hi), np.isfinite(actuator_lo)
-        Aub = np.vstack([np.c_[actuator_A[upper_mask], np.zeros(upper_mask.sum())],
-                         np.c_[-actuator_A[lower_mask], np.zeros(lower_mask.sum())], np.c_[-R, scale]])
-        bub = np.r_[actuator_hi[upper_mask], -actuator_lo[lower_mask], -low]
-        result = linprog(np.r_[np.zeros(8), -1.], A_ub=Aub, b_ub=bub,
-                         A_eq=np.c_[J, np.zeros(6)], b_eq=desired, bounds=[(None, None)]*9, method='highs')
-        if result.success:
-            rho = float(result.x[-1])
+        if task_feasible:
+            rho = task_margin_witness(command,J,desired,actuator_A,actuator_lo,actuator_hi,R,low,scale)
+        if rho is not None:
             actuator_task_feasible = True
-        elif result.status == 2:
-            actuator_task_feasible = False
+            rho_method = 'verified_feasible_point_lower_bound'
+        else:
+            upper_mask, lower_mask = np.isfinite(actuator_hi), np.isfinite(actuator_lo)
+            Aub = np.vstack([np.c_[actuator_A[upper_mask], np.zeros(upper_mask.sum())],
+                             np.c_[-actuator_A[lower_mask], np.zeros(lower_mask.sum())], np.c_[-R, scale]])
+            bub = np.r_[actuator_hi[upper_mask], -actuator_lo[lower_mask], -low]
+            result = linprog(np.r_[np.zeros(8), -1.], A_ub=Aub, b_ub=bub,
+                             A_eq=np.c_[J, np.zeros(6)], b_eq=desired, bounds=[(None, None)]*9, method='highs')
+            if result.success:
+                rho = float(result.x[-1])
+                actuator_task_feasible = True
+            elif result.status == 2:
+                actuator_task_feasible = False
     predicted_velocity=command.copy()
     if response_active:
         command=command_scale*predicted_velocity+command_offset
+    mark('constrained_qp')
     proof = c.collision.sweep(state, predicted_velocity, dt, base_z, tolerance=.0005, max_samples=33, base_rotation=base_rotation)
     clearance = float(proof['lower'].min())
     if response_active:
@@ -755,6 +805,7 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
     report = dict(status=status, camera_task_feasible=bool(task_feasible), rho=rho,
                   camera_actuator_feasible=actuator_task_feasible,
                   rho_definition='joint minimum normalized active-barrier residual',
+                  rho_method=rho_method,
                   barrier_mode=barrier_mode,
                   kinematic_preference_active=kinematic_preference_active,
                   geometry_preference_active=geometry_preference_active,
@@ -770,7 +821,9 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
                   full_base_twist_measured=base_twist is not None,
                   self_clearance_lower_m=self_clearance,
                   scope='local model feasibility; agent owns task-space changes')
+    mark('continuous_certificates')
     info = dict(position_error=float(np.linalg.norm(error[:3])), orientation_error=float(np.linalg.norm(error[3:])),
+                solver_stage_wall_s=timings,
                 qp_violation=violation, solve_s=time.perf_counter()-started, command_position_violation=0.,
                 command_diff_drive_violation=0., command_sweep_lower_m=clearance, clearance_m=float(distances.min()),
                 dynamic_constraint_count=int(np.sum(active & (c.collision.track_ids[indices,None] > 0))),

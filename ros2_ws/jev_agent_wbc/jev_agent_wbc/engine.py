@@ -22,6 +22,15 @@ from .safety import solve_with_certificate
 from .kinematic_feasibility import POLICY as KINEMATIC_POLICY
 
 
+def geometry_feedback_snapshot(guidance,box_budget,state,t,base_z,base_rotation):
+    """Advisory measured geometry; hard control preferences remain synchronous."""
+    from .representation_jvs import JVSGeometryBackend
+    backend=JVSGeometryBackend(box_budget)
+    observation=backend.observe(state,t,base_z=base_z,base_rotation=base_rotation)
+    feedback=guidance.feedback(observation,'measured')
+    return feedback,json.dumps(native(feedback),ensure_ascii=False,allow_nan=False)
+
+
 def needs_configuration_confirmation(diagnosis, feedback, t):
     """Allow one fresh diagnosis for transient local-model disagreement.
 
@@ -63,6 +72,8 @@ class CinematicEngine:
         self.geometry_preferences = geometry_preferences
         self.geometry_scene = None
         self.last_geometry_feedback_s = -float('inf')
+        self.geometry_feedback_async=coordination_async
+        self.geometry_feedback_future=None
         self.camera_history = []
         self.actual_feedback = None
         self.camera_output = None
@@ -79,7 +90,10 @@ class CinematicEngine:
         self.perception = SubjectEvidence(original.task['subject']['id'])
         self.output = Path(output)
         self.output.mkdir(parents=True, exist_ok=True)
-        self.events = (self.output/'events.jsonl').open('w')
+        if coordination_async:
+            from .async_journal import AsyncJournal
+            self.events=AsyncJournal(self.output/'events.jsonl')
+        else:self.events = (self.output/'events.jsonl').open('w')
         if decider is None:
             client = SystemOneClient(model=model, journal=self.output/'jev_api.jsonl',
                 **({} if api_url is None else {'url': api_url}))
@@ -147,7 +161,7 @@ class CinematicEngine:
             function = {'diagnose': task_space_planning.diagnose,
                         'candidates': task_space_planning.build, 'verify': task_space_planning.verify}[kind]
             if kind == 'diagnose':
-                kwargs.update(active=self.active, budget=self.budget,
+                kwargs.update(active=self.active, budget=self.budget,encode_journal=True,
                     accepted_intent=None if self.active_candidate is None else self.active_candidate.consequences.get('intent'))
             if kind == 'candidates':
                 kwargs.update(representation_boxes=self.geometry_backend.box_budget,
@@ -346,8 +360,14 @@ class CinematicEngine:
                             untested_proposals=result.get('untested_proposals'),search_exhausted=result.get('search_exhausted'),
                             evaluations=result.get('evaluations'))
             elif kind == 'diagnose':
+                encoded=result.pop('_encoded_journal',None)
                 self.report = result
-                self._write('whole_body_difficulty', t, **result)
+                if encoded is None:self._write('whole_body_difficulty',t,**result)
+                else:
+                    # Serialization runs in the numerical worker; the servo
+                    # only appends its receipt time to the same full evidence.
+                    self.events.write('{"event":"whole_body_difficulty","time_s":'+str(float(t))+','+encoded[1:]+'\n')
+                    self.events.flush()
                 if (self.planner_model=='floating_camera' and self.active is not self.original
                         and not result['report']['issues']):
                     kept=[]
@@ -404,7 +424,7 @@ class CinematicEngine:
                 self.feasible_plans += bool(candidates)
                 self.pending_candidates = {c.id: c for c in candidates if t < c.path.activation_s}
                 self._write('candidate_set', t, cards=[c.card() for c in candidates],
-                    evaluations=result['evaluations'], planner_wall_s=result['wall_s'],
+                    evaluations=result['evaluations'], planner_wall_s=result['wall_s'],seed_wall_s=result.get('seed_wall_s'),
                     untested_proposals=result.get('untested_proposals'), search_exhausted=result.get('search_exhausted'),
                     kinematic_prior=result.get('kinematic_prior'),construction_plan=result.get('construction_plan'),
                     generated_proposals=result.get('generated_proposals'))
@@ -521,13 +541,21 @@ class CinematicEngine:
                 self.wbc.previous.copy(), t, base_z, self.planning_limits,
                 commanded_q=None if commanded_q is None else np.asarray(commanded_q).copy())
             self.last_report_s = t
+    def warm_workers(self):
+        self.pool.submit(initialize_worker).result(timeout=30.)
+        for name in ('coordination','reconfiguration'):
+            worker=getattr(self.wbc,name,None)
+            if hasattr(worker,'warm'):worker.warm()
+
     def step(self, state, scene, t, dt, base_z=0., base_rotation=None, commanded_q=None, measured_control=None,
              measured_base_twist=None):
         started = time.monotonic()
+        cpu_started=time.thread_time()
         self.wbc.measured_control = None if measured_control is None else np.asarray(measured_control, float).copy()
         self.planning_base_rotation = None if base_rotation is None else np.asarray(base_rotation,float).copy()
         self.wbc.measured_base_twist = None if measured_base_twist is None else np.asarray(measured_base_twist, float).copy()
         self.update(state, scene, t, base_z, commanded_q)
+        updated_wall=time.monotonic()
         target, rotation, feedforward = self.active.sample(t)
         brake = t >= self.original.duration or t-float(scene['observation_stamp']) > .6
         if brake and t < self.original.duration:
@@ -541,13 +569,31 @@ class CinematicEngine:
                         trajectory_id=path_hash(self.active),reason=str(error),
                         safety_guaranteed=False,command_published=False)
             raise
+        solved_wall=time.monotonic()
         guide = getattr(self.wbc,'geometry_guidance',None)
+        if self.geometry_feedback_future is not None and self.geometry_feedback_future.done():
+            future,self.geometry_feedback_future=self.geometry_feedback_future,None
+            try:
+                feedback,encoded=future.result()
+                self.events.write('{"event":"geometry_execution_feedback","time_s":'+str(float(t))+','+encoded[1:]+'\n')
+                self.events.flush()
+                if guide is not None and feedback['request_id']==guide.request.id:
+                    info['geometry_feedback']={k:v for k,v in feedback.items() if k!='geometry'}
+            except Exception as error:
+                self._write('geometry_feedback_failed',t,reason=str(error))
         if (guide is not None and guide.request.start_s <= t <= guide.request.end_s
-                and t-self.last_geometry_feedback_s >= .5):
-            snapshot = self.geometry_backend.observe(state,t,base_z=base_z,base_rotation=base_rotation)
-            feedback = guide.feedback(snapshot,'measured')
-            self._write('geometry_execution_feedback',t,**feedback)
-            info['geometry_feedback'] = {k:v for k,v in feedback.items() if k!='geometry'}
+                and t-self.last_geometry_feedback_s >= .5 and self.geometry_feedback_future is None):
+            if self.geometry_feedback_async:
+                from copy import copy
+                snapshot=copy(guide);snapshot.camera_path=None
+                self.geometry_feedback_future=self.pool.submit(geometry_feedback_snapshot,snapshot,
+                    self.geometry_backend.box_budget,np.asarray(state).copy(),t,base_z,
+                    None if base_rotation is None else np.asarray(base_rotation).copy())
+            else:
+                snapshot = self.geometry_backend.observe(state,t,base_z=base_z,base_rotation=base_rotation)
+                feedback = guide.feedback(snapshot,'measured')
+                self._write('geometry_execution_feedback',t,**feedback)
+                info['geometry_feedback'] = {k:v for k,v in feedback.items() if k!='geometry'}
             self.last_geometry_feedback_s = t
         self.wbc_degraded_samples += int(info.get('tpr_status') == 'degraded')
         preparation=self.configuration_monitor.update(state,
@@ -591,6 +637,9 @@ class CinematicEngine:
                 visual_proxy_source='runtime subject position and declared camera output pose; no SAM; not evaluation masks',
                 clearance_m=info.get('command_sweep_lower_m'), joint_margin_rad=info['joint_margin_rad'],
                 actual_parameters=parameters.tolist(), remaining_budget_s=max(0., self.original.duration-t)))
+        info['control_thread_cpu_s']=time.thread_time()-cpu_started
+        info['engine_stage_wall_s']=dict(observation_and_agent=updated_wall-started,
+            control=solved_wall-updated_wall,feedback_and_record=time.monotonic()-solved_wall)
         return command, info
 
     def close(self):
@@ -602,6 +651,14 @@ class CinematicEngine:
                 wall_s=time.monotonic()-self.pipeline_started_wall))
             self.pipeline_started_wall = None
         self.jev.close()
+        if self.geometry_feedback_future is not None:
+            try:
+                feedback,_=self.geometry_feedback_future.result(timeout=30.)
+                self._write('geometry_execution_feedback',(self.actual_feedback or {}).get('time_s',feedback['stamp_s']),
+                    **feedback,drained_at_close=True)
+            except Exception as error:
+                self._write('geometry_feedback_failed',self.last_geometry_feedback_s,reason=str(error))
+            self.geometry_feedback_future=None
         if self.math_future:
             self.math_future.cancel()
         self.pool.shutdown(wait=False, cancel_futures=True)

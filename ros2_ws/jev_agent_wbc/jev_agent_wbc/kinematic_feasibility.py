@@ -16,6 +16,7 @@ from scipy.spatial.transform import Rotation
 from .jvs_kinematics import JOINT_LOWER, JOINT_UPPER
 from .kc_svsdf import advance
 from .whole_body_qp import WholeBodyQP, whole_body_kinematics
+from .intent_paths import pose_at,poses_at
 
 
 @dataclass(frozen=True)
@@ -33,7 +34,7 @@ class KinematicPolicy:
     def __post_init__(self):
         values = [self.step_s, self.position_tolerance_m, self.orientation_tolerance_rad,
                   self.characteristic_length_m, self.min_singular_value, self.prior_horizon_s]
-        if not np.isfinite(values).all() or min(values) <= 0 or self.step_s > .1:
+        if not np.isfinite(values).all() or min(values) <= 0 or self.step_s > .15:
             raise ValueError('invalid kinematic policy')
         if isinstance(self.max_samples, bool) or not isinstance(self.max_samples, int) or self.max_samples < 2:
             raise ValueError('kinematic max_samples must be an integer >= 2')
@@ -244,6 +245,9 @@ class KinematicSearch:
         if count+1 > cfg.max_samples:
             return reject('kinematic_sample_budget_exceeded', self.t)
         times = np.linspace(self.t, end, count+1) if end > self.t else np.array([self.t])
+        target_times=np.unique(np.r_[times,.5*(times[:-1]+times[1:])])
+        target_positions,target_rotations=poses_at(path,target_times)
+        targets={float(at):(p,r) for at,p,r in zip(target_times,target_positions,target_rotations)}
         state, velocity = self.state.copy(), self.velocity.copy()
         cq = None if self.commanded_q is None else self.commanded_q.copy()
         # Require braking by the shot end; a terminal hold does not extend it.
@@ -260,7 +264,7 @@ class KinematicSearch:
         rows, cols = np.triu_indices(8)
         def audit(x, u, at):
             p, r, j = self.fk(x)
-            tp, tr = path.sample(float(at))[:2]
+            tp, tr = targets[float(at)]
             ep = float(np.linalg.norm(p-tp))
             er = float(Rotation.from_matrix(r@tr.T).magnitude())
             sigma = self.sigma(j)
@@ -292,7 +296,7 @@ class KinematicSearch:
             if np.any(lo > hi):
                 return reject('braking_or_acceleration_infeasible', at)
             p, r, j = self.fk(state)
-            tp, tr = path.sample(float(after))[:2]
+            tp, tr = targets[float(after)]
             desired = np.r_[tp-p, Rotation.from_matrix(tr@r.T).as_rotvec()]/dt
             factor = .5 if lim.command_ramp else 1.
             offset = .5*j@velocity if lim.command_ramp else np.zeros(6)
@@ -426,28 +430,36 @@ class KinematicSearch:
                 # and independent nonlinear FK/sweep checks remain mandatory.
                 h=jw.T@jw+np.eye(8)*.001
                 g=-jw.T@(self.weight*(desired-offset))-.001*center
-            pm = sparse.csc_matrix((h[rows, cols], (rows, cols)), shape=(8, 8))
-            if solver_shape != a.shape:
-                solver = None
-            if solver is None:
-                solver = osqp.OSQP()
-                solver_shape = a.shape
-                solver.setup(P=pm, q=g, A=sparse.csc_matrix(a), l=lo, u=hi, verbose=False,
-                    eps_abs=1e-8, eps_rel=1e-8, max_iter=4000, polish=False, warm_start=True)
+            # The strictly convex objective's unconstrained minimizer is also
+            # the constrained optimum whenever every original hard row passes.
+            # Active constraints still use the existing QP and residual gate.
+            free=-np.linalg.solve(h,g)
+            values=a@free
+            if np.all(values>=lo-1e-9) and np.all(values<=hi+1e-9):
+                control=free
             else:
-                solver.update(Px=pm.data, q=g, l=lo, u=hi)
-            result = solver.solve()
-            if result.info.status_val != 1 or result.x is None or not np.isfinite(result.x).all():
-                # Use the shared convex solver's feasible-start refinement;
-                # an iteration limit is not evidence of unreachable geometry.
-                from .tpr_wbc import qp
-                try:
-                    control,_=qp(h,g,a,lo,hi,velocity)
-                except RuntimeError as error:
-                    report['solver_failure']=str(error)
-                    return reject('kinematic_qp_infeasible', at)
-            else:
-                control = result.x.copy()
+                pm = sparse.csc_matrix((h[rows, cols], (rows, cols)), shape=(8, 8))
+                if solver_shape != a.shape:
+                    solver = None
+                if solver is None:
+                    solver = osqp.OSQP()
+                    solver_shape = a.shape
+                    solver.setup(P=pm, q=g, A=sparse.csc_matrix(a), l=lo, u=hi, verbose=False,
+                        eps_abs=1e-8, eps_rel=1e-8, max_iter=4000, polish=False, warm_start=True)
+                else:
+                    solver.update(Px=pm.data, q=g, l=lo, u=hi)
+                result = solver.solve()
+                if result.info.status_val != 1 or result.x is None or not np.isfinite(result.x).all():
+                    # Use the shared convex solver's feasible-start refinement;
+                    # an iteration limit is not evidence of unreachable geometry.
+                    from .tpr_wbc import qp
+                    try:
+                        control,_=qp(h,g,a,lo,hi,velocity)
+                    except RuntimeError as error:
+                        report['solver_failure']=str(error)
+                        return reject('kinematic_qp_infeasible', at)
+                else:
+                    control = result.x.copy()
             residual = float(max(0., np.max(lo-a@control), np.max(a@control-hi)))
             report['max_constraint_residual'] = max(report['max_constraint_residual'], residual)
             if residual > 1e-6:

@@ -46,6 +46,16 @@ class FKCameraPath(IntentPath):
     def pose(self,t):
         return self.sample(t)[:2]
 
+    def poses_at(self,times):
+        from .intent_paths import poses_at
+        times=np.asarray(times,float);before=times<=self.activation_s
+        p=np.empty((len(times),3));r=np.empty((len(times),3,3))
+        p[before],r[before]=poses_at(self.previous,times[before])
+        if np.any(~before):
+            at=np.minimum(times[~before],self.duration)
+            p[~before],r[~before]=self.translation(at),self.rotation(at).as_matrix()
+        return p,r
+
     def sample(self,t):
         if t<=self.activation_s:
             return self.previous.sample(t)

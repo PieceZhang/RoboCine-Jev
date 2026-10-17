@@ -19,7 +19,7 @@ from scipy.spatial.transform import Rotation
 from .candidates import Candidate, SearchBudget, path_hash
 from .camera_intent import (IntentSpec, POLICY, default_intrinsics, progress_at,
                             selection_key, visibility, subject_clearances)
-from .intent_paths import propose_intent_paths, positions_at, pose_at
+from .intent_paths import propose_intent_paths, positions_at, pose_at, poses_at
 from .contracts import Validation, native, digest
 from .evaluation import save_json, smoothness
 from .jev import AsyncJev, CandidateDecider, SystemOneClient, PhaseAwareDecider
@@ -121,7 +121,8 @@ def intent_prediction(spec, path, scene, t, history=(), step=.05):
     # grid offset (e.g. t=2.78, step=.1) must not turn a full .4 s hold into .32 s.
     boundaries=[prediction_end]+([path.duration] if path.duration>=t else [])
     times = np.unique(np.round(np.r_[np.arange(t,prediction_end-1e-8,step),boundaries],9))
-    poses = [pose_at(path,float(at)) for at in times]
+    pp,rr=poses_at(path,times)
+    poses=list(zip(pp,rr))
     previous = [row for row in history if row['t'] < t-1e-8]
     positions = [row['camera_position'] for row in previous]+[pose[0] for pose in poses]
     rotations = [Rotation.from_quat(row['camera_quaternion_xyzw']).as_matrix() for row in previous]+[pose[1] for pose in poses]
@@ -135,6 +136,12 @@ def intent_prediction(spec, path, scene, t, history=(), step=.05):
         guarantee=False,physical_uncertainty_envelope_retained=True,
         max_future_radius_growth_m=float(max(0.,prediction_end-scene['observation_stamp'])*
             np.max(scene.get('radius_rates',[0.]),initial=0.)))
+    result.update(camera_motion_limits(poses,times))
+    return result
+
+
+def camera_motion_limits(poses,times):
+    result={}
     velocity = np.gradient(np.array([pose[0] for pose in poses]), times, axis=0)
     acceleration = np.gradient(velocity, times, axis=0)
     angular = [(Rotation.from_matrix(b[1]@a[1].T).magnitude()/(tb-ta))
@@ -267,7 +274,15 @@ def camera_candidates(original, active, strategy, scene, t, budget, radius, hist
             evaluations.append(detail)
             continue
         if value.feasible:
-            metrics = intent_prediction(spec,path,scene,t,history)
+            if construction_plan is not None and direct_gate is not None:
+                # Full framing/intent already ran on the realized FK witness.
+                # Retain the authored curve's separate motion-limit gate.
+                end=path.duration+POLICY.terminal_hold_s
+                times=np.unique(np.round(np.r_[np.arange(t,end-1e-8,.05),path.duration,end],9))
+                pp,rr=poses_at(path,times)
+                metrics=camera_motion_limits(list(zip(pp,rr)),times)
+            else:
+                metrics = intent_prediction(spec,path,scene,t,history)
             detail['intent'] = metrics
             if metrics['camera_limits_pass']:
                 gate = direct_gate if direct_gate is not None else (None if numerical_gate is None else numerical_gate(path))

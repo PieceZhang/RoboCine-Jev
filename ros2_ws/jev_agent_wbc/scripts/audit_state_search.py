@@ -3,9 +3,10 @@
 import argparse
 from collections import Counter
 import json
+import os
 from pathlib import Path
 import sys
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0,os.environ.get('JEV_AUDIT_CODE_ROOT',str(Path(__file__).resolve().parents[1])))
 import numpy as np
 from jev_agent_wbc.dynamic_collision import DynamicCollision
 from jev_agent_wbc.self_collision import SelfCollision

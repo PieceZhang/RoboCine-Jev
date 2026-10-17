@@ -228,6 +228,14 @@ class AsyncCoordinationPreview(CoordinationPreview):
         self.requested = -np.inf
         self.accepted = self.rejected = 0
 
+    def warm(self):
+        if self.enabled and self.pool is None:
+            import multiprocessing
+            from concurrent.futures import ProcessPoolExecutor
+            from .shot_preview_worker import initialize_worker
+            self.pool=ProcessPoolExecutor(max_workers=1,mp_context=multiprocessing.get_context('spawn'),initializer=initialize_worker)
+            self.pool.submit(initialize_worker).result(timeout=30.)
+
     def set_trajectory(self, reference):
         if reference is not self.trajectory:
             self.generation += 1

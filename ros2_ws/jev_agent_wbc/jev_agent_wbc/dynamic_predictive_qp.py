@@ -89,7 +89,7 @@ class DynamicPredictiveQP(ObstaclePredictiveQP):
         self.base_reference_cache = None
 
     def update_collision_map(self, scene):
-        self.collision = DynamicCollision(scene, self.physical_time)
+        self.collision = DynamicCollision(scene, self.physical_time,geometry=self.collision.geometry)
         self.base_reference_cache = None
 
     def make_plan(self, state, t, base_z, commanded_q):

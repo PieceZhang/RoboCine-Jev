@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
-from .jvs_kinematics import JOINT_ORIGINS, JOINT_AXES, CAMERA_OFFSET, _rotation
+from .jvs_kinematics import JOINT_ORIGINS, JOINT_AXES, CAMERA_OFFSET, _rotation, arm_chain
 
 
 def advance(x, u, dt):
@@ -23,6 +23,17 @@ def advance(x, u, dt):
     y[:2] += u[0]*dt*np.sinc(a/(2*np.pi))*np.array([np.cos(x[2]+a/2), np.sin(x[2]+a/2)])
     y[2:] += dt*u[1:]
     return y
+
+
+def advance_sequence(x,u,times):
+    times=np.asarray(times)
+    states=np.broadcast_to(x,(len(times),9)).copy()
+    a=u[1]*times
+    distance=u[0]*times*np.sinc(a/(2*np.pi))
+    states[:,0]+=distance*np.cos(x[2]+a/2)
+    states[:,1]+=distance*np.sin(x[2]+a/2)
+    states[:,2:]+=times[:,None]*u[1:]
+    return states
 
 
 def obstacle_spheres(obstacle):
@@ -165,24 +176,21 @@ def primitive_sdf(points, kind, size, with_gradient=False):
         r0, r1, height = size
         q = np.c_[np.linalg.norm(p[:, :2], axis=1), p[:, 2]]
         vertices = np.array([[0, -height/2], [r0, -height/2], [r1, height/2], [0, height/2]])
-        distances, offsets, edge_normals = [], [], []
-        for a, b in zip(vertices[:-1], vertices[1:]):
-            v = b-a
-            s = np.clip((q-a)@v/(v@v), 0, 1)
-            delta = q-a-s[:, None]*v
-            distances.append(np.linalg.norm(delta, axis=1))
-            if with_gradient:
-                offsets.append(delta)
-                edge_normals.append(np.array([v[1], -v[0]])/np.linalg.norm(v))
+        edges=np.diff(vertices,axis=0)
+        relative=q[:,None]-vertices[:-1]
+        s=np.clip(np.einsum('nei,ei->ne',relative,edges)/np.sum(edges*edges,axis=1),0,1)
+        offsets=relative-s[...,None]*edges
+        distances=np.linalg.norm(offsets,axis=-1)
         inside = (np.abs(q[:, 1]) <= height/2) & (q[:, 0] <= r0+(r1-r0)*(q[:, 1]/height+.5))
-        distance = np.min(distances, axis=0)*np.where(inside, -1., 1.)
+        distance = np.min(distances, axis=1)*np.where(inside, -1., 1.)
         if not with_gradient:
             return distance
-        edge = np.argmin(distances, axis=0)
-        delta = np.array(offsets)[edge, np.arange(len(p))]
+        edge = np.argmin(distances, axis=1)
+        delta = offsets[np.arange(len(p)),edge]
         meridian = delta/np.maximum(np.abs(distance[:, None]), 1e-12)*np.where(inside[:, None], -1., 1.)
         surface = np.abs(distance) < 1e-12
-        meridian[surface] = np.array(edge_normals)[edge[surface]]
+        edge_normals=np.column_stack([edges[:,1],-edges[:,0]])/np.linalg.norm(edges,axis=1)[:,None]
+        meridian[surface] = edge_normals[edge[surface]]
         normal = np.c_[meridian[:, :1]*p[:, :2]/np.maximum(q[:, :1], 1e-12), meridian[:, 1]]
         return distance, normal
     raise ValueError(kind)
@@ -215,19 +223,44 @@ class CollisionGeometry:
         # Conservative distance from each rotation axis to any downstream point.
         self.reach = np.array([1.25, .98, .88, .66, .46, .36, .22])
         self.by_body = [[shape for shape in self.shapes if shape[0] == b] for b in range(8)]
+        self.shape_bodies=np.array([s[0] for s in self.shapes])
+        self.shape_offsets=np.array([s[4] for s in self.shapes])
+        self.shape_rotations=np.array([s[5] for s in self.shapes])
+        self.shape_groups={kind:np.array([i for i,s in enumerate(self.shapes) if s[2]==kind])
+                           for kind in ('sphere','box','cylinder','frustum')}
+        self.shape_sizes={kind:np.array([self.shapes[i][3] for i in ids]) for kind,ids in self.shape_groups.items()}
+        self.axis_outer=np.array([np.outer(axis,axis) for axis in JOINT_AXES])
+        self.axis_cross=np.array([[[0.,-z,y],[z,0.,-x],[-y,x,0.]] for x,y,z in JOINT_AXES])
+        self.shape_joint_mask=np.arange(6)[None,:]<np.minimum(self.shape_bodies,6)[:,None]
+        extents=[]
+        for _,_,kind,size,offset,_ in self.shapes:
+            radius=(size[0] if kind=='sphere' else np.linalg.norm(size)/2 if kind=='box'
+                    else np.hypot(size[0],size[1]/2) if kind=='cylinder'
+                    else np.hypot(max(size[:2]),size[2]/2))
+            extents.append(np.linalg.norm(offset)+radius)
+        self.max_body_extent=float(max(extents))
 
     def frames(self, x, z=0., base_rotation=None):
         p = np.array([x[0], x[1], z])
         r = Rotation.from_euler('z', x[2]).as_matrix() if base_rotation is None else base_rotation
-        frames = [(p.copy(), r.copy())]
-        origins, axes = [], []
-        for offset, axis, angle in zip(JOINT_ORIGINS, JOINT_AXES, x[3:]):
-            p = p+r@offset
-            origins.append(p.copy()); axes.append(r@axis)
-            r = r@_rotation(axis, angle)
-            frames.append((p.copy(), r.copy()))
-        frames.append((p+r@CAMERA_OFFSET, r.copy()))
-        return frames, np.asarray(origins), np.asarray(axes)
+        positions,rotations,origins,axes,_=arm_chain(x[3:])
+        return list(zip(positions@r.T+p,r@rotations)),origins@r.T+p,axes@r.T
+
+    def frame_arrays(self,states,z=0.,base_rotations=None):
+        states=np.asarray(states);n=len(states)
+        p=np.column_stack([states[:,:2],np.full(n,z)])
+        r=Rotation.from_euler('z',states[:,2]).as_matrix() if base_rotations is None else np.asarray(base_rotations)
+        positions=np.empty((n,8,3));orientations=np.empty((n,8,3,3))
+        positions[:,0]=p;orientations[:,0]=r
+        for j,(offset,axis) in enumerate(zip(JOINT_ORIGINS,JOINT_AXES)):
+            p=p+np.einsum('nij,j->ni',r,offset)
+            c=np.cos(states[:,3+j]);s=np.sin(states[:,3+j])
+            rotation=c[:,None,None]*np.eye(3)+(1-c[:,None,None])*self.axis_outer[j]+s[:,None,None]*self.axis_cross[j]
+            r=r@rotation
+            positions[:,j+1]=p;orientations[:,j+1]=r
+        positions[:,-1]=p+np.einsum('nij,j->ni',r,CAMERA_OFFSET)
+        orientations[:,-1]=r
+        return positions,orientations
 
     def body_sdf(self, points, frames, body):
         points = np.atleast_2d(points)
@@ -257,72 +290,88 @@ class CollisionGeometry:
 
     def distances(self, x, centers, z=0., base_rotation=None, gradient=False):
         frames, origins, axes = self.frames(x,z,base_rotation)
+        result=self.primitive_arrays(frames,centers,gradient)
         if not gradient:
-            return np.array([self.body_sdf(centers, frames, b) for b in range(8)]).T
+            return np.stack([result[:,self.shape_bodies==b].min(axis=1) for b in range(8)],axis=1)
+        primitive_distances,primitive_normals=result
         distances, gradients = [], []
         for b in range(8):
-            bp, br = frames[b]
-            body_distances, body_normals = [], []
-            for _, _, kind, size, p, r in self.by_body[b]:
-                rotation = br@r
-                d, normal = primitive_sdf((centers-(bp+br@p))@rotation, kind, size, with_gradient=True)
-                body_distances.append(d)
-                body_normals.append(normal@rotation.T)
-            nearest = np.argmin(body_distances, axis=0)
+            selected=np.flatnonzero(self.shape_bodies==b)
+            nearest=selected[np.argmin(primitive_distances[:,selected],axis=1)]
             indices = np.arange(len(centers))
-            distances.append(np.array(body_distances)[nearest, indices])
-            normal = np.array(body_normals)[nearest, indices]
+            distances.append(primitive_distances[indices,nearest])
+            normal=primitive_normals[indices,nearest]
             gradients.append(-np.einsum('ni,nij->nj', normal,
                 self.point_jacobians(x,centers,b,origins,axes,z)))
         return np.array(distances).T, np.array(gradients).transpose(1,0,2)
 
-    def primitive_distances(self,x,centers,z=0.,base_rotation=None):
+    def primitive_arrays(self, frames, centers, gradient=False):
+        """Batch identical analytic primitives; preserve their exact SDFs."""
+        positions=np.array([p for p,_ in frames]);rotations=np.array([r for _,r in frames])
+        return self._primitive_arrays(positions,rotations,np.asarray(centers),gradient)
+
+    def _primitive_arrays(self, positions, rotations, centers, gradient=False):
+        br=rotations[...,self.shape_bodies,:,:]
+        origins=positions[...,self.shape_bodies,:]+np.einsum('...pij,pj->...pi',br,self.shape_offsets)
+        rotation=br@self.shape_rotations
+        local=np.einsum('...npi,...pij->...npj',centers[...,None,:]-origins[...,None,:,:],rotation)
+        distances=np.empty(local.shape[:-1]);normals=np.empty_like(local) if gradient else None
+        for kind,ids in self.shape_groups.items():
+            points=local[...,ids,:];shape=points.shape
+            sizes=self.shape_sizes[kind]
+            if kind=='frustum':
+                # The chassis has one frustum; its dimensions are common.
+                size=sizes[0]
+            else:
+                expanded=np.broadcast_to(sizes,shape[:-1]+(sizes.shape[1],)).reshape(-1,sizes.shape[1])
+                size=expanded if kind=='box' else expanded.T
+            result=primitive_sdf(points.reshape(-1,3),kind,size,with_gradient=gradient)
+            if gradient:
+                distance,normal=result
+                normals[...,ids,:]=normal.reshape(shape)
+            else:distance=result
+            distances[...,ids]=distance.reshape(shape[:-1])
+        if gradient:
+            return distances,np.einsum('...npi,...pji->...npj',normals,rotation)
+        return distances
+
+    def primitive_distances(self,x,centers,z=0.,base_rotation=None,with_normals=False):
         """All primitive gradients for a nonsmooth union's safety constraints.
 
         Constraining only the currently nearest chassis primitive can miss an
         impending nearest-feature switch. Each nearby primitive gets a row.
         """
         frames,origins,axes=self.frames(x,z,base_rotation)
-        ds=[];gs=[]
+        ds,normals=self.primitive_arrays(frames,centers,True)
         # Point Jacobians depend on the body and witness, not its primitive.
-        # Batch them so the execution QP can inspect all local mesh witnesses.
-        jacobians = [self.point_jacobians(x,centers,body,origins,axes,z) for body in range(8)]
-        for body,_,kind,size,p,r in self.shapes:
-            bp,br=frames[body];center=bp+br@p;rot=br@r
-            distance,normal=primitive_sdf((centers-center)@rot,kind,size,with_gradient=True)
-            ds.append(distance)
-            normals=normal@rot.T
-            gs.append(-np.einsum('ni,nij->nj', normals, jacobians[body]))
-        return np.array(ds).T,np.array(gs).transpose(1,0,2)
+        # Compute the full chain once, then mask joints downstream of each
+        # primitive. Every primitive still supplies its own exact union row.
+        full=self.point_jacobians(x,centers,6,origins,axes,z)
+        gradients=-np.einsum('npi,nij->npj',normals,full)
+        gradients[...,3:]*=self.shape_joint_mask
+        result=ds,gradients
+        return (*result,normals) if with_normals else result
 
     def distances_sequence(self, states, centers, z=0., base_rotations=None):
         """Exact same primitive SDFs, vectorized across time samples and points."""
-        rotations = [None]*len(states) if base_rotations is None else base_rotations
-        frames = [self.frames(state, z, rotation)[0] for state, rotation in zip(states, rotations)]
         points = np.asarray(centers)
-        count, surfaces = points.shape[:2]
-        distances = np.full((count, surfaces, 8), np.inf)
-        positions = np.array([[p for p, _ in f] for f in frames])
-        orientations = np.array([[r for _, r in f] for f in frames])
-        for body, _, kind, size, offset, local_rotation in self.shapes:
-            br = orientations[:, body]
-            origin = positions[:, body]+np.einsum('sij,j->si', br, offset)
-            rotation = br@local_rotation
-            local = np.einsum('sni,sij->snj', points-origin[:, None], rotation)
-            sdf = primitive_sdf(local.reshape(-1, 3), kind, size).reshape(count, surfaces)
-            distances[:, :, body] = np.minimum(distances[:, :, body], sdf)
-        return distances
+        rotations=None if base_rotations is None or all(r is None for r in base_rotations) else base_rotations
+        if rotations is not None and any(r is None for r in rotations):
+            rotations=[Rotation.from_euler('z',state[2]).as_matrix() if r is None else r for state,r in zip(states,rotations)]
+        positions,orientations=self.frame_arrays(states,z,rotations)
+        primitive=self._primitive_arrays(positions,orientations,points)
+        return np.stack([primitive[...,self.shape_bodies==b].min(axis=-1) for b in range(8)],axis=-1)
 
     def displacement_bound(self, dx, dz=0., tilt=0.):
         return np.linalg.norm(dx[:2])+abs(dz)+1.25*abs(tilt)+np.abs(dx[2:])@self.reach
 
 
 class SweptCollision:
-    def __init__(self, scene):
+    def __init__(self, scene, geometry=None):
         self.scene = (load_scene(scene) if isinstance(scene, (str, Path))
                       else scene if scene.get('format') in ('jvs_groundtruth_mesh/v1', 'jvs_lidar_surfels/v1')
                       else validate_scene(scene))
-        self.geometry = CollisionGeometry()
+        self.geometry = CollisionGeometry() if geometry is None else geometry
         self.is_mesh = self.scene.get('format') in ('jvs_groundtruth_mesh/v1', 'jvs_lidar_surfels/v1')
         if self.scene.get('format') == 'jvs_lidar_surfels/v1':
             self.centers = np.asarray(self.scene['surfel_centers'], float).reshape(-1, 3).copy()

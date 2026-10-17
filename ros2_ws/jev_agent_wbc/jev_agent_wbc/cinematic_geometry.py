@@ -6,14 +6,17 @@ Each selected endpoint is checked again against the unchanged image tolerances.
 import itertools
 import numpy as np
 from .camera_intent import POLICY, default_intrinsics
-from .reference import look_at
-from .subject_state import frame_state, frame_error
+from .reference import look_at,look_at_many
+from .subject_state import frame_state,frame_states,frame_error
 
 
 def terminal_error(original, position, model, intrinsics):
     p, r, _ = original.sample(original.duration)
     rotation = look_at(position, original.subject) @ look_at(p, original.subject).T @ r
-    target=frame_state(p,r,model,intrinsics)
+    key=repr((model,intrinsics))
+    cache=original.__dict__.setdefault('_terminal_frame_cache',{})
+    if key not in cache:cache[key]=frame_state(p,r,model,intrinsics)
+    target=cache[key]
     error=frame_error(frame_state(position,rotation,model,intrinsics),target)
     error['silhouette_axis_required']=target.get('silhouette_axis_rad') is not None
     return error
@@ -31,16 +34,30 @@ def inside_terminal_band(error, reserve=1.):
         for k,v in limits.items() if k != 'silhouette_axis_error_rad' or error.get(k) is not None))
 
 
-def terminal_band(original, model, intrinsics=None):
+def terminal_band(original, model, intrinsics=None, axis_only=False):
     intrinsics = default_intrinsics() if intrinsics is None else intrinsics
-    key = repr((model, intrinsics))
+    key = repr((model, intrinsics,axis_only))
     cache = original.__dict__.setdefault('_terminal_band_cache', {})
     if key in cache:
         return cache[key]
     p = original.sample(original.duration)[0]
     offsets = [np.zeros(3)]
-    if model is not None:
+    if model is not None and axis_only:
+        directions=np.array([xyz for xyz in itertools.product((-1.,0.,1.),repeat=3) if sum(v!=0 for v in xyz)==1])
+        original_rotation=original.sample(original.duration)[1]
+        residual=look_at(p,original.subject).T@original_rotation
+        target=frame_state(p,original_rotation,model,intrinsics)
+        lo=np.zeros(6);hi=np.full(6,.35)
+        for _ in range(14):
+            mid=(lo+hi)/2;positions=p+mid[:,None]*directions
+            frames=frame_states(positions,look_at_many(positions,original.subject)@residual,model,intrinsics)
+            errors=[dict(frame_error(frame,target),silhouette_axis_required=target.get('silhouette_axis_rad') is not None) for frame in frames]
+            valid=np.array([inside_terminal_band(error,.8) for error in errors])
+            lo=np.where(valid,mid,lo);hi=np.where(valid,hi,mid)
+        offsets.extend(lo[:,None]*directions)
+    elif model is not None:
         for xyz in itertools.product((-1., 0., 1.), repeat=3):
+            if axis_only and sum(v!=0 for v in xyz)!=1:continue
             d = np.array(xyz)
             if not np.any(d):
                 continue
@@ -53,7 +70,7 @@ def terminal_band(original, model, intrinsics=None):
                 else:
                     hi = mid
             offsets.append(lo*d)
-    value = dict(method='26_ray_bisection_rechecked_endpoints', tolerance_reserve=.8,
+    value = dict(method='6_axis_bisection_rechecked_endpoints' if axis_only else '26_ray_bisection_rechecked_endpoints', tolerance_reserve=.8,
                  offsets_m=[v.tolist() for v in offsets], reference_position=p.tolist())
     cache[key] = value
     return value
@@ -73,7 +90,7 @@ def curve_quality(path, start=None, samples=121):
         sign = -1. if motion == 'movein' else 1.
     elif motion == 'orbit':
         feature = np.unwrap(np.arctan2(points[:,1]-original.subject[1],points[:,0]-original.subject[0]))
-        ref = np.array([original.sample(float(t))[0] for t in times])
+        ref = positions_at(original,times)
         angles = np.unwrap(np.arctan2(ref[:,1]-original.subject[1],ref[:,0]-original.subject[0]))
         sign = np.sign(angles[-1]-angles[0])
     else:

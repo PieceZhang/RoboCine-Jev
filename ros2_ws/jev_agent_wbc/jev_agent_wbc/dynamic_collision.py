@@ -3,12 +3,12 @@ import numpy as np
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
 
-from .kc_svsdf import SweptCollision, advance, primitive_sdf
+from .kc_svsdf import SweptCollision, advance, advance_sequence, primitive_sdf
 
 
 class DynamicCollision(SweptCollision):
-    def __init__(self, scene, physical_time=None, uncertainty_rate=None):
-        super().__init__(scene)
+    def __init__(self, scene, physical_time=None, uncertainty_rate=None, geometry=None):
+        super().__init__(scene,geometry)
         self.observed_centers = self.centers.copy()
         self.observed_radii = self.radii.copy()
         self.velocities = np.asarray(scene.get('surfel_velocities', np.zeros_like(self.centers)), float)
@@ -60,14 +60,8 @@ class DynamicCollision(SweptCollision):
             return result
         centers, indices = centers[moving], indices[moving]
         frames = self.geometry.frames(state, z, base_rotation)[0]
-        derivatives = []
-        for body, _, kind, size, p, r in self.geometry.shapes:
-            bp, br = frames[body]
-            center, rotation = bp + br @ p, br @ r
-            _, normal = primitive_sdf((centers - center) @ rotation, kind, size, with_gradient=True)
-            derivatives.append(np.einsum('ni,ni->n', normal @ rotation.T, self.velocities[indices])
-                               - self.radius_rates[indices])
-        result[moving] = np.array(derivatives).T
+        _,normal=self.geometry.primitive_arrays(frames,centers,True)
+        result[moving]=np.einsum('npi,ni->np',normal,self.velocities[indices])-self.radius_rates[indices,None]
         return result
 
     def sweep(self, x, u, duration, z=0., tolerance=.003, max_samples=257, base_rotation=None):
@@ -79,14 +73,13 @@ class DynamicCollision(SweptCollision):
         speed = abs(u[0]) + np.abs(u[1:]) @ self.geometry.reach + obstacle_speed
         count = min(max_samples, max(3, int(np.ceil(speed * duration / (2 * tolerance))) + 1))
         times = np.linspace(0, duration, count)
-        states = [advance(x, u, t) for t in times]
-        rotations = ([None] * count if base_rotation is None else
-                     [Rotation.from_euler('z', u[1] * t).as_matrix() @ base_rotation for t in times])
+        states = advance_sequence(x,u,times)
+        rotations = None if base_rotation is None else Rotation.from_euler('z',u[1]*times).as_matrix()@base_rotation
         # Include every moving surface even if it starts outside the static
         # nearest-witness neighbourhood. Nearby static surfaces use the same
         # established selection as the static swept oracle.
         omitted_lower = np.inf
-        if duration <= .1:
+        if duration <= .2+1e-9:
             # Short execution intervals do not need repeated nearest-body SDF
             # searches at every sample. Include ALL witnesses near the initial
             # body origins plus ALL movers, and analytically bound the omitted
@@ -98,15 +91,9 @@ class DynamicCollision(SweptCollision):
             if not selected:
                 selected.update(np.atleast_1d(self.tree.query(origins, k=1)[1]).tolist())
             indices = np.array(sorted(selected), dtype=int)
-            radii = []
-            for _, _, kind, size, offset, _ in self.geometry.shapes:
-                bound = (size[0] if kind == 'sphere' else np.linalg.norm(size)/2 if kind == 'box'
-                         else np.hypot(size[0], size[1]/2) if kind == 'cylinder'
-                         else np.hypot(max(size[:2]), size[2]/2))
-                radii.append(np.linalg.norm(offset)+bound)
             static_radius = float(np.max(self.radii[self.track_ids == 0], initial=0.))
             robot_speed = abs(u[0])+np.abs(u[1:])@self.geometry.reach
-            omitted_lower = 1.5-max(radii)-static_radius-robot_speed*duration
+            omitted_lower = 1.5-self.geometry.max_body_extent-static_radius-robot_speed*duration
         else:
             centers, _ = self.active_sequence(states, z, rotations)
             indices = np.unique(np.r_[self.tree.query(centers, k=1)[1], np.flatnonzero(self.track_ids > 0)])

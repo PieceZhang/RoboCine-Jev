@@ -24,6 +24,7 @@ def main():
     p.add_argument('--key-file', type=Path, required=True)
     p.add_argument('--model', default='jev-1.14.0')
     p.add_argument('--cases', nargs='+', help='Optional subset of the existing scenario catalog')
+    p.add_argument('--workers',type=int,help='Concurrent demos; use 1 for isolated latency measurements')
     p.add_argument('--pace', type=float, default=.03)
     p.add_argument('--lead', type=float, default=1.2)
     p.add_argument('--candidate-seconds', type=float, default=12.)
@@ -44,7 +45,7 @@ def main():
         p.error('unknown scenario')
     config = dict(model=a.model, api_url='https://api.typesafe.ai/v1/systemone',
                   pace=a.pace, activation_lead_s=a.lead, candidate_wall_budget_s=a.candidate_seconds,
-                  max_proposals=a.proposals,max_rollouts=a.shortlist,parallel_cases=len(names), planner_model='floating_camera',
+                  max_proposals=a.proposals,max_rollouts=a.shortlist,parallel_cases=a.workers or len(names), planner_model='floating_camera',
                   representation_boxes=3, geometry_preferences=True,
                   obstacle_avoidance_enabled=True,single_candidate=a.single_candidate,preplan=a.preplan,
                   scenarios_source=str(a.scenarios.resolve()))
@@ -56,7 +57,7 @@ def main():
     # even while the next tuning iteration edits the working tree.
     os.environ['PYTHONPATH'] = str((a.output/'frozen_code').resolve())
     results = []
-    with ProcessPoolExecutor(max_workers=len(names)) as pool:
+    with ProcessPoolExecutor(max_workers=a.workers or len(names)) as pool:
         futures = []
         for name in names:
             command = [sys.executable, '-m', 'jev_agent_wbc.runner', '--case', name,

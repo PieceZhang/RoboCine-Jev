@@ -11,6 +11,7 @@ from copy import deepcopy
 from hashlib import sha256
 import json
 from typing import Protocol
+from functools import lru_cache
 
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -145,8 +146,20 @@ def compress_boxes(boxes, budget):
         return ()
     low = np.array([np.array(b.center_m)-b.half_extents_m for b in boxes])
     high = np.array([np.array(b.center_m)+b.half_extents_m for b in boxes])
+    low,high=compress_bounds(low,high,budget)
+    boxes = [Box(tuple((a+b)/2),tuple((b-a)/2)) for a,b in zip(low,high)]
+    return tuple(sorted(boxes,key=lambda b:b.center_m))
+
+
+@lru_cache(maxsize=32)
+def _merge_pairs(count):
+    return np.triu_indices(count,1)
+
+
+def compress_bounds(low,high,budget):
+    """Internal array version of the identical conservative greedy merging."""
     while len(low) > budget:
-        i,j = np.triu_indices(len(low),1)
+        i,j = _merge_pairs(len(low))
         merged_low,merged_high = np.minimum(low[i],low[j]),np.maximum(high[i],high[j])
         volumes = np.prod(high-low,axis=1)
         growth = np.prod(merged_high-merged_low,axis=1)-volumes[i]-volumes[j]
@@ -154,8 +167,9 @@ def compress_boxes(boxes, budget):
         keep = np.ones(len(low),bool);keep[[i[best],j[best]]] = False
         low = np.vstack([low[keep],merged_low[best]])
         high = np.vstack([high[keep],merged_high[best]])
-    boxes = [Box(tuple((a+b)/2),tuple((b-a)/2)) for a,b in zip(low,high)]
-    return tuple(sorted(boxes,key=lambda b:b.center_m))
+    centers=(low+high)/2
+    order=np.lexsort((centers[:,2],centers[:,1],centers[:,0]))
+    return low[order],high[order]
 
 
 @dataclass(frozen=True)
@@ -392,10 +406,51 @@ class CompiledGuidance:
             values.extend(np.sqrt(p['weight'])*np.asarray(violation))
         return np.asarray(values, float)
 
+    def residual_arrays(self,mount,camera,occupancy):
+        """Same residual on backend FK arrays, after contract compilation.
+
+        The public ingress remains validated; internal finite differences do
+        not construct and validate the same Pose/Box contract 16 times.
+        occupancy contains (centers, half_extents) in the mount frame.
+        """
+        values=[]
+        frames={k:(v.rotation,np.asarray(v.translation_m)) for k,v in self.frames.items()}
+        frames.update(mount=mount,camera=camera)
+        for p in self.request.pose_preferences:
+            fr,fp=frames[p['frame']]
+            target=p['target'];tr=fr@Rotation.from_quat(target['quaternion_xyzw']).as_matrix()
+            tp=fp+fr@np.asarray(target['translation_m'])
+            ar,ap=mount if p['part']=='mobile_platform' else camera
+            delta=tr.T@(ap-tp)
+            excess=np.sign(delta)*np.maximum(np.abs(delta)-p['position_tolerance_m'],0.)
+            angle=Rotation.from_matrix(tr.T@ar).as_rotvec();length=np.linalg.norm(angle)
+            angle*=max(0.,length-p['orientation_tolerance_rad'])/max(length,1e-12)
+            values.extend(np.sqrt(p['weight'])*np.r_[excess,.35*angle])
+        for p in self.request.occupancy_preferences:
+            centers,half=occupancy[p['part']]
+            if not len(centers):values.append(0.);continue
+            fr,fp=frames[p['frame']];mr,mp=mount
+            relative=fr.T@mr;translation=fr.T@(mp-fp)
+            occupied=centers@relative.T+translation
+            extent=half@np.abs(relative).T
+            region=p['region'];delta=np.abs(occupied-region['center_m'])
+            if p['relation']=='stay_in_region':
+                violation=np.maximum(np.max(delta+extent,axis=0)-region['half_extents_m']+p['margin_m'],0.)
+            else:
+                d=delta-extent-region['half_extents_m']
+                distance=np.linalg.norm(np.maximum(d,0),axis=1)+np.minimum(np.max(d,axis=1),0)
+                violation=[max(0.,p['margin_m']-min(distance))]
+            values.extend(np.sqrt(p['weight'])*np.asarray(violation))
+        return np.asarray(values,float)
+
     def feedback(self, current, kind='predicted', backend_status='unknown'):
         if kind not in ('predicted','measured') or backend_status not in ('pass','fail','unknown'):
             raise ValueError('invalid result provenance/status')
-        residual = self.residual(current)
+        mount,camera=current.world_from_mount,current.world_from_camera
+        occupancy={part:(np.array([b.center_m for b in boxes]).reshape(-1,3),
+                         np.array([b.half_extents_m for b in boxes]).reshape(-1,3)) for part,boxes in current.occupancy.items()}
+        residual=self.residual_arrays((mount.rotation,np.asarray(mount.translation_m)),
+            (camera.rotation,np.asarray(camera.translation_m)),occupancy)
         return dict(schema=VERSION, kind='result', evidence_kind=kind, request_id=self.request.id, camera_path_id=self.request.camera_path_id,
             observation_id=current.id, stamp_s=current.stamp_s, backend_status=backend_status,
             preference_residual_norm=float(np.linalg.norm(residual)), geometry=current.summary(),

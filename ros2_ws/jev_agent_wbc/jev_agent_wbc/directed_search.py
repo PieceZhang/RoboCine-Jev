@@ -83,7 +83,9 @@ def options(family):
                   ('above','below') if family=='joint_vertical' else ('left','right','above','below','adaptive'))
     return {name: dict(family=family,direction=name,amplitude_m=0. if name=='adaptive' else (.3 if family.startswith('joint_') else .2),
                       plane_tolerance_m=.025 if family.startswith('joint_') else 0.,
-                      tempo=2.,allocation='anticipatory',search_config='base') for name in directions}
+                      # Delay the middle of the motion enough to preserve
+                      # acceleration reserve while the redundant posture opens.
+                      tempo=4.,allocation='anticipatory',search_config='base') for name in directions}
 
 
 def generate(original, active, scene, activation, model, intrinsics, budget, plan,initial_boundary=None):

@@ -29,6 +29,17 @@ def look_at(position, subject):
     return np.column_stack([forward, left, up])
 
 
+def look_at_many(positions,subject):
+    forward=np.asarray(subject)-np.asarray(positions)
+    norm=np.linalg.norm(forward,axis=-1)
+    if np.any(norm<1e-6):raise ValueError('camera coincides with subject')
+    forward=forward/norm[...,None]
+    left=np.stack([-forward[...,1],forward[...,0],np.zeros_like(norm)],axis=-1)
+    left[np.linalg.norm(left,axis=-1)<1e-6]=[0.,1.,0.]
+    left/=np.linalg.norm(left,axis=-1)[...,None]
+    return np.stack([forward,left,np.cross(forward,left)],axis=-1)
+
+
 def bound_effect_estimate(evidence, parameter, amount):
     """Geometry at a numerical bound, not a semantic threshold or SAM metric."""
     if not parameter.endswith('_m'):
@@ -86,6 +97,12 @@ class OriginalReference:
     @property
     def task(self):
         return deepcopy(self._task)
+
+    def __getstate__(self):
+        state=self.__dict__.copy()
+        for name in ('_sample_cache','_geometry_pose_cache'):
+            if name in state:state[name]={}
+        return state
 
     @staticmethod
     def _allocation_type(motion):
@@ -218,6 +235,11 @@ class DeformedReference:
         if t < 0. or t >= self.duration:
             twist[:] = 0.
         return p, r, twist
+
+    def __getstate__(self):
+        # Special-method lookup must not delegate pickling to the original
+        # reference: this wrapper owns its deformation and executed prefix.
+        return self.__dict__.copy()
 
     def __getattr__(self, name):
         return getattr(object.__getattribute__(self, 'original'), name)

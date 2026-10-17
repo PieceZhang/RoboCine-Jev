@@ -42,6 +42,7 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
     engine = CinematicEngine(original, observed, output, mode=mode, api_url=api_url, model=model,
         subject_model=runtime['subject'],representation_boxes=representation_boxes,geometry_preferences=geometry_preferences,
         planner_model=planner_model, planning_obstacle_avoidance=True if planning_wbc_avoidance else None,
+        coordination_async=bool(budget and budget.single_candidate),
         preview=preview, budget=budget, limits=Limits(obstacle_avoidance=not disable_wbc_avoidance), intrinsics=[fy*288/384, fy, .5, .5])
     schedule, replayed = [], []
     if target_replay is not None:
@@ -66,14 +67,22 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
     begin = time.monotonic()
     dt = .02
     startup=None
+    sensor_worker=None
     try:
+        if budget and budget.single_candidate:
+            engine.warm_workers()
+            from .async_sensor import AsyncRuntimeLidar
+            sensor_worker=AsyncRuntimeLidar(lidar,scene,observed)
         if preplan:
             from .initial_planning import prepare
             startup=prepare(engine,state,observed,z)
             begin=time.monotonic()
         for i in range(round((original.duration+POLICY.terminal_hold_s)/dt)+1):
+            iteration_started=time.monotonic()
             t = i*dt
-            if i % 5 == 0:
+            if sensor_worker is not None:
+                observed=sensor_worker.poll(state,z,t)
+            elif i % 5 == 0:
                 observed = lidar.synthetic_scan(scene, state, z, t)
             while schedule and schedule[0][0] <= t+1e-9:
                 installed_at, path, card = schedule.pop(0)
@@ -92,7 +101,7 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
                                         measured_control=engine.wbc.previous.copy())
             info['control_thread_wall_s']=time.monotonic()-control_started
             p, r, _ = whole_body_kinematics(state, z)
-            truth = DynamicCollision(scene.truth_collision(t), t, uncertainty_rate=0.)
+            truth = DynamicCollision(scene.truth_collision(t), t, uncertainty_rate=0.,geometry=engine.wbc.collision.geometry)
             clearance = float(truth.clearance(state, z).min())
             row = dict(t=t, state=state.tolist(), command=command.tolist(), camera_position=p.tolist(),
                        camera_quaternion_xyzw=Rotation.from_matrix(r).as_quat().tolist(), truth_clearance_m=clearance, info=info,
@@ -103,6 +112,7 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
                     jev_calls=engine.jev.decider.client.calls, installed=engine.installed_plans, tracks=len(observed.get('tracks', [])))), flush=True)
             if t < original.duration+POLICY.terminal_hold_s:
                 state = advance(state, command, dt)
+            info['iteration_compute_wall_s']=time.monotonic()-iteration_started
             if pace > 0:
                 remaining = (i+1)*dt/pace-(time.monotonic()-begin)
                 if remaining > 0:
@@ -122,12 +132,12 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
                 [r['visual'] for r in history],[r['progress_s'] for r in history])
             summary.update(executed_camera_intent=measured_intent,
                 terminal_confirmation_observed_s=max(0.,rows[-1]['t']-original.duration) if rows else 0.,
-                intent_success=bool(not failure and summary['safety_pass'] and measured_intent['intent_complete']))
+                intent_success=bool(not failure and summary.get('safety_pass',False) and measured_intent['intent_complete']))
             acceptance=evaluate_shot(original,runtime['subject'],
                 [r['t'] for r in history],[r['camera_position'] for r in history],
                 [Rotation.from_quat(r['camera_quaternion_xyzw']).as_matrix() for r in history],
                 [r['visual'] for r in history],[r['progress_s'] for r in history],
-                safety_pass=summary['safety_pass'],execution_ok=not failure,
+                safety_pass=summary.get('safety_pass',False),execution_ok=not failure,
                 intrinsics=engine.intrinsics,motion_end_s=engine.active.duration,
                 legacy_intent=measured_intent,
                 safety_source='runner_execution_checks; independent_sweep_audit_is_separate')
@@ -143,6 +153,7 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
         save_json(output/'summary.json', summary)
         save_json(output/'telemetry.json', rows)
         engine.close()
+        if sensor_worker is not None:sensor_worker.close()
     print(json.dumps(dict(output=str(output), completed=summary['completed'], failure=failure,
                           installed=summary['installed_plans'])), flush=True)
     return summary

@@ -11,6 +11,7 @@ import json
 import math
 from pathlib import Path
 from typing import Sequence
+from functools import lru_cache
 
 import numpy as np
 
@@ -138,8 +139,24 @@ def forward_kinematics(
     if q.shape != (6,) or not np.all(np.isfinite(q)):
         raise ValueError("joint_positions must contain six finite values")
 
+    positions,rotations,_,_,jacobian=arm_chain(q)
+    if with_jacobian:return positions[-1].copy(),rotations[-1].copy(),jacobian.copy()
+    return positions[-1].copy(),rotations[-1].copy()
+
+
+def arm_chain(joint_positions):
+    """Shared immutable FK for identical configurations within numerical steps."""
+    q=np.asarray(joint_positions,float)
+    if q.shape!=(6,) or not np.isfinite(q).all():
+        raise ValueError('joint_positions must contain six finite values')
+    return _arm_chain(tuple(q))
+
+
+@lru_cache(maxsize=256)
+def _arm_chain(q):
     position = np.zeros(3)
     orientation = np.eye(3)
+    positions=[position.copy()];rotations=[orientation.copy()]
     origins_world: list[np.ndarray] = []
     axes_world: list[np.ndarray] = []
     for origin, axis, angle in zip(JOINT_ORIGINS, JOINT_AXES, q):
@@ -147,15 +164,16 @@ def forward_kinematics(
         origins_world.append(position.copy())
         axes_world.append(orientation @ axis)
         orientation = orientation @ _rotation(axis, float(angle))
+        positions.append(position.copy());rotations.append(orientation.copy())
     position = position + orientation @ CAMERA_OFFSET
-
-    if not with_jacobian:
-        return position, orientation
+    positions.append(position.copy());rotations.append(orientation.copy())
     jacobian = np.zeros((6, 6))
     axes_array = np.asarray(axes_world)
     jacobian[:3] = np.cross(axes_array, position-np.asarray(origins_world)).T
     jacobian[3:] = axes_array.T
-    return position, orientation, jacobian
+    arrays=tuple(np.asarray(value) for value in (positions,rotations,origins_world,axes_world,jacobian))
+    for value in arrays:value.setflags(write=False)
+    return arrays
 
 
 def solve_ik(

@@ -4,6 +4,8 @@ A cylinder fit is a calibrated shape estimate, not semantic body-pose inference.
 The CPU adapter raycasts the current scene; only hit points enter the estimator.
 """
 from collections import deque
+from functools import lru_cache
+from copy import deepcopy
 
 import numpy as np
 from scipy.spatial import ConvexHull
@@ -16,6 +18,57 @@ from .contracts import native
 def frame_state(position, rotation, model, intrinsics):
     if model is None:
         return dict(valid=False, reason='missing_subject_geometry', body_orientation='unknown')
+    # Past measured frames and immutable reference poses recur in every online
+    # diagnosis. Key every geometric input exactly; callers receive an owned
+    # copy so observer annotations cannot contaminate cached measurements.
+    return deepcopy(_cached_frame_state(tuple(np.asarray(position)),tuple(np.asarray(rotation).ravel()),
+        float(model['radius']),float(model['height']),tuple(model['position']),
+        tuple(model.get('orientation_xyzw',[0.,0.,0.,1.])),tuple(intrinsics)))
+
+
+def frame_states(positions, rotations, model, intrinsics):
+    """Batch the same projected-hull moments as the scalar frame oracle."""
+    positions=np.asarray(positions);rotations=np.asarray(rotations)
+    if not len(positions):return []
+    if model is None:
+        return [dict(valid=False,reason='missing_subject_geometry',body_orientation='unknown') for _ in positions]
+    camera=np.einsum('npi,nij->npj',cylinder_points(model)[None]-positions[:,None],rotations)
+    fx,fy,cx,cy=intrinsics;depth=camera[...,0]
+    uv=np.stack([cx-fx*camera[...,1]/np.maximum(depth,1e-8),cy-fy*camera[...,2]/np.maximum(depth,1e-8)],axis=-1)
+    valid=np.all(depth>1e-5,axis=1);ids=np.flatnonzero(valid)
+    result=[dict(valid=False,reason='subject_behind_camera',body_orientation='unknown') for _ in positions]
+    if not len(ids):return result
+    polygons=[uv[i,ConvexHull(uv[i]).vertices] for i in ids]
+    size=max(map(len,polygons));a=np.empty((len(ids),size,2))
+    for i,polygon in enumerate(polygons):
+        a[i,:len(polygon)]=polygon;a[i,len(polygon):]=polygon[0]
+    b=np.roll(a,-1,axis=1);cross=a[...,0]*b[...,1]-b[...,0]*a[...,1]
+    area=.5*cross.sum(axis=1);centroid=((a+b)*cross[...,None]).sum(axis=1)/(6*area[:,None])
+    xx=((a[...,0]**2+a[...,0]*b[...,0]+b[...,0]**2)*cross).sum(axis=1)/(12*area)
+    yy=((a[...,1]**2+a[...,1]*b[...,1]+b[...,1]**2)*cross).sum(axis=1)/(12*area)
+    xy=((2*a[...,0]*a[...,1]+a[...,0]*b[...,1]+b[...,0]*a[...,1]+2*b[...,0]*b[...,1])*cross).sum(axis=1)/(24*area)
+    covariance=np.stack([xx,xy,xy,yy],axis=-1).reshape(-1,2,2)-centroid[:,:,None]*centroid[:,None,:]
+    values,axes=np.linalg.eigh(covariance);anisotropy=(values[:,-1]-values[:,0])/np.maximum(values.sum(axis=1),1e-12)
+    angle=np.arctan2(axes[:,1,-1],axes[:,0,-1])%np.pi
+    lo,hi=uv[ids].min(axis=1),uv[ids].max(axis=1)
+    relative=positions[ids]-np.asarray(model['position']);distance=np.linalg.norm(relative,axis=1)
+    direction=relative/np.maximum(distance[:,None],1e-8)
+    elevation=np.arctan2(relative[:,2],np.linalg.norm(relative[:,:2],axis=1))
+    for i,index in enumerate(ids):
+        result[index]=dict(valid=True,centroid=centroid[i].tolist(),unoccluded_area=abs(float(area[i])),
+            bbox=np.r_[lo[i],hi[i]].tolist(),bbox_size=(hi[i]-lo[i]).tolist(),
+            aspect_ratio=float((hi[i,0]-lo[i,0])/(hi[i,1]-lo[i,1])),view_direction=direction[i].tolist(),
+            distance_m=float(distance[i]),elevation_rad=float(elevation[i]),
+            silhouette_axis_rad=float(angle[i]) if anisotropy[i]>.1 else None,
+            silhouette_anisotropy=float(anisotropy[i]),body_orientation='unknown',shape_model='calibrated_cylinder',
+            source='geometry_projection_not_observed_mask')
+    return result
+
+
+@lru_cache(maxsize=8192)
+def _cached_frame_state(position,rotation,radius,height,subject,orientation,intrinsics):
+    position=np.asarray(position);rotation=np.asarray(rotation).reshape(3,3)
+    model=dict(radius=radius,height=height,position=subject,orientation_xyzw=orientation)
     uv, depth = project(cylinder_points(model), np.asarray(position), rotation, intrinsics)
     if np.any(depth <= 1e-5):
         return dict(valid=False, reason='subject_behind_camera', body_orientation='unknown')

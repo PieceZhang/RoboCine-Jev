@@ -207,8 +207,7 @@ class IntentSpec:
             segment['axis'] = r[:, 1].tolist() if 'truck' in segment['motion'] else [0., 0., 1.]
             segment['angle_anchor'] = float(np.arctan2(*(p-original.subject)[[1, 0]]))
             times = np.linspace(segment['start_s'], segment['end_s'], 257)
-            poses = [original.sample(float(t)) for t in times]
-            values = self.features(segment, [p[0] for p in poses], [p[1] for p in poses])
+            values = self.features(segment,original.translation(times),original.rotation(times).as_matrix())
             segment['start_value'], segment['end_value'] = float(values[0]), float(values[-1])
             segment['reference_range'] = [float(np.min(values)), float(np.max(values))]
             # Reject a non-monotone specification rather than silently replacing
@@ -249,8 +248,12 @@ class IntentSpec:
         return self._frame_cache[key]
 
     def frame_and_trend(self, times, positions, rotations, progress_times):
-        from .subject_state import frame_state, frame_error
-        states = [frame_state(p,r,self.model,self.intrinsics) for p,r in zip(positions,rotations)]
+        from .subject_state import frame_states, frame_error
+        states = frame_states(positions,rotations,self.model,self.intrinsics)
+        missing=np.array(sorted(set(float(np.clip(t,0.,self.original.duration)) for t in progress_times)-self._frame_cache.keys()))
+        if len(missing):
+            frames=frame_states(self.original.translation(missing),self.original.rotation(missing).as_matrix(),self.model,self.intrinsics)
+            self._frame_cache.update(zip(missing,frames))
         references = [self.reference_frame(t) for t in progress_times]
         errors = [frame_error(a,b) for a,b in zip(states,references)]
         if not errors or not all(e['valid'] for e in errors):

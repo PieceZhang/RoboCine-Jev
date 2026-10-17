@@ -8,25 +8,25 @@ import numpy as np
 import osqp
 from scipy import sparse
 from scipy.spatial.transform import Rotation
-from .intent_paths import IntentPath
+from .intent_paths import IntentPath,positions_at,poses_at
 from .reference import look_at
 from .jvs_kinematics import JOINT_LOWER,JOINT_UPPER
 from .cinematic_geometry import curve_quality,terminal_error,inside_terminal_band,terminal_band
 from .camera_intent import POLICY
 
 
-def refine(path,search,seconds=5.,max_iterations=12):
+def refine(path,search,seconds=5.,max_iterations=12,knots=33,step_tolerance=1e-4):
     start=time.monotonic()
     if search.tilt is not None:return None,dict(reason='tilted_base_not_supported')
     end=path.duration;activation=path.activation_s
     if end-search.t<1.:return None,dict(reason='insufficient_horizon')
-    n=33;ts=np.linspace(search.t,end,n);dt=ts[1]-ts[0]
+    n=knots;ts=np.linspace(search.t,end,n);dt=ts[1]-ts[0]
     original=path.original;span=end-activation
     u=np.clip((ts-activation)/span,0,1);s=10*u**3-15*u**4+6*u**5
     b=64*u**3*(1-u)**3;basis=np.column_stack([b,b*(2*u-1),s])
     if 'shape_basis' in path.geometry:
         basis=np.column_stack([np.interp(ts,path.geometry['times'],np.asarray(path.geometry['shape_basis'])[:,j],left=0.) for j in range(3)])
-    target=np.array([path.sample(t)[0] for t in ts]);initial_offset=search.p-target[0]
+    target=positions_at(path,ts);initial_offset=search.p-target[0]
     join=(1-(10*np.clip((ts-search.t)/(activation-search.t),0,1)**3-15*np.clip((ts-search.t)/(activation-search.t),0,1)**4+6*np.clip((ts-search.t)/(activation-search.t),0,1)**5)
           if activation>search.t else np.zeros_like(ts))
     target+=join[:,None]*initial_offset
@@ -67,14 +67,23 @@ def refine(path,search,seconds=5.,max_iterations=12):
     size=9*n+9
     collisions=[]
     camera_observed=None
+    directed=bool(path.program.get('construction_contract'))
+    camera_probes=None
     if search.collision is not None:
         for t in ts:collisions.append(search.collision.at_time(float(t-search.t)))
         from .task_space_planning import camera_scene
         from .camera_intent import obstacle_state
         camera_observed=camera_scene(search.collision.scene,search.t,end)
+        if directed:
+            probe_times=np.linspace(activation,end,65)[1:]
+            probe_basis=np.column_stack([np.interp(probe_times,path.geometry['times'],np.asarray(path.geometry['shape_basis'])[:,j]) for j in range(3)])
+            probe_target=positions_at(path,probe_times)
+            observations=[obstacle_state(camera_observed,float(t)) for t in probe_times]
+            camera_probes=(probe_basis,probe_target,np.array([v[0] for v in observations]),np.array([v[1] for v in observations]))
     best=None;last={}
     import itertools
-    offsets=np.asarray(terminal_band(original,path.model,path.intrinsics)['offsets_m'])
+    offsets=np.asarray(terminal_band(original,path.model,path.intrinsics,
+        axis_only=bool(path.program.get('construction_contract')))['offsets_m'])
     axis_radius=[]
     for a in range(3):
         selected=offsets[np.sum(abs(offsets)>1e-8,axis=1)==1]
@@ -87,12 +96,23 @@ def refine(path,search,seconds=5.,max_iterations=12):
         def residual(j,r,weight):rows.append(j*weight);values.append(np.atleast_1d(r)*weight)
         def constraint(j,lo,hi):cons.append(j);los.append(np.broadcast_to(lo,len(j)));his.append(np.broadcast_to(hi,len(j)))
         poses=target+basis@xcurve.reshape(3,3)
+        max_position_error=max_orientation_error=0.
+        if camera_probes is not None:
+            pb,pt,pc,pr=camera_probes
+            relative=(pt+pb@xcurve.reshape(3,3))[:,None]-pc
+            distance=np.linalg.norm(relative,axis=2);clear=distance-pr-.06
+            mask=clear<.08
+            if np.any(mask):
+                knots_index,_=np.nonzero(mask)
+                normal=relative[mask]/np.maximum(distance[mask,None],1e-9)
+                C=np.zeros((len(normal),size))
+                C[:,-9:]=(pb[knots_index,:,None]*normal[:,None,:]).reshape(-1,9)
+                residual(C,clear[mask]-.065,3000.)
         for k in range(n):
-            if camera_observed is not None and ts[k]>activation:
+            if camera_observed is not None and not directed and ts[k]>activation:
                 centers,radii=obstacle_state(camera_observed,float(ts[k]))
                 relative=poses[k]-centers;distance=np.linalg.norm(relative,axis=1)
                 clear=distance-radii-.06
-                directed=bool(path.program.get('construction_contract'))
                 mask=clear<(.08 if directed else .045)
                 if np.any(mask):
                     C=np.zeros((sum(mask),size))
@@ -103,6 +123,8 @@ def refine(path,search,seconds=5.,max_iterations=12):
             tr=path.sample(ts[k])[1]
             if ts[k]>activation:tr=look_at(poses[k],original.subject)@look_at(target[k],original.subject).T@tr
             err=np.r_[p-poses[k],Rotation.from_matrix(r@tr.T).as_rotvec()]
+            max_position_error=max(max_position_error,float(np.linalg.norm(err[:3])))
+            max_orientation_error=max(max_orientation_error,float(np.linalg.norm(err[3:])))
             J=np.zeros((6,size));J[:,9*k:9*k+9]=j9
             if ts[k]>activation:
                 jr=np.empty((3,3));eps=1e-5
@@ -122,15 +144,18 @@ def refine(path,search,seconds=5.,max_iterations=12):
                 constraint(S,.027-sigma,np.inf)
 
             if k and collisions:
-                col=collisions[k];d,g=col.clearance(x,search.base_z,gradient=True)
+                col=collisions[k];d=col.clearance(x,search.base_z)
                 # One closest surface per body: fixed eight rows per knot.
-                idx=np.argmin(d,axis=0);dist=d[idx,np.arange(d.shape[1])];grad=g[idx,np.arange(d.shape[1])]
+                idx=np.argmin(d,axis=0);dist=d[idx,np.arange(d.shape[1])]
                 mask=dist<col.margin+.04
                 if np.any(mask):
+                    d,g=col.clearance(x,search.base_z,gradient=True)
+                    idx=np.argmin(d,axis=0);dist=d[idx,np.arange(d.shape[1])];grad=g[idx,np.arange(d.shape[1])]
                     J=np.zeros((sum(mask),size));J[:,9*k:9*k+9]=grad[mask]
                     residual(J,dist[mask]-col.margin-.04,180.)
-                dist,grad=search.self_collision.terms(x);mask=dist<search.self_collision.margin+.012
+                dist=search.self_collision.distances(x);mask=dist<search.self_collision.margin+.012
                 if np.any(mask):
+                    dist,grad=search.self_collision.terms(x)
                     J=np.zeros((sum(mask),size));J[:,9*k:9*k+9]=grad[mask]
                     residual(J,dist[mask]-search.self_collision.margin-.012,120.)
         controls=[];control_j=[]
@@ -208,7 +233,7 @@ def refine(path,search,seconds=5.,max_iterations=12):
         curve_trust=.6 if path.program.get('construction_contract') and iteration<2 else .06
         lower[-9:]=-curve_trust;upper[-9:]=curve_trust
         constraint(np.eye(size),lower,upper)
-        qp=osqp.OSQP();qp.setup(P=H,q=g,A=sparse.csc_matrix(np.vstack(cons)),l=np.concatenate(los),u=np.concatenate(his),verbose=False,eps_abs=2e-5,eps_rel=2e-5,max_iter=4000,polish=False)
+        qp=osqp.OSQP();qp.setup(P=H,q=g,A=sparse.csc_matrix(np.vstack(cons)),l=np.concatenate(los),u=np.concatenate(his),verbose=False,eps_abs=1e-4 if directed else 2e-5,eps_rel=1e-4 if directed else 2e-5,max_iter=1500 if directed else 4000,polish=False)
         result=qp.solve()
         if (result.x is None or not np.isfinite(result.x).all() or result.info.status_val in (3,4,5,6) or
                 (result.info.status_val not in (1,2) and result.info.prim_res>.005)):
@@ -217,9 +242,9 @@ def refine(path,search,seconds=5.,max_iterations=12):
             last=dict(reason='coarse_qp_'+result.info.status,iteration=iteration,
                 contradictory_constant_rows=int(np.sum(zero_rows&((lower_all>1e-8)|(upper_all< -1e-8)))));break
         step=result.x;states+=step[:9*n].reshape(n,9);xcurve+=step[-9:]
-        last=dict(reason='coarse_sqp_seed',iteration=iteration+1,max_step=float(abs(step).max()),objective=float(e@e),qp_status=result.info.status,qp_residual=float(result.info.prim_res))
+        last=dict(reason='coarse_sqp_seed',iteration=iteration+1,max_step=float(abs(step).max()),objective=float(e@e),qp_status=result.info.status,qp_residual=float(result.info.prim_res),linearization_position_m=max_position_error,linearization_orientation_rad=max_orientation_error)
         best=(states.copy(),xcurve.copy())
-        if np.max(np.abs(step))<1e-4:break
+        if np.max(np.abs(step))<step_tolerance:break
     if best is None:return None,dict(last,wall_s=time.monotonic()-start)
     states,xcurve=best
     times=np.asarray(path.geometry['times']);u=(times-activation)/span;s=10*u**3-15*u**4+6*u**5;b=64*u**3*(1-u)**3
@@ -247,8 +272,9 @@ def refine(path,search,seconds=5.,max_iterations=12):
         program['shape_coefficients']=coefficients.ravel().tolist()
     fitted=IntentPath(original,path.previous,activation,program,path.model,path.intrinsics,geometry=geometry)
     residuals=[]
+    targets,rotations=poses_at(fitted,ts)
     for k,t in enumerate(ts):
-        p,r,_=search.fk(states[k]);tp,tr=fitted.sample(float(t))[:2]
+        p,r,_=search.fk(states[k]);tp,tr=targets[k],rotations[k]
         residuals.append([float(np.linalg.norm(p-tp)),float(Rotation.from_matrix(r@tr.T).magnitude())])
     last['coarse_max_position_error_m']=max(row[0] for row in residuals)
     last['coarse_max_orientation_error_rad']=max(row[1] for row in residuals)

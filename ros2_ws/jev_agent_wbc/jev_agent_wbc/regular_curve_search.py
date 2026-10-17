@@ -44,6 +44,19 @@ def global_curves(original, active, scene, activation, model, intrinsics, count=
     # first follows the chord then turns sharply into a large avoidance arch.
     bow=4*s*(1-s) if initial_boundary is not None else (256./27.)*q**3*(1-q)
     basis=np.column_stack([bow,bow*(2*s-1),10*u**3-15*u**4+6*u**5])
+    if not fit_seed:
+        seed=np.zeros(3) if seed_direction is None else seed_amplitude*np.asarray(seed_direction if construction_axis is None else construction_axis,float)
+        if construction_axis is None:seed-=axis*(seed@axis)
+        program=dict(route='timing',amplitude_m=0.,extension_s=0.,regular_curve=True,
+            curve_family='global_endpoint_polynomial',curve_tempo=tempo,
+            endpoint_offset_m=[0.,0.,0.],search_role='coordinated_clearance',
+            unverified_seed_direction=seed.tolist(),seed_kind='directed_analytic_arch')
+        geometry=dict(times=times.tolist(),positions=(base+basis[:,:1]*seed).tolist(),
+            shape_basis=basis.tolist(),start_velocity=v0[:3].tolist(),start_acceleration=a0.tolist())
+        if initial_boundary is not None:
+            program['measured_initial_boundary']=True
+            geometry['initial_rotation_xyzw']=initial_boundary['quaternion_xyzw']
+        return [IntentPath(original,active,activation,program,model,intrinsics,geometry=geometry)]
     centers=[];radii=[]
     for t in times:
         c,r=obstacle_state(scene,float(t));centers.append(c);radii.append(r)
@@ -194,7 +207,8 @@ def bind_geometric_progress(path):
     It prevents a deliberate wait from being scored as a spatial detour.
     """
     original=path.original;ts=np.linspace(0.,original.duration,401)
-    reference=np.array([original.sample(t)[0] for t in ts])
+    from .intent_paths import positions_at
+    reference=positions_at(original,ts)
     points=np.asarray(path.geometry['positions']);motion=original.phase(path.activation_s)['motion'].lower()
     if motion=='orbit':
         def feature(x):return np.unwrap(np.arctan2(x[:,1]-original.subject[1],x[:,0]-original.subject[0]))

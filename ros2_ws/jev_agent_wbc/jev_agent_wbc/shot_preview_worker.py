@@ -8,15 +8,27 @@ the same planner synchronously for deterministic controller comparisons.
 from concurrent.futures import ProcessPoolExecutor
 import multiprocessing
 import signal
+import os
 import numpy as np
 from .shot_predictive_qp import ShotPredictiveQP
 from .obstacle_predictive_qp import ObstaclePredictiveQP
+
+
+_priority_configured=False
 
 
 def initialize_worker():
     # The ROS node owns bounded braking and closes its pool afterwards. A
     # launch-group SIGINT must not interrupt a child while the parent brakes.
     signal.signal(signal.SIGINT, signal.SIG_IGN)
+    # Give the servo scheduling preference over optional background numerics.
+    # This only lowers this child process's priority; no real-time policy or
+    # machine-wide scheduler setting is changed. Warm-up can call us twice.
+    global _priority_configured
+    if not _priority_configured:
+        try:os.nice(5)
+        except (AttributeError,OSError):pass
+        _priority_configured=True
 
 
 def compute_preview(snapshot, state, t, base_z, commanded_q):

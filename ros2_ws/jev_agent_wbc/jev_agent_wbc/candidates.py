@@ -51,8 +51,9 @@ class SearchBudget:
     def __post_init__(self):
         if any(isinstance(v, bool) or not isinstance(v, int) for v in (self.max_proposals, self.max_rollouts)):
             raise ValueError('candidate counts must be integers')
-        if not 2 <= self.max_rollouts <= self.max_proposals <= 16:
-            raise ValueError('candidate budget must satisfy 2 <= rollouts <= proposals <= 16')
+        minimum=1 if self.single_candidate else 2
+        if not minimum <= self.max_rollouts <= self.max_proposals <= 16:
+            raise ValueError(f'candidate budget must satisfy {minimum} <= rollouts <= proposals <= 16')
         if not .04 <= self.prediction_step_s <= .1:
             raise ValueError('prediction step outside bounded range')
         if not .2 <= self.decision_period_s <= 5.:
