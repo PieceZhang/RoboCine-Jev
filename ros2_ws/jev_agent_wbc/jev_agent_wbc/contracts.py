@@ -36,7 +36,7 @@ def number(value, name):
     return float(value)
 
 
-def validate_task(document):
+def validate_task(document, *, allow_phase_gaps=False):
     """The four upstream fields are the complete task API; robot/scene are runtime inputs."""
     expected = {'reference_camera_trajectory', 'shot_phase', 'subject', 'intent'}
     if not isinstance(document, dict) or set(document) != expected:
@@ -71,7 +71,8 @@ def validate_task(document):
         a, b = number(phase['start_s'], 'phase.start'), number(phase['end_s'], 'phase.end')
         if not isinstance(phase['name'], str) or not phase['name'] or not isinstance(phase['motion'], str):
             raise ValueError('phase names/motions must be strings')
-        if abs(a-end) > 1e-8 or b <= a:
+        if (a < end-1e-8 or (not allow_phase_gaps and abs(a-end) > 1e-8)
+                or (end == 0. and a != 0.) or b <= a):
             raise ValueError('phases must be contiguous and positive')
         end = b
     if abs(end-last) > 1e-8:

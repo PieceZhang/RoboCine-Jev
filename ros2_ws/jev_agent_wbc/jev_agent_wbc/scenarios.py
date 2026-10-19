@@ -1,5 +1,6 @@
 """Short independent shots and a runtime-owned scene/robot fixture catalog."""
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
@@ -93,7 +94,7 @@ def generate(directory):
 
 class RuntimeScene:
     def __init__(self, path):
-        self.document = json.loads(Path(path).read_text())
+        self.document = deepcopy(path) if isinstance(path, dict) else json.loads(Path(path).read_text())
         self.curves = {}
         for obj in self.document['obstacles']:
             frames = obj['keyframes']
@@ -119,7 +120,8 @@ class RuntimeScene:
         """Independent auditing only. Never passed to Jev, its planner or the WBC."""
         obstacles = self.obstacles(t)
         return dict(format='jvs_lidar_surfels/v1',
-            surfel_centers=np.array([o['center'] for o in obstacles]),
-            surfel_radius=obstacles[0]['radius'], minimum_clearance_m=.025,
-            surfel_velocities=np.array([o['velocity'] for o in obstacles]),
-            surfel_track_ids=np.ones(len(obstacles), int), observation_stamp=t)
+            surfel_centers=np.array([o['center'] for o in obstacles]).reshape(-1, 3),
+            surfel_radius=max((o['radius'] for o in obstacles), default=.025),
+            surfel_radii=np.array([o['radius'] for o in obstacles]), minimum_clearance_m=.025,
+            surfel_velocities=np.array([o['velocity'] for o in obstacles]).reshape(-1, 3),
+            surfel_track_ids=np.arange(1, len(obstacles)+1), observation_stamp=t)

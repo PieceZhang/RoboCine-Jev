@@ -20,6 +20,11 @@ def refine(path,search,seconds=5.,max_iterations=12,knots=33,step_tolerance=1e-4
     if search.tilt is not None:return None,dict(reason='tilted_base_not_supported')
     end=path.duration;activation=path.activation_s
     if end-search.t<1.:return None,dict(reason='insufficient_horizon')
+    from .combo import is_combo,motion_phases
+    combo=is_combo(path.original)
+    if combo:
+        knots=max(knots,int(np.ceil((end-search.t)/.5))+1)
+        max_iterations=max(max_iterations,20)
     n=knots;ts=np.linspace(search.t,end,n);dt=ts[1]-ts[0]
     original=path.original;span=end-activation
     u=np.clip((ts-activation)/span,0,1);s=10*u**3-15*u**4+6*u**5
@@ -135,13 +140,13 @@ def refine(path,search,seconds=5.,max_iterations=12,knots=33,step_tolerance=1e-4
                 J[:,-9:]=-np.vstack([np.eye(3),jr])@np.kron(basis[k:k+1],np.eye(3))
             residual(J,err,500. if path.program.get('construction_contract') else 120.)
             sigma=search.sigma(j)
-            if k and sigma<.045:
+            if k and sigma<(.065 if combo else .045):
                 gradient=np.zeros(9);eps=2e-4
                 for a in range(3,9):
                     xp=x.copy();xm=x.copy();xp[a]+=eps;xm[a]-=eps
                     gradient[a]=(search.sigma(search.fk(xp)[2])-search.sigma(search.fk(xm)[2]))/(2*eps)
                 S=np.zeros((1,size));S[0,9*k:9*k+9]=gradient
-                constraint(S,.027-sigma,np.inf)
+                constraint(S,(.045 if combo else .027)-sigma,np.inf)
 
             if k and collisions:
                 col=collisions[k];d=col.clearance(x,search.base_z)
@@ -187,7 +192,11 @@ def refine(path,search,seconds=5.,max_iterations=12,knots=33,step_tolerance=1e-4
         if 'pedestal' in motion:
             axes=[np.array([0.,0.,np.sign(chord[2])])]
             planar=chord.copy();planar[2]=0.
-            if np.linalg.norm(planar)>.05:axes.append(planar/np.linalg.norm(planar))
+            # An explicitly screened fixed pedestal bow is directed in height.
+            # Its lateral/forward companion may turn; imposing a second
+            # monotonic axis would contradict that already approved geometry.
+            if np.linalg.norm(planar)>.05 and not path.program.get('fixed_spatial_shape'):
+                axes.append(planar/np.linalg.norm(planar))
         elif 'truck' in motion:
             axis=original.sample(0.)[1][:,1];axis*=np.sign(chord@axis);axes=[axis]
         for axis in axes:
@@ -199,8 +208,52 @@ def refine(path,search,seconds=5.,max_iterations=12,knots=33,step_tolerance=1e-4
                 # constraint in the suffix optimizer. Full execution direction
                 # and curve checks still report this deviation independently.
                 if ts[k+1]<=activation:continue
+                from .combo import is_combo
+                if is_combo(original):
+                    phase=original.phase(float((ts[k]+ts[k+1])/2))
+                    if phase['motion']=='transition' or ts[k]<phase['start_s'] or ts[k+1]>phase['end_s']:
+                        continue
+                    motion=phase['motion']
+                    a=original.sample(phase['start_s'])[0];b=original.sample(phase['end_s'])[0]
+                    if motion in ('movein','moveout'):
+                        axis=poses[k]-original.subject;axis/=max(np.linalg.norm(axis),1e-9)
+                        axis*=(-1 if motion=='movein' else 1)
+                    elif motion=='orbit':
+                        radial=poses[k]-original.subject;axis=np.array([-radial[1],radial[0],0.])
+                        axis/=max(np.linalg.norm(axis),1e-9)
+                        axis*=np.sign(np.cross((a-original.subject)[:2],(b-original.subject)[:2]))
+                    else:
+                        axis=original.sample(phase['start_s'])[1][:,1] if 'truck' in motion else np.array([0.,0.,1.])
+                        axis*=np.sign((b-a)@axis)
                 C=np.zeros((1,size));C[0,-9:]=np.kron(basis[k+1]-basis[k],axis)
                 constraint(C,-(poses[k+1]-poses[k])@axis,np.inf)
+        if combo:
+            # Fine, phase-local direction constraints catch reversals between
+            # coarse whole-body knots without applying one phase's axis to all.
+            fine_t=np.asarray(path.geometry['times'])
+            fine_b=np.asarray(path.geometry['shape_basis'])
+            fine_p=np.asarray(path.geometry['positions'])+fine_b@xcurve.reshape(3,3)
+            for phase in motion_phases(original):
+                if phase['motion']=='transition':continue
+                ids=np.flatnonzero((fine_t>=max(activation,phase['start_s']))&(fine_t<=phase['end_s']))
+                if len(ids)<2:continue
+                pp=fine_p[ids];bb=fine_b[ids];motion=phase['motion']
+                ref_a=original.sample(phase['start_s'])[0];ref_b=original.sample(phase['end_s'])[0]
+                if motion in ('movein','moveout'):
+                    rel=pp-original.subject;norm=np.linalg.norm(rel,axis=1)
+                    sign=-1 if motion=='movein' else 1
+                    feature_values=sign*norm;gradient=sign*rel/np.maximum(norm[:,None],1e-9)
+                elif motion=='orbit':
+                    rel=pp-original.subject;sign=np.sign(np.cross((ref_a-original.subject)[:2],(ref_b-original.subject)[:2]))
+                    feature_values=sign*np.unwrap(np.arctan2(rel[:,1],rel[:,0]))
+                    gradient=sign*np.column_stack([-rel[:,1],rel[:,0],np.zeros(len(rel))])/np.maximum(np.sum(rel[:,:2]**2,axis=1)[:,None],1e-9)
+                else:
+                    ax=original.sample(phase['start_s'])[1][:,1] if 'truck' in motion else np.array([0.,0.,1.])
+                    ax*=np.sign((ref_b-ref_a)@ax)
+                    feature_values=pp@ax;gradient=np.tile(ax,(len(pp),1))
+                derivatives=(bb[:,:,None]*gradient[:,None,:]).reshape(-1,9)
+                C=np.zeros((len(ids)-1,size));C[:,-9:]=np.diff(derivatives,axis=0)
+                constraint(C,-np.diff(feature_values)-1e-8,np.inf)
         # Low-dimensional curve regularity and continuous endpoint freedom.
         if path.program.get('construction_axis_world') is not None:
             selected_axis=np.asarray(path.program['construction_axis_world'])
@@ -218,6 +271,12 @@ def refine(path,search,seconds=5.,max_iterations=12,knots=33,step_tolerance=1e-4
         C=np.zeros((3,size));C[:,-6:-3]=np.eye(3)
         initial=np.asarray(path.program.get('shape_coefficients',[0.]*6))[3:6]
         constraint(C,-initial-xcurve[3:6],-initial-xcurve[3:6])
+        if path.program.get('fixed_spatial_shape'):
+            C=np.zeros((6,size));C[:,-9:-3]=np.eye(6)
+            constraint(C,-xcurve[:6],-xcurve[:6])
+        if path.program.get('fixed_camera_path'):
+            C=np.zeros((9,size));C[:,-9:]=np.eye(9)
+            constraint(C,-xcurve,-xcurve)
         C=np.zeros((8,size));C[:,-3:]=endpoint_rows
         constraint(C,np.full(8,-np.inf),.8-endpoint_rows@(poses[-1]-reference_end))
         residual(np.eye(size),np.zeros(size),.03)
@@ -227,7 +286,9 @@ def refine(path,search,seconds=5.,max_iterations=12,knots=33,step_tolerance=1e-4
         lower=np.full(size,-trust);upper=np.full(size,trust)
         lower[:9]=upper[:9]=0.
         for k in range(1,n):
-            reserve=.12 if path.program.get('construction_contract') else .02
+            reserve=float(path.program.get('joint_reserve_rad',.12 if path.program.get('construction_contract') else .02))
+            if not 0.<reserve<float(np.min(JOINT_UPPER-JOINT_LOWER))/2:
+                raise ValueError('invalid joint-curve configuration reserve')
             lower[9*k+3:9*k+9]=np.maximum(lower[9*k+3:9*k+9],JOINT_LOWER+reserve-states[k,3:])
             upper[9*k+3:9*k+9]=np.minimum(upper[9*k+3:9*k+9],JOINT_UPPER-reserve-states[k,3:])
         curve_trust=.6 if path.program.get('construction_contract') and iteration<2 else .06

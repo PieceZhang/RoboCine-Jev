@@ -6,6 +6,12 @@ with the API key stored in the repository-root `typesafe_Jev_api_key` file.
 Timeouts or connection failures when calling the official API do not count as
 failures of the current test; record them as network-related, unverified trials.
 
+User preference, updated 2026-10-17: all new CPU executions use `pace=1`.
+Do not add deliberate wall-clock slowdown, including in batch scripts, independent
+camera experiments or fixed-camera CPU demos. Keep historical recordings, frozen
+source snapshots and logs intact. This does not change the candidate curve's
+within-shot timing profile.
+
 User preference, updated later 2026-10-17: new PhysX executions also use `pace=1`.
 Never pause physical time to wait for Agent trajectories. Use bounded asynchronous
 control and latched timeout/failure braking; late results cannot automatically

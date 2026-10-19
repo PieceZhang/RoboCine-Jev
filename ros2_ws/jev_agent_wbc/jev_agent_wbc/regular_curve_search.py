@@ -14,6 +14,10 @@ from .jvs_kinematics import CAMERA_OFFSET
 
 
 def global_curves(original, active, scene, activation, model, intrinsics, count=6, seconds=3., diagnostics=None, tempo=2., seed_direction=None, initial_boundary=None, seed_amplitude=.3, construction_axis=None, plane_tolerance=.025, fit_seed=True):
+    from .combo import is_combo,combo_curves
+    if is_combo(original):
+        return combo_curves(original,active,activation,model,intrinsics,count,seed_direction,
+            seed_amplitude,initial_boundary,tempo)
     started=time.monotonic()
     intrinsics=default_intrinsics() if intrinsics is None else intrinsics
     end=active.duration; span=end-activation
@@ -176,6 +180,10 @@ def global_curves(original, active, scene, activation, model, intrinsics, count=
 
 
 def bounded_paths(original,active,scene,activation,model,intrinsics,budget):
+    from .combo import is_combo,combo_curves
+    if is_combo(original):
+        continuation=IntentPath(original,active,activation,dict(route='continuation',amplitude_m=0.,extension_s=0.),model,intrinsics)
+        return [continuation]+combo_curves(original,active,activation,model,intrinsics,max(0,budget.max_proposals-1))
     from .curve_timing import timed_curves
     timed=timed_curves(original,active,scene,activation,model,intrinsics,count=2)
     remaining=max(0,budget.max_proposals-3-len(timed))
@@ -207,6 +215,9 @@ def bind_geometric_progress(path):
     It prevents a deliberate wait from being scored as a spatial detour.
     """
     original=path.original;ts=np.linspace(0.,original.duration,401)
+    from .combo import is_combo
+    if is_combo(original):
+        return path  # Explicit ordered phase clock is already bound into geometry.
     from .intent_paths import positions_at
     reference=positions_at(original,ts)
     points=np.asarray(path.geometry['positions']);motion=original.phase(path.activation_s)['motion'].lower()

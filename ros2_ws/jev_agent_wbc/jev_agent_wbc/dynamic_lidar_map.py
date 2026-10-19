@@ -338,10 +338,25 @@ class DynamicLidarMap(LidarCollisionMap):
                 # boxes still lack that vertical-motion evidence.
                 sphere_observed='sphere' in detection
                 if not sphere_observed:velocity[2] = 0.
+                local_velocity=False
+                track['acceleration']=None
+                if sphere_observed and len(times)>=4:
+                    # A round object can accelerate at a crossing. A long-window
+                    # secant plus a 0.3 m/s² limiter retained an obsolete velocity
+                    # after measured braking. Fit the latest simultaneous centers;
+                    # accept only a well-conditioned, low-residual local model.
+                    recent=times>=times[-1]-.4-1e-8
+                    local_t=times[recent]-times[-1]
+                    design=np.column_stack([np.ones(len(local_t)),local_t,.5*local_t**2])
+                    coefficients,_,rank,_=np.linalg.lstsq(design,centers[recent],rcond=None)
+                    residual_m=np.linalg.norm(design@coefficients-centers[recent],axis=1).max()
+                    if rank==3 and len(local_t)>=4 and residual_m<.005 and np.linalg.norm(coefficients[2])<=3.:
+                        velocity=coefficients[1];local_velocity=True
+                        track['acceleration']=coefficients[2].copy()
                 speed = np.linalg.norm(velocity)
                 if speed > self.maximum_speed:
                     velocity *= self.maximum_speed / speed
-                if track['moving']:
+                if track['moving'] and not local_velocity:
                     interval = max(.01, stamp - track['stamp'])
                     change = velocity - track['velocity']
                     length = np.linalg.norm(change)
@@ -350,10 +365,19 @@ class DynamicLidarMap(LidarCollisionMap):
                 track['velocity'] = velocity
                 dimensions=3 if sphere_observed else 2
                 displacement = np.linalg.norm(detection['center'][:dimensions] - track['anchor'][:dimensions])
-                residual = centers[:, :dimensions] - centers[:, :dimensions].mean(axis=0) - times[:, None] * velocity[:dimensions]
-                energy = np.sum((centers[:, :dimensions] - centers[:, :dimensions].mean(axis=0)) ** 2)
+                # Motion classification tests translation coherence, not whether
+                # its current derivative equals the full-window average speed.
+                classification_times=times
+                classification_centers=centers
+                if sphere_observed:
+                    recent=times>=times[-1]-.3-1e-8
+                    classification_times=times[recent]-times[recent].mean()
+                    classification_centers=centers[recent]
+                average_velocity=classification_times@classification_centers/max(classification_times@classification_times,1e-9)
+                residual = classification_centers[:, :dimensions] - classification_centers[:, :dimensions].mean(axis=0) - classification_times[:, None] * average_velocity[:dimensions]
+                energy = np.sum((classification_centers[:, :dimensions] - classification_centers[:, :dimensions].mean(axis=0)) ** 2)
                 consistency = 1. - np.sum(residual ** 2) / max(energy, 1e-9)
-                evidence = (len(detection['points']) >= (6 if sphere_observed else 12) and displacement > .09 and speed > .055 and np.ptp(times) > .3
+                evidence = (len(detection['points']) >= (6 if sphere_observed else 12) and displacement > (.008 if sphere_observed else .09) and speed > .055 and np.ptp(classification_times) > (.09 if sphere_observed else .3)
                             and consistency > .65 and (novelty > .25 or sphere_observed) and static_fraction < .25)
                 track['motion_votes'] = track['motion_votes'] + 1 if evidence else 0
                 if not track['moving'] and track['motion_votes'] >= 2:
@@ -393,6 +417,24 @@ class DynamicLidarMap(LidarCollisionMap):
         ids = [np.zeros(len(centers[0]), dtype=int)]
         radii = [np.full(len(centers[0]), static['surfel_radius'])]
         tracks = []
+        objects=[]
+        for key,track in self.tracks.items():
+            age=max(0.,self.stamp-track['stamp'])
+            if age>self.track_timeout:continue
+            moving=bool(track['moving'])
+            center=track['center']+(track['velocity']*age if moving else 0.)
+            extent=track['model_extent'] if 'model_extent' in track else track['extent']
+            objects.append(dict(id=key,center=center.tolist(),half_extent=extent.tolist(),
+                height_range_m=[float(center[2]-extent[2]),float(center[2]+extent[2])],
+                moving_confirmed=moving,velocity=(track['velocity'] if moving else np.zeros(3)).tolist(),
+                velocity_status='measured_motion' if moving else 'motion_not_yet_confirmed',age_s=age,
+                shape_model='measured_sphere' if track.get('sphere') is not None else 'measured_box',
+                source='timestamped_lidar_returns_only'))
+            if (not moving and track.get('sphere') is not None and track.get('motion_votes',0)>=1
+                    and np.linalg.norm(track['velocity'])>.04):
+                objects[-1]['motion_hint']=dict(velocity_estimate=track['velocity'].tolist(),
+                    confirmation_votes=track['motion_votes'],confirmed=False,
+                    source='coherent_measured_sphere_centers_pending_second_confirmation')
         for key, track in self.tracks.items():
             if not track['moving'] or self.stamp - track['stamp'] > self.track_timeout:
                 continue
@@ -430,8 +472,10 @@ class DynamicLidarMap(LidarCollisionMap):
             radii.append(np.full(len(proxies), proxy_radius))
             tracks.append(dict(id=key, center=(track['center'] + track['velocity'] * age).tolist(),
                 velocity=track['velocity'].tolist(), age_s=age, surfaces=len(points),
+                acceleration=(track['acceleration'].tolist() if track.get('acceleration') is not None else None),
+                acceleration_source='recent_observed_sphere_centers_quadratic_fit' if track.get('acceleration') is not None else 'unknown',
                 shape_model='measured_sphere' if track.get('sphere') is not None else 'measured_box'))
         return {
             **static, 'surfel_centers': np.vstack(centers), 'surfel_velocities': np.vstack(velocities),
             'surfel_track_ids': np.concatenate(ids), 'surfel_ages': np.concatenate(ages), 'surfel_radii': np.concatenate(radii),
-            'observation_stamp': self.stamp, 'tracks': tracks}
+            'observation_stamp': self.stamp, 'tracks': tracks,'object_observations':objects}

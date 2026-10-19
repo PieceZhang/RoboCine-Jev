@@ -1,5 +1,62 @@
 # Jev 相机意图规划与独立执行层
 
+## Combo CPU 接入与闭环测试（2026-10-18）
+
+CPU `runner --mode jev` 现在可直接接收 `combo_01_easy` 至 `combo_06_hard`
+这类保留衔接空窗的四字段任务。它将原始输入保存在 `source_task.json`，用真实 Jev
+Choice 为各空窗选择连接弧线，补全 `transition` 阶段，再进入同一个 Agent/WBC。
+主动作采样、阶段起止时间、总时长和场景保持原样；补全后的执行参考保存为
+`original_task.json`，源/结果哈希及选择记录在 `combo_completion.json`，API 原始请求/
+响应在 `combo_jev_api.jsonl`。衔接选择只是几何提案，执行与候选仍须独立检查。
+
+这些已编排的 combo 是停稳衔接：平移和 SO(3) 姿态按阶段插值，衔接边界速度、
+加速度为零。候选保留完整分段参考，不再将多个动作替换为全程起终点弦线；
+当前保持各阶段原有时钟，只提供分阶段整机联合曲线，不向模型提供尚未实现的
+combo 全局重定时选项。长轨迹增加构型检查点预算，保持原有采样间隔和安全门槛。
+
+`shot_acceptance/v2_combo` 分别检查每个主动作的方向和实际运动、每个主动作及
+衔接段的曲线形状、全程构图、终帧，以及包含接缝的相机速度/加速度/角速度。
+单动作验收保持原口径；未知运动类型仍报告未验证。多个运镜自然形成的全程总转角
+只作诊断，各段仍使用原有严格形状阈值。遮挡继续独立记录。
+
+多障碍 CPU 观测也修复了低/中障碍被合并的问题：使用更细的点云聚类，经过良好
+球面拟合的观测可更早确认运动，并用近期中心观测估计加减速；没有向 Agent 输入
+障碍未来关键帧。独立审计脚本对实际 Hermite 障碍轨迹计算连续净距下界，不再把
+这组变速障碍当成全程匀速。失败前的安全前缀不计为整段安全成功。
+
+前四组简单/中等场景使用 TypeSafe `jev-1.14.0`、本地密钥和 `pace=1` 测试。
+完整记录见 [本轮报告](results/combo_cpu_20261018/REPORT.txt)。**接入与闭环测试已实现，
+尚未证明这四组都能完成避障和镜头意图；候选拒绝、安全控制不可行和验收失败均保留。**
+本轮验证范围是 CPU 运动学闭环；ROS/PhysX 没有新增执行验证。
+
+```bash
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /usr/bin/python3 \
+  ros2_ws/jev_agent_wbc/scripts/benchmark_official_jev.py \
+  --output <新的结果目录> --key-file "$PWD/typesafe_Jev_api_key" \
+  --cases combo_01_easy combo_02_easy combo_03_medium combo_04_medium \
+  --workers 1 --pace 1 --lead 1.2 --candidate-seconds 12 --proposals 6 --shortlist 2
+OPENBLAS_NUM_THREADS=1 /usr/bin/python3 \
+  ros2_ws/jev_agent_wbc/scripts/analyze_combo_cpu.py \
+  --runs <结果目录> --output <新的审计目录>
+```
+
+起始单候选实验额外使用 `--single-candidate --preplan --proposals 1 --shortlist 1
+--candidate-seconds 30`；初始候选不合格会明确结束该实验，不能算作已执行完整闭环。
+普通在线模式继续从原参考执行并异步修复。未补全的任务在 `strict/rule` 模式下会被
+拒绝；这类对照应显式使用已记录的补全参考，避免隐式生成另一条衔接。
+
+自 2026-10-17 起，所有新 CPU 执行统一使用 `pace=1`，包括整机、独立相机、
+官方批处理及固定相机 demo；不再使用主动墙钟慢跑。下文历史结果中记录的
+`pace<1` 仅描述旧实验，不能用于新的运行。`pace=1` 不保证计算永不超时，
+也不改变候选曲线在既定镜头时长内的速度分配。PhysX 的新运行也统一为 `pace=1`；见下方实时运行说明。
+
+本次 `pace=1` 新闭环录像（六场景 × 种子 20261017）：
+[视频合辑](results/cpu_pace1_20261017_215219_seed20261017/videos/cpu_closed_loop_six_demos_seed20261017.mp4)、
+[六个独立视频](results/cpu_pace1_20261017_215219_seed20261017/videos/)、
+[运行与审计记录](results/cpu_pace1_20261017_215219_seed20261017/REPORT.txt)。
+沿用三视图及统一 Representation，1920×1080、16 fps、合计 50.625 秒；
+镜头与独立安全验收均为 6/6，全部视频完整解码通过。
+
 ## PhysX 实时运行与故障处理（2026-10-17 夜间）
 
 `run_isaac.py` 默认且仅接受 `pace=1`。Agent/WBC 在独立进程消费有界观测队列；
@@ -268,7 +325,7 @@ OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 PYTHONPATH=ros2_ws/jev_agent_wbc \
   --key-file /path/to/key --output /path/to/new_results
 ```
 
-脚本沿用历史最终版六场景并行、pace=.03、提前量1.2秒、候选预算20秒，保存冻结源码、
+脚本默认六场景并行、pace=1、提前量1.2秒；新验收使用上文的串行单候选命令，保存冻结源码、
 逐场景 provenance、完整遥测和真实请求/响应。`replay_official_requests.py` 支持历史
 完全相同的 state/questions 回放；`compare_official_jev.py` 汇总完成、安全、安装、终帧、
 趋势、完整意图与 API 延迟。回放选择一致率不代表正确率；一次历史对照不能证明显著优势。
@@ -312,10 +369,10 @@ OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 PYTHONPATH=ros2_ws/jev_agent_wbc \
 这些是采样运动学约束与局部可达性筛选，失败表示当前数值方法未找到合格连续实现；不能证明全局不可达。通过也不能替代动力学、连续时间或整机碰撞安全证明。实际避障及其失败处理仍由独立 WBC 承担。FK 检查结果存入 `kinematic_prior`、`kinematics`、候选卡 `kinematic_feasibility` 和安装检查 `kinematic_state`，保留速度来源、残差、限制利用率及首次失败时刻。
 
 ```bash
-# CPU 整机 + 在线 Jev；WBC 避障保持开启。pace=.2 是慢速调试，不是实时性结果。
+# CPU 整机 + 在线 Jev；WBC 避障保持开启，pace=1，不主动慢跑。
 PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
   /usr/bin/python3 -m jev_agent_wbc.runner --case all --mode jev \
-  --planner-model floating_camera --pace .2 --activation-lead 1.5 --output <新结果目录>
+  --planner-model floating_camera --pace 1 --activation-lead 1.5 --output <新结果目录>
 
 # 可重复的 FK 正/负例，以及真实 CPU WBC 下的异步安装链路。
 # 此处使用远障碍和显式触发重规划的规则选择器，不作为 Jev 或动态避障成功证据。
@@ -351,8 +408,8 @@ PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
   /usr/bin/python3 -m jev_agent_wbc.floating_camera --case all --mode jev \
   --pace 1 --activation-lead 2.7 --output /tmp/jev_subject_frame_new
 
-# 规则选择器对照：--mode rule；原始参考对照：--mode strict --pace 0
-# 慢速机制验证可用 --pace .3 --activation-lead 1.5；不等同墙钟实时性能
+# 规则选择器对照：--mode rule；原始参考对照：--mode strict --pace 1
+# 所有新 CPU 运行均使用 --pace 1；计算是否满足实时期限另行测量
 PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 \
   /usr/bin/python3 -m pytest -q ros2_ws/jev_agent_wbc/test/test_subject_state.py \
   ros2_ws/jev_agent_wbc/test/test_camera_intent.py \
@@ -435,7 +492,7 @@ PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 \
 | SAM | 独立进程，默认最多 4 Hz，一次仅一个未完成任务 |
 | 决策超时 | 每次 API 请求默认 3 s；超时期间底层继续运行 |
 
-完整预测仍可能耗时数秒，这是当前局限。`--pace 1` 只是仿真/墙钟速率的上限，计算过慢时仿真仍可能落后；不能据此宣称在线实时。`--pace .2` 只用于明确标注的慢速机制调试。必须同时报告墙钟时间、API 延迟、端到端延迟、控制 p95/p99 和未安装原因。
+完整预测仍可能耗时数秒，这是当前局限。`--pace 1` 只是仿真/墙钟速率的上限，计算过慢时仿真仍可能落后；不能据此宣称在线实时。新 CPU 运行不再使用低于 1 的 pace。必须同时报告墙钟时间、API 延迟、端到端延迟、控制 p95/p99 和未安装原因。
 
 五个验证结果分开记录：`physical_valid`、`target_authorized`、`predicted_visual_valid`、`state_fresh`、`observed_visual_valid`。它们可为 pass/fail/unknown。遮挡未知、缺内参、失去分割都不能记成通过。已批准的已知证据后来丢失会要求重新审批。构图中心一致也不能单独证明全部视觉目标满足。
 
@@ -566,7 +623,7 @@ OPENBLAS_NUM_THREADS=1 /usr/bin/python3 ros2_ws/jev_agent_wbc/scripts/render_age
 ```bash
 PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
   /usr/bin/python3 -m jev_agent_wbc.floating_camera --case all --mode jev \
-  --pace .2 --activation-lead 1.5 --output <新的独立相机结果目录>
+  --pace 1 --activation-lead 1.5 --output <新的独立相机结果目录>
 ```
 
 CPU WBC 运行器新增 `--disable-wbc-avoidance`：使用同一套 shot-aware 相机任务、姿态偏好、关节余量与执行器约束，跳过静态/动态碰撞约束、障碍相关的跟踪权重退让、撤退、避障制动和逃逸回退；扫掠计算只作为观察值，不改变命令。执行器不可行仍报错。候选预测同步使用该控制模式，但独立碰撞筛选仍会淘汰预测碰撞的候选。关闭避障不意味着候选为空时会自动得到一条安全路径。
@@ -574,7 +631,7 @@ CPU WBC 运行器新增 `--disable-wbc-avoidance`：使用同一套 shot-aware �
 ```bash
 PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
   /usr/bin/python3 -m jev_agent_wbc.runner --case all --mode jev \
-  --pace .2 --activation-lead 1.5 --disable-wbc-avoidance --output <新的WBC结果目录>
+  --pace 1 --activation-lead 1.5 --disable-wbc-avoidance --output <新的WBC结果目录>
 ```
 
 `--target-replay-root <独立相机结果目录>` 与 `--mode strict` 联用，可将源 Agent 已安装的目标按相同哈希、安装时刻和激活时刻交给 WBC，分别打开/关闭避障。此处 strict 只关闭新的语义调用；复用的是修改后的目标，不是未修改的原始轨迹。日志记为 `target_replayed`，不冒充新安装或新模型决策；为了隔离执行器差异，固定目标回放不重新进行 WBC 安装审批。所有碰撞均独立记录。
@@ -587,7 +644,7 @@ PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
 
 ```bash
 PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /usr/bin/python3 -m jev_agent_wbc.runner \
-  --case all --mode jev --pace .2 --activation-lead 1.5 \
+  --case all --mode jev --pace 1 --activation-lead 1.5 \
   --disable-wbc-avoidance --planning-wbc-avoidance \
   --output <新运行目录>
 ```
@@ -602,7 +659,7 @@ PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /usr/b
 
 ```bash
 PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /usr/bin/python3 -m jev_agent_wbc.runner \
-  --case all --mode jev --pace .2 --activation-lead 1.5 \
+  --case all --mode jev --pace 1 --activation-lead 1.5 \
   --planner-model floating_camera --output <相机规划在线闭环目录>
 # 将 floating_camera 改为 wbc，在另一个新目录运行完整 WBC 预测对照。
 ```
@@ -631,18 +688,75 @@ PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /usr/b
 
 WBC 从批准安装后开始在相机任务和硬约束内跟随复核过的冗余分配，相机轨迹仍只在其精确激活时刻改变；保留滚动预测与持续余量维护。实测进入准备目标且余量也满足要求，才记录完成；跟踪不可行、余量不足和未确认进入分别记录，不能把预测准备完成当成实测成功。生成阶段额外保留关节、速度、加速度和轮速余量，供实测状态纠偏使用；这些限制只收紧生成问题，不放松执行硬条件。
 
-复现本轮慢速 CPU 闭环（新目录）：
+沿用本轮场景运行新的 CPU 闭环（pace 已统一为 1，与历史慢跑结果的墙钟条件不同）：
 
 ```bash
 PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 \
  /usr/bin/python3 -m jev_agent_wbc.runner --case all --mode jev \
- --planner-model floating_camera --pace .05 --activation-lead .8 --output <新目录>
+ --planner-model floating_camera --pace 1 --activation-lead .8 --output <新目录>
 
 PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 \
  /usr/bin/python3 ros2_ws/jev_agent_wbc/scripts/audit_state_search.py \
  --runs <运行目录> --output <审计目录>
 ```
 
-`floating_camera` 在此是历史保留的规划器参数名：实际执行仍是整机 WBC，候选包含整机 FK 与扫掠检查，不是自由悬空相机执行。`pace=.05` 是机制调试速度上限，不能宣称实时；视频按仿真时间连续回放。默认本机服务仍请求 `perplexity`，真实返回模型名称以 `jev_api.jsonl` 为准，不把它冒称为另一个模型。CPU 检查不代替 PhysX 或硬件验证。
+`floating_camera` 在此是历史保留的规划器参数名：实际执行仍是整机 WBC，候选包含整机 FK 与扫掠检查，不是自由悬空相机执行。历史运行的 `pace=.05` 是机制调试速度上限，不能宣称实时；新运行统一为 `pace=1`。视频按仿真时间连续回放。默认本机服务仍请求 `perplexity`，真实返回模型名称以 `jev_api.jsonl` 为准，不把它冒称为另一个模型。CPU 检查不代替 PhysX 或硬件验证。
 
-本轮结果、逐场景失败、准备对照、测试与 demo 见 `results/state_conditioned_20261014/REPORT.txt`；主演示运行目录为 `budgeted_runs/`（8 秒协作式候选预算、1.2 秒激活提前量），`release_runs/` 保留上面命令对应的 2 秒预算对照。两组计算预算不同，不构成等预算算法消融。主演示可通过结果目录中的 `run_budgeted.py --output <新目录> --candidate-seconds 8 --lead 1.2 --pace .05` 复现；Python 环境同上。旧日志与旧视频全部保留。
+本轮结果、逐场景失败、准备对照、测试与 demo 见 `results/state_conditioned_20261014/REPORT.txt`；主演示运行目录为 `budgeted_runs/`（8 秒协作式候选预算、1.2 秒激活提前量），`release_runs/` 保留上面命令对应的 2 秒预算对照。两组计算预算不同，不构成等预算算法消融。沿用场景的新运行可用结果目录中的 `run_budgeted.py --output <新目录> --candidate-seconds 8 --lead 1.2 --pace 1`；其墙钟条件与历史主演示不同，Python 环境同上。旧日志与旧视频全部保留。
+
+## Combo 分高度主运镜诊断（2026-10-18）
+
+`prepare_combo_stage_cases.py` 将 1–4 combo 拆成 10 个独立主运镜。每段保留全部高、中、低障碍物及原始物理时间窗口，从作者提供的该段初始构型开始；这些重置仅用于隔离主运镜问题，不能作为连续 combo 或衔接通过的证据。
+
+`--phase-program` 使用 Typesafe 官方 Jev API，在 CPU 执行开始前选择通过数值筛选的阶段路径。筛选包括全程 FK、关节/执行器限值、方向和曲线质量，以及当前观测的短时碰撞检查。全程 FK 可行不代表未来动态避障已获证明；每条实际命令仍需通过当前整机、自碰撞、执行器和扫掠检查。默认候选包括水平弧线和按观测运动方向生成的横向弧线；圆形掉头构造仅保留在本地几何诊断中，未加入默认候选集。
+
+观测对象提供高度范围、是否确认运动和观测时间。第一次可靠球心运动确认只作为明确标记的 `motion_hint`，不会提前改变碰撞模型的运动分类。候选中的穿越空间、冻结占据净距和底盘位移后的静态机械臂补偿探测均为搜索证据，不能代替动态执行验证。
+
+主运镜的 body 模式使用底盘/近端运动能力分配避障责任，按实际镜头进度跟踪路径；无迫近威胁时，姿态恢复限于相机任务的零空间。在线搜索族和数值配置可合并为一次结构化调用，后续精确候选选择和安装检查仍保留。主运镜的镜头验收阈值、障碍净距与执行器硬限制保持不变。
+
+```bash
+/usr/bin/python3 ros2_ws/jev_agent_wbc/scripts/prepare_combo_stage_cases.py \
+  --output <新的主运镜夹具目录>
+
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /usr/bin/python3 \
+  ros2_ws/jev_agent_wbc/scripts/benchmark_official_jev.py \
+  --output <新的运行目录> --key-file <本地API-key文件> \
+  --scenarios <主运镜夹具目录> \
+  --cases combo_02_easy__action_02_pedestal_up \
+  --workers 1 --pace 1 --candidate-seconds 6 --proposals 3 \
+  --shortlist 2 --lead .8 --phase-program
+
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /usr/bin/python3 \
+  ros2_ws/jev_agent_wbc/scripts/analyze_combo_cpu.py \
+  --runs <运行目录> --output <新的审计目录>
+```
+
+运行目录保存冻结源码、输入哈希、实际 API 返回、所选路径与完整遥测。`shot_acceptance` 是镜头验收，`completed` 是执行是否完成；失败前缀即使未碰撞也不算完整安全通过。独立审计使用真实障碍三次轨迹和不超过 2 ms 采样间隔的扫掠下界。`pace=1` 不保证控制计算能达到实时频率，需同时查看记录的计算耗时和仿真时间/墙钟时间比例。
+
+本次调试记录位于 `results/combo_layers_20261018/`。`collect_phase_feedback.py` 只生成本地历史结果汇总，没有 API 或 Agent 输入集成。
+
+## Combo 自由相机衔接诊断（2026-10-18）
+
+`free_transfer.py` 将衔接定义为下一段运镜的构型到达任务：没有构图、曲线或时长验收；碰撞净距、自碰撞、关节、加速度和轮速检查全部保留。此模式拒绝覆盖已经安装的相机轨迹或镜头 deadline，避免将主运镜误当成自由衔接。45 秒仅为单次测试 watchdog，超时记为未完成，不是镜头时间指标。
+
+Jev 根据当前观测选择直接、左侧或右侧通路。候选证据包含冻结占据的整机构型净距、行程、转角以及 2.5 秒内的实测运动外推；这些是搜索依据，不是未来安全证书。对已经有足够观测净距的候选，筛去额外绕行却没有几何收益的通路。发现短时通路风险或持续无进展时异步请求换路，等待 API 期间控制循环继续推进。每一步仍由原安全控制器和非线性扫掠证书决定实际命令。
+
+实测到达后还从当前构型和速度验证下一段完整运镜的 FK/执行器可行性。该检查不包含未来动态障碍证明。当前采用作者提供的下一段初始构型作为明确的到达目标；自动生成其它等价初始构型以及完整 combo 的连续阶段调度尚未验证。
+
+```bash
+/usr/bin/python3 ros2_ws/jev_agent_wbc/scripts/prepare_combo_transfer_cases.py \
+  --output <新的衔接夹具目录>
+# 若要重放已通过主运镜的实测边界，增加：
+# --main-runs <通过的主运镜运行目录>
+
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /usr/bin/python3 \
+  ros2_ws/jev_agent_wbc/scripts/benchmark_combo_transfers.py \
+  --output <新的衔接运行目录> --key-file <本地API-key文件> \
+  --scenarios <衔接夹具目录> --workers 2 --watchdog 45
+
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /usr/bin/python3 \
+  ros2_ws/jev_agent_wbc/scripts/analyze_combo_cpu.py \
+  --runs <衔接运行目录> --output <新的审计目录>
+```
+
+六个衔接夹具之间会重置状态，单个衔接内部不重置。实测边界重放保留前一段实际终态、速度、最近观测历史及对应障碍物时间偏移，但依然属于独立边界测试，不能冒充从 combo 起点连续运行到终点。API 仍使用官方 `https://api.typesafe.ai/v1/systemone` 和 `jev-1.14.0`，密钥只从本地文件加载。

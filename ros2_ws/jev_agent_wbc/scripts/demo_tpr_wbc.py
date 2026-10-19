@@ -150,7 +150,7 @@ def main():
     parser.add_argument('--dt', type=float, default=.02)
     parser.add_argument('--preview-period', type=float, default=.4)
     parser.add_argument('--async-preview', action='store_true')
-    parser.add_argument('--pace', type=float, default=0.)
+    parser.add_argument('--pace', type=float, default=1., help='maximum sim/wall ratio; CPU runs use 1 without deliberate slowdown')
     args = parser.parse_args()
     run(args)
 

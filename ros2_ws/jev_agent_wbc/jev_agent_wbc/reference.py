@@ -77,6 +77,7 @@ class OriginalReference:
         if isinstance(task, (str, Path)):
             task = json.loads(Path(task).read_text())
         self._task = validate_task(task)
+        self.is_combo = len({p['motion'].lower() for p in self._task['shot_phase']}) > 1
         self.sha256 = digest(self._task)
         samples = self._task['reference_camera_trajectory']['samples']
         times = np.array([row['t'] for row in samples])
@@ -84,6 +85,10 @@ class OriginalReference:
         self.translation = CubicSpline(times, np.array([row['position'] for row in samples]),
                                        bc_type=((1, np.zeros(3)), (1, np.zeros(3))))
         self.rotation = RotationSpline(times, Rotation.from_quat([row['quaternion_xyzw'] for row in samples]))
+        if any(p['motion'] == 'transition' for p in self._task['shot_phase']):
+            from .combo import PhaseTranslation, PhaseRotation
+            self.translation = PhaseTranslation(self._task)
+            self.rotation = PhaseRotation(self._task)
         self.subject = np.array(subject_position, float)
         if self.subject.shape != (3,) or not np.isfinite(self.subject).all():
             raise ValueError('runtime subject position must be finite 3D')

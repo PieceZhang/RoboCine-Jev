@@ -27,7 +27,7 @@ def prepare(engine, state, scene, base_z):
     diagnostic=task_space_planning.diagnose(original,scene,state,np.zeros(8),0.,base_z,engine.planning_limits,
         budget=engine.budget,measured_control=np.zeros(8))
     context=dict(objective='visible_intent_completion',time_s=0.,duration_s=original.duration,
-        phase=original.phase(0.),intent=original.task['intent'],subject=original.task['subject'],
+        phase=original.phase(0.),shot_phase=original.task['shot_phase'],intent=original.task['intent'],subject=original.task['subject'],
         reference_subject_position=original.subject.tolist(),difficulty=diagnostic['report'],
         robot_geometry=observation.summary(engine.geometry_backend.obstacle_relations(observation,scene)),
         construction=dict(construction_evidence(original,original,scene,0.,0.,

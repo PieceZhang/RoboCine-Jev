@@ -14,6 +14,10 @@ from .cinematic_geometry import curve_quality
 
 
 def timed_curves(original,active,scene,activation,model,intrinsics,count=3,diagnostics=None,displacement=None,skew=.2,initial_boundary=None):
+    from .combo import is_combo
+    if is_combo(original):
+        if diagnostics is not None:diagnostics.append(dict(reason='combo_uses_fixed_phase_clock_joint_curves'))
+        return []
     end=active.duration;span=end-activation
     if span<1.5:return []
     p0,_,v0=active.sample(activation);pe=original.sample(original.duration)[0]

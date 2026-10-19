@@ -196,7 +196,10 @@ class IntentSpec:
         # distinct motion types remain separate, ordered completion obligations.
         for phase in original.task['shot_phase']:
             motion = phase['motion'].lower()
-            if self.segments and self.segments[-1]['motion'] == motion:
+            if motion == 'transition':
+                continue  # Connector safety/shape is checked separately from main-action intent.
+            if (self.segments and self.segments[-1]['motion'] == motion
+                    and abs(self.segments[-1]['end_s']-phase['start_s'])<1e-8):
                 self.segments[-1]['end_s'] = phase['end_s']
                 self.segments[-1]['landmarks'].append(dict(phase))
             else:

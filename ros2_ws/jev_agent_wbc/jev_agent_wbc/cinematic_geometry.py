@@ -76,10 +76,14 @@ def terminal_band(original, model, intrinsics=None, axis_only=False):
     return value
 
 
-def curve_quality(path, start=None, samples=121):
+def curve_quality(path, start=None, samples=121, end=None, phase=None, _single=False):
     """Audit only the proposed suffix; past reversals cannot be repaired retroactively."""
     start = getattr(path, 'activation_s', 0.) if start is None else start
-    times = np.linspace(start, path.duration, samples)
+    original = getattr(path, 'original', path)
+    from .combo import is_combo, phase_quality, phase_direction
+    if not _single and is_combo(original):
+        return phase_quality(path, start, end)
+    times = np.linspace(start, path.duration if end is None else end, samples)
     from .intent_paths import positions_at
     points=positions_at(path,times)
     original = getattr(path, 'original', path)
@@ -98,6 +102,10 @@ def curve_quality(path, start=None, samples=121):
         feature = points@axis
         sign = np.sign((original.sample(original.duration)[0]-original.sample(0.)[0])@axis)
     reverse = float(np.maximum(0., -sign*np.diff(feature)).sum())
+    unit='rad' if motion=='orbit' else 'm'
+    if phase is not None:
+        directed, unit = phase_direction(original, phase, points)
+        reverse=float(np.maximum(0.,-directed).sum())
     lengths = np.linalg.norm(delta, axis=1)
     # Curvature must not depend on speed or dwell time. Evaluate equal-distance
     # chords; the endpoint's near-zero velocities otherwise amplify harmless
@@ -122,8 +130,8 @@ def curve_quality(path, start=None, samples=121):
     join=turn_distance<.02
     core=turns[~join];join_turn=float(turns[join].sum())
     regular=bool(float(core.sum())<3.5 and float(max(core,default=0.))<.45 and join_turn<.9)
-    return dict(reverse_motion=reverse, reverse_unit='rad' if motion=='orbit' else 'm',
-                direction_pass=reverse <= (.003 if motion=='orbit' else .004),
+    return dict(reverse_motion=reverse, reverse_unit=unit,
+                direction_pass=reverse <= (.003 if unit=='rad' else .004),
                 length_m=float(lengths.sum()), chord_m=chord,
                 total_turn_rad=total_turn, max_step_turn_rad=float(max(turns,default=0.)),
                 regular_curve_pass=regular, core_turn_rad=float(core.sum()),core_max_step_turn_rad=float(max(core,default=0.)),

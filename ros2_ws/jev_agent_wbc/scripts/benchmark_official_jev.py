@@ -25,13 +25,14 @@ def main():
     p.add_argument('--model', default='jev-1.14.0')
     p.add_argument('--cases', nargs='+', help='Optional subset of the existing scenario catalog')
     p.add_argument('--workers',type=int,help='Concurrent demos; use 1 for isolated latency measurements')
-    p.add_argument('--pace', type=float, default=.03)
+    p.add_argument('--pace', type=float, default=1., help='maximum sim/wall ratio; CPU runs use 1 without deliberate slowdown')
     p.add_argument('--lead', type=float, default=1.2)
     p.add_argument('--candidate-seconds', type=float, default=12.)
     p.add_argument('--proposals', type=int, default=6)
     p.add_argument('--shortlist', type=int, default=2)
     p.add_argument('--single-candidate',action='store_true')
     p.add_argument('--preplan',action='store_true')
+    p.add_argument('--phase-program',action='store_true')
     p.add_argument('--scenarios',type=Path,default=ROOT/'scenarios')
     a = p.parse_args()
     a.output.mkdir(parents=True, exist_ok=False)
@@ -41,13 +42,14 @@ def main():
     from jev_agent_wbc.provenance import source_manifest
     from jev_agent_wbc.scenarios import NAMES
     names = a.cases or NAMES
-    if any(name not in NAMES for name in names):
+    if any(Path(name).name != name or name in ('.','..') or
+           not all((a.scenarios/name/file).is_file() for file in ('task.json','runtime_scene.json')) for name in names):
         p.error('unknown scenario')
-    config = dict(model=a.model, api_url='https://api.typesafe.ai/v1/systemone',
+    config = dict(model=a.model, api_url='https://api.typesafe.ai/v1/systemone',cases=list(names),
                   pace=a.pace, activation_lead_s=a.lead, candidate_wall_budget_s=a.candidate_seconds,
                   max_proposals=a.proposals,max_rollouts=a.shortlist,parallel_cases=a.workers or len(names), planner_model='floating_camera',
                   representation_boxes=3, geometry_preferences=True,
-                  obstacle_avoidance_enabled=True,single_candidate=a.single_candidate,preplan=a.preplan,
+                  obstacle_avoidance_enabled=True,single_candidate=a.single_candidate,preplan=a.preplan,phase_program=a.phase_program,
                   scenarios_source=str(a.scenarios.resolve()))
     (a.output/'provenance.json').write_text(json.dumps(source_manifest(ROOT, config), indent=2))
     shutil.copytree(ROOT/'jev_agent_wbc', a.output/'frozen_code'/'jev_agent_wbc',
@@ -68,6 +70,7 @@ def main():
                        '--candidate-budget',str(a.shortlist), '--output', str(a.output/name)]
             if a.single_candidate:command.append('--single-candidate')
             if a.preplan:command.append('--preplan')
+            if a.phase_program:command.append('--phase-program')
             futures.append(pool.submit(run_one, command, a.output/(name+'.log')))
         for future in as_completed(futures):
             result = future.result(); results.append(result)

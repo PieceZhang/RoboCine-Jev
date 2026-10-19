@@ -225,6 +225,7 @@ class CinematicEngine:
             construction=construction_evidence(self.original,self.active,self.geometry_scene,t,t+self.budget.activation_lead_s,
                 mount_height_m=None if geometry is None else geometry['world_from_mount']['translation_m'][2])
         return dict(planner_model=self.planner_model, actual_robot_feedback=self.actual_feedback,construction=construction,
+            bundle_search_choices=bool(getattr(self.wbc,'body_aware',False)),
             robot_geometry=geometry,
             camera_task=TaskContext(self.original.sha256,t,self.original.duration,
                 earliest_change,self.report.get('kinematics',{}).get('first_failure_s'),
@@ -233,7 +234,7 @@ class CinematicEngine:
             objective='visible_intent_completion' if self.planner_model == 'floating_camera' else 'legacy_reference_tracking',
             prediction_scope=("state-seeded FK with observed whole-body/self-collision swept checks; no dynamics or future truth"
                 if self.planner_model == "floating_camera" else "whole-body WBC rollout"),
-            time_s=t, duration_s=self.original.duration, phase=phase,
+            time_s=t, duration_s=self.original.duration, phase=phase, shot_phase=self.original.task['shot_phase'],
             next_phase=following[0] if following else None,
             event='validation_failed' if self.pending_feedback else 'recovery' if recovery else 'difficulty',
             subject=self.original.task['subject'], intent=self.original.task['intent'],

@@ -22,20 +22,39 @@ from .camera_intent import POLICY,IntentSpec
 from .shot_acceptance import evaluate_shot, attach_acceptance
 
 
-def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, budget=None, model='perplexity', disable_wbc_avoidance=False, target_replay=None, planning_wbc_avoidance=False, planner_model="floating_camera", representation_boxes=3, geometry_preferences=True,preplan=False):
+def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, budget=None, model='perplexity', disable_wbc_avoidance=False, target_replay=None, planning_wbc_avoidance=False, planner_model="floating_camera", representation_boxes=3, geometry_preferences=True,preplan=False,phase_program=False):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     scene = RuntimeScene(Path(case)/'runtime_scene.json')
     runtime = scene.document
     state = np.asarray(runtime['initial_state'], float)
     z = runtime['base_z']
-    original = OriginalReference(Path(case)/'task.json', runtime['subject']['position'])
-    save_json(output/'original_task.json', original.task)
-    save_json(output/'runtime_scene.json', runtime)
-    save_json(output/'evaluation_protocol.json', EVALUATION_PROTOCOL)
     lidar = RuntimeLidar()
     for stamp in np.linspace(-.8, 0., 9):
         observed = lidar.synthetic_scan(scene, state, z, float(stamp))
+    from .combo import gaps, complete_task
+    task = json.loads((Path(case)/'task.json').read_text())
+    save_json(output/'source_task.json', task)
+    completion = None
+    if gaps(task):
+        if mode != 'jev':
+            raise ValueError('incomplete combo requires mode=jev or a previously completed task')
+        from .jev import SystemOneClient
+        import threading
+        client = SystemOneClient(url=api_url or 'http://127.0.0.1:8000/v1/systemone',model=model,
+            timeout_s=15.,journal=output/'combo_jev_api.jsonl',
+            policy='Complete the connecting arcs of a cinematic combo. Choose using the authored actions and current observations. Preserve every main action, endpoint and deadline. Choices are proposals; physical safety requires independent checks.')
+        # A lost transport must not consume the whole bounded experiment.
+        timer=threading.Timer(90.,lambda:setattr(client,'closed',True));timer.start()
+        try:
+            task,completion=complete_task(task,runtime['subject']['position'],client.ask,observed)
+        finally:
+            timer.cancel();client.closed=True
+        save_json(output/'combo_completion.json',completion)
+    original = OriginalReference(task, runtime['subject']['position'])
+    save_json(output/'original_task.json', original.task)
+    save_json(output/'runtime_scene.json', runtime)
+    save_json(output/'evaluation_protocol.json', EVALUATION_PROTOCOL)
     # Same explicitly configured pinhole camera as the Isaac measurement rig.
     # This enables geometric projection, not synthetic SAM/visibility evidence.
     fy = .5/np.tan(np.deg2rad(27.5))
@@ -67,8 +86,13 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
     begin = time.monotonic()
     dt = .02
     startup=None
+    selected_phase_program=None
     sensor_worker=None
     try:
+        from .combo import is_combo
+        if is_combo(original) and not (budget and budget.single_candidate):
+            engine.warm_workers()
+            begin=time.monotonic()
         if budget and budget.single_candidate:
             engine.warm_workers()
             from .async_sensor import AsyncRuntimeLidar
@@ -76,6 +100,11 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
         if preplan:
             from .initial_planning import prepare
             startup=prepare(engine,state,observed,z)
+            begin=time.monotonic()
+        if phase_program:
+            from .phase_program import prepare as prepare_phases
+            selected_phase_program=prepare_phases(engine,observed,state,z)
+            save_json(output/'phase_program.json',selected_phase_program)
             begin=time.monotonic()
         for i in range(round((original.duration+POLICY.terminal_hold_s)/dt)+1):
             iteration_started=time.monotonic()
@@ -143,7 +172,7 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
                 safety_source='runner_execution_checks; independent_sweep_audit_is_separate')
             attach_acceptance(summary,acceptance)
             save_json(output/'camera_history.json',history)
-        summary.update(startup_planning=startup,backend='kinematic_integration', obstacle_avoidance_enabled=not disable_wbc_avoidance, wall_s=time.monotonic()-begin,
+        summary.update(combo_completion=completion,startup_planning=startup,phase_program=selected_phase_program is not None,backend='kinematic_integration', obstacle_avoidance_enabled=not disable_wbc_avoidance, wall_s=time.monotonic()-begin,
                        observation_source='synthetic_sparse_lidar_raycast', measured_physical_constraints=False,
                        camera_model='configured 384x288 pinhole, 55deg vertical FOV; no RGB observations')
         summary['planning_obstacle_avoidance_enabled'] = engine.planning_limits.obstacle_avoidance
@@ -177,12 +206,13 @@ def main():
     parser.add_argument('--geometry-preferences',choices=('on','off'),default='on')
     parser.add_argument('--model', default='perplexity', help='explicit backend model ID')
     parser.add_argument('--api-url', default='http://127.0.0.1:8000/v1/systemone')
-    parser.add_argument('--pace', type=float, default=1., help='maximum sim/wall ratio; 0 unpaced for strict tests')
+    parser.add_argument('--pace', type=float, default=1., help='maximum sim/wall ratio; CPU runs use 1 without deliberate slowdown')
     parser.add_argument('--agent-period', type=float, default=.5, help='minimum event spacing, independent of WBC')
     parser.add_argument('--activation-lead', type=float, default=4., help='exact candidate activation lead; never rebased')
     parser.add_argument('--candidate-proposals', type=int, default=6, help='maximum local numerical proposals')
     parser.add_argument('--single-candidate', action='store_true',help='Jev chooses one construction before generation; no fallback candidates')
     parser.add_argument('--preplan',action='store_true',help='approve one measured-start candidate before starting the shot clock')
+    parser.add_argument('--phase-program',action='store_true',help='official Jev selects screened phase geometry and timing; source task and deadlines preserved')
     parser.add_argument('--candidate-budget', type=int, default=2, help='maximum full counterfactual branches')
     parser.add_argument('--candidate-wall-budget',type=float,default=2.,help='cooperative candidate search budget in wall seconds')
     parser.add_argument('--prediction-horizon', type=float, default=8., help='bounded prediction lease in seconds')
@@ -214,7 +244,7 @@ def main():
                               args.allocation_preview and not args.no_preview, budget, args.model, args.disable_wbc_avoidance,
                               None if args.target_replay_root is None else args.target_replay_root/f"{name}_jev",
                               planning_wbc_avoidance=args.planning_wbc_avoidance, planner_model=args.planner_model,
-                              representation_boxes=args.representation_boxes,geometry_preferences=args.geometry_preferences=='on',preplan=args.preplan)
+                              representation_boxes=args.representation_boxes,geometry_preferences=args.geometry_preferences=='on',preplan=args.preplan,phase_program=args.phase_program)
             results.append(dict(case=name, **result))
             save_json(args.output/'runs.json', results)
     return 0 if all(r['completed'] for r in results) else 2

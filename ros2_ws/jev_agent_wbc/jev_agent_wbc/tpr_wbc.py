@@ -1,9 +1,10 @@
 """Trajectory-preserving predictive reconfiguration (TPR-WBC).
 
-Eight executable inputs, a six-dimensional camera task, and no escape heading.
-The fast hierarchy is expressed in endpoint velocities (a=(u-u_measured)/dt).
-Safety and actuator rows are hard; the second QP freezes the first QP's camera
-output. Prediction is a local SQP, not a recursive-feasibility guarantee.
+Eight executable inputs and a six-dimensional camera task. The fast hierarchy
+uses endpoint velocities (a=(u-u_measured)/dt). Safety and actuator rows remain
+hard. Ordered combo actions can advance along their geometric path to prepare
+body clearance; exact-camera tracking remains the ordinary single-shot mode.
+Prediction is a local SQP, not a recursive-feasibility guarantee.
 """
 import time
 import numpy as np
@@ -168,6 +169,21 @@ def qp(H, g, A, lo, hi, warm=None):
     return answer, residual
 
 
+def qp_with_reserve(H,g,A,lo,hi,warm,rows,targets,weight):
+    """Penalize a clearance-rate deficit, never surplus safe separation."""
+    count=len(rows)
+    if not count:return qp(H,g,A,lo,hi,warm)
+    size=len(g)
+    extended_H=np.zeros((size+count,size+count));extended_H[:size,:size]=H
+    extended_H[size:,size:]=weight*np.eye(count)
+    extended_A=np.vstack([np.pad(A,((0,0),(0,count))),
+        np.column_stack([rows,np.eye(count)]),np.column_stack([np.zeros((count,size)),np.eye(count)])])
+    seed=np.r_[warm,np.maximum(0.,targets-rows@warm)]
+    command,residual=qp(extended_H,np.r_[g,np.zeros(count)],extended_A,
+        np.r_[lo,targets,np.zeros(count)],np.r_[hi,np.full(2*count,np.inf)],seed)
+    return command[:size],residual
+
+
 def witnesses(collision, state, z=0., rotation=None,with_motion=False):
     centers, radii = collision.active_obstacles(state, z, rotation, per_body=None)
     # Incoming movers must not be lost by a static nearest-neighbour selection.
@@ -219,12 +235,18 @@ class ReconfigurationPreview:
     def update(self, c, state, velocity, t, dt, z, rotation, commanded_q):
         if self.trajectory is None or t >= self.trajectory.duration-1e-9:
             return np.zeros(8)
-        if t-self.updated < self.period-1e-8:
+        tracks={int(row['id']):np.array(row['velocity']) for row in c.collision.scene.get('tracks',[])}
+        old_tracks=getattr(self,'observed_motion',{})
+        changed=(tracks.keys()!=old_tracks.keys() or any(np.linalg.norm(v-old_tracks[k])>.08 for k,v in tracks.items() if k in old_tracks))
+        if changed:self.observed_motion=tracks
+        if t-self.updated < self.period-1e-8 and not changed:
             return np.zeros(8) if self.controls is None else self.sample(t+dt)
         started = time.perf_counter()
         self.updated = t
-        n = self.nodes
-        end = min(t+self.horizon, self.trajectory.duration)
+        body_mode=getattr(c,'body_aware',False) or getattr(c,'body_adaptation_seen',False)
+        n = max(self.nodes,10) if body_mode else self.nodes
+        horizon=max(self.horizon,2.5) if body_mode else self.horizon
+        end = min(t+horizon, self.trajectory.duration)
         h = (end-t)/n
         times = t+np.arange(1, n+1)*h
         nominal = (np.tile(velocity, (n, 1)) if self.controls is None else
@@ -242,7 +264,24 @@ class ReconfigurationPreview:
         failure = ''
         accepted = False
         first_conflict = None
-        for iteration in range(4):
+        from .combo import is_combo
+        from .body_anticipation import path_frame
+        from types import SimpleNamespace
+        geometric=getattr(c,'body_aware',False) or getattr(c,'body_adaptation_seen',False)
+        initial_p,initial_r,_=whole_body_kinematics(state,z,rotation)
+        initial_frame=path_frame(SimpleNamespace(),self.trajectory,initial_p,t) if geometric else None
+        capture_position=np.zeros(3) if initial_frame is None else initial_p-initial_frame[0]
+        capture_rotation=np.zeros(3) if initial_frame is None else Rotation.from_matrix(initial_r@initial_frame[1].T).as_rotvec()
+        capture_duration=min(1.,end-t)
+        def capture_frame(frame,elapsed):
+            tp,tr,transform,tangent,progress=frame
+            u=np.clip(elapsed/max(capture_duration,1e-6),0.,1.)
+            weight=1.-(10*u**3-15*u**4+6*u**5)
+            return tp+weight*capture_position,Rotation.from_rotvec(weight*capture_rotation).as_matrix()@tr,transform,tangent,progress
+        if geometric and (self.controls is None or changed):
+            from .body_anticipation import preview_seed
+            nominal=preview_seed(c,self.trajectory,state,velocity,t,h,n,z,rotation)
+        for iteration in range(6 if geometric else 4):
             H, g = np.eye(nv)*1e-5, np.zeros(nv)
             rows, lows, highs = [], [], []
             x = state.copy(); affine = x.copy(); sensitivity = np.zeros((9, nv))
@@ -251,6 +290,7 @@ class ReconfigurationPreview:
             oldcmdE,oldcmdaff=np.zeros((8,nv)),oldcmd.copy()
             command_q_affine=state[3:].copy() if commanded_q is None else np.asarray(commanded_q).copy()
             command_q_sensitivity=np.zeros((6,nv))
+            projector=SimpleNamespace()
 
             def constrain(M, low, high):
                 rows.append(M); lows.append(np.broadcast_to(low, M.shape[0])); highs.append(np.broadcast_to(high, M.shape[0]))
@@ -307,9 +347,21 @@ class ReconfigurationPreview:
                 p, r, J = whole_body_kinematics(x, z, br)
                 C = np.zeros((6, 9)); C[:2, :2] = np.eye(2); C[:, 2:] = J[:, 1:]
                 tp, tr, _ = self.trajectory.sample(times[k])
+                frame=path_frame(projector,self.trajectory,p,times[k]) if geometric else None
+                timed_position=tp.copy()
+                if frame is not None:tp,tr,transform,tangent,progress=capture_frame(frame,times[k]-t)
                 error = np.r_[tp-p, Rotation.from_matrix(tr@r.T).as_rotvec()]
                 target = error-C@(affine-x)
-                constrain(C@sensitivity, target, target)
+                if frame is None:
+                    constrain(C@sensitivity, target, target)
+                else:
+                    constrain(transform@C@sensitivity,transform@target,transform@target)
+                    cost(tangent[None,:]@C[:3]@sensitivity,
+                        [tangent@(timed_position-p-C[:3]@(affine-x))],.5*h)
+                    progress_knots,progress_points=projector.progress_cache
+                    remaining_points=np.vstack([frame[0],progress_points[progress_knots>progress]])
+                    remaining_arc=float(np.linalg.norm(np.diff(remaining_points,axis=0),axis=1).sum())
+                    constrain(tangent[None,:]@J[:3]@select,0.,2.*remaining_arc)
                 constrain(sensitivity[3:], qlo-affine[3:], qhi-affine[3:])
                 # Bounded configuration anchoring recovers compensation range
                 # after a mover passes; it can never compete with camera rows.
@@ -356,9 +408,11 @@ class ReconfigurationPreview:
                     dp = primitive_values(future.geometry,xp,fc+future.velocities[fi]*ee,z,brp)-fr[:,None]
                     dm = primitive_values(future.geometry,xm,fc-future.velocities[fi]*ee,z,brm)-fr[:,None]
                     curvature = ((dp-2*d+dm)/ee**2)[mask]
-                    hocbf = R@((select-oldE)/h+4*select)+4*M
-                    bound = (-curvature-4*motion-4*(d[mask]-future.margin-.006)
-                             -4*correction+R@oldaff/h)
+                    from .body_anticipation import barrier_gains
+                    gains=barrier_gains(future,fi)[mask]
+                    hocbf = R@((select-oldE)/h)+2*gains[:,None]*(R@select)+gains[:,None]**2*M
+                    bound = (-curvature-2*gains*motion-gains**2*(d[mask]-future.margin-.006)
+                             -gains**2*correction+R@oldaff/h)
                     constrain(hocbf, bound, np.inf)
                     reserve_scale=np.maximum(np.linalg.norm(R,axis=1),1e-5)
                     reserve_target=bound+.05*reserve_scale
@@ -391,6 +445,7 @@ class ReconfigurationPreview:
         states = [state.copy()]
         if accepted:
             x, old = state.copy(), velocity.copy()
+            projector=SimpleNamespace()
             oldcmd=c.previous.copy() if response_active and hasattr(c,'previous') else velocity.copy()
             accumulated_error = 0.
             # Nonlinear re-integration and between-knot collision validation.
@@ -416,6 +471,8 @@ class ReconfigurationPreview:
                     br = None if tilt is None else Rotation.from_euler('z', x[2]).as_matrix()@tilt
                     p, r, _ = whole_body_kinematics(x, z, br)
                     tp, tr, _ = self.trajectory.sample(t+(k+(sub+1)/subdivisions)*h)
+                    frame=path_frame(projector,self.trajectory,p,t+(k+(sub+1)/subdivisions)*h) if geometric else None
+                    if frame is not None:tp,tr=capture_frame(frame,(k+(sub+1)/subdivisions)*h)[:2]
                     maxp = max(maxp, float(np.linalg.norm(p-tp)))
                     maxr = max(maxr, float(np.linalg.norm(Rotation.from_matrix(tr@r.T).as_rotvec())))
                 states.append(x.copy()); old = u;oldcmd=cmd
@@ -432,17 +489,20 @@ class ReconfigurationPreview:
                          tpr_prediction_horizon_s=float(end-t), tpr_prediction_s=time.perf_counter()-started,
                          tpr_prediction_position_m=maxp, tpr_prediction_orientation_rad=maxr,
                          tpr_prediction_clearance_m=None if not np.isfinite(clearance) else clearance,
+                         tpr_prediction_path_progress_free=bool(geometric),
+                         tpr_prediction_capture_offset_m=float(np.linalg.norm(capture_position)),
+                         tpr_prediction_capture_duration_s=capture_duration,
                          tpr_first_conflict_s=first_conflict,
                          tpr_prediction_scope='local measured constant-velocity obstacle model; no recursive guarantee')
         return np.zeros(8) if self.controls is None else self.sample(t+dt)
 
 
-def compute_reconfiguration(preview, scene, physical_time, limits, state, velocity, previous_command, t, dt, z, rotation, commanded_q):
+def compute_reconfiguration(preview, scene, physical_time, limits, state, velocity, previous_command, t, dt, z, rotation, commanded_q, body_aware=False):
     from types import SimpleNamespace
     from .dynamic_collision import DynamicCollision
     from .self_collision import SelfCollision
     model = SimpleNamespace(collision=DynamicCollision(scene, physical_time), limits=limits,previous=previous_command,
-                            self_collision=SelfCollision())
+                            self_collision=SelfCollision(),body_aware=body_aware)
     preview.update(model, state, velocity, t, dt, z, rotation, commanded_q)
     # Return only the result, not the trajectory and its growing pose caches.
     return SimpleNamespace(**{name:getattr(preview,name) for name in
@@ -515,7 +575,8 @@ class AsyncReconfigurationPreview(ReconfigurationPreview):
             self.pending = self.pool.submit(compute_reconfiguration, snapshot, c.collision.scene,
                 c.physical_time, c.limits, state.copy(), velocity.copy(), c.previous.copy(), t, dt, z,
                 None if rotation is None else np.asarray(rotation).copy(),
-                None if commanded_q is None else np.asarray(commanded_q).copy())
+                None if commanded_q is None else np.asarray(commanded_q).copy(),
+                getattr(c,'body_aware',False) or getattr(c,'body_adaptation_seen',False))
             self.requested, self.pending_generation = t, self.generation
         self.info.update(tpr_prediction_async=True, tpr_prediction_pending=self.pending is not None,
                          tpr_prediction_accepted=self.accepted, tpr_prediction_rejected=self.rejected,
@@ -528,7 +589,7 @@ class AsyncReconfigurationPreview(ReconfigurationPreview):
 
 
 def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_rotation=None,
-              commanded_q=None, brake=False, trajectory_time=0., preparing=False, **unused):
+              commanded_q=None, brake=False, trajectory_time=0., preparing=False, free_transfer_control=None, **unused):
     started = time.perf_counter()
     timings={};stage_started=started
     def mark(name):
@@ -537,6 +598,12 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
     if not np.isfinite(dt) or not 0 < dt <= .1:
         raise ValueError('control dt must be in (0, 0.1]')
     state = np.asarray(state, float)
+    if free_transfer_control is not None:
+        free_transfer_control=np.asarray(free_transfer_control,float)
+        if free_transfer_control.shape!=(8,) or not np.isfinite(free_transfer_control).all():
+            raise ValueError('free transfer requires eight finite actuator preferences')
+        if c.reconfiguration.trajectory is not None or c.limits.deadline_s is not None:
+            raise ValueError('free transfer cannot override an installed camera shot or deadline')
     previous = c.previous.copy()
     measured = previous if c.measured_control is None else np.asarray(c.measured_control, float)
     if measured.shape != (8,) or not np.isfinite(measured).all():
@@ -545,6 +612,39 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
     model_error=None if previous_prediction is None or c.measured_control is None else (measured-previous_prediction)
     c.time_s = trajectory_time
     p, r, J = whole_body_kinematics(state, base_z, base_rotation)
+    received = c.reconfiguration.trajectory
+    original=getattr(received,'original',received)
+    from .combo import is_combo
+    ordered=received is not None and is_combo(original)
+    if ordered and any(np.linalg.norm(row['velocity'])>.04 for row in c.collision.scene.get('tracks',[])):
+        c.body_adaptation_seen=True
+    combo=received is not None and (getattr(c,'body_aware',False) or (ordered and getattr(c,'body_adaptation_seen',False)))
+    terminal_pose=getattr(c,'terminal_camera_pose',None)
+    if terminal_pose is not None and received is not None and trajectory_time>=received.duration:
+        # Once the measured frame is inside the unchanged terminal band,
+        # confirm that frame without restarting the finished camera move.
+        # Redundant body motion remains available under all physical checks.
+        target_p,target_r=terminal_pose;feedforward=np.zeros(6);combo=False
+    semantic_axis=None;feedback_progress=trajectory_time
+    if combo and not brake and not preparing:
+        from .body_anticipation import phase_axis,tracking_progress,local_forward_target
+        original=getattr(received,'original',received)
+        semantic_axis=phase_axis(original,original.phase(trajectory_time),p)
+        feedback_progress=tracking_progress(c,received,p,trajectory_time)
+        if semantic_axis is not None:
+            feedback_progress=local_forward_target(c,received,feedback_progress)
+        if abs(feedback_progress-trajectory_time)>1e-7:
+            target_p,target_r,feedforward=received.sample(feedback_progress)
+        if semantic_axis is not None:
+            geometric_position,target_r,geometric_twist=received.sample(c.achieved_progress)
+            from .reference import look_at
+            # Preserve the authored subject-relative viewing offset at the
+            # actually measured camera position during body avoidance.
+            target_r=look_at(p,original.subject)@look_at(geometric_position,original.subject).T@target_r
+            # Feed forward along the locally achieved tangent. A clock ahead
+            # of a hairpin otherwise commands the opposite translation while
+            # the path constraint requires forward progress.
+            feedforward=np.asarray(geometric_twist)
     error = np.r_[np.asarray(target_p)-p, Rotation.from_matrix(target_r@r.T).as_rotvec()]
     ff = np.asarray(feedforward, float)
     if ff.shape != (6,) or not np.isfinite(ff).all() or not np.isfinite(error).all():
@@ -572,14 +672,30 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
     ff_acc = np.zeros(6)
     received = c.reconfiguration.trajectory
     if received is not None and not brake and not preparing:
-        ta, tb = max(0., trajectory_time-eps), min(received.duration, trajectory_time+eps)
+        ta, tb = max(0., feedback_progress-eps), min(received.duration, feedback_progress+eps)
         if tb > ta:
             from .intent_paths import twists_at
             va,vb=twists_at(received,[ta,tb])
             ff_acc=(vb-va)/(tb-ta)
+        if combo and semantic_axis is not None:
+            ta=max(0.,c.achieved_progress-eps);tb=min(received.duration,c.achieved_progress+eps)
+            if tb>ta:
+                va,vb=twists_at(received,[ta,tb]);ff_acc=(vb-va)/(tb-ta)
+                pa=received.sample(ta)[0];pb=received.sample(tb)[0]
+                planned_gaze=Rotation.from_matrix(look_at(pb,original.subject)@look_at(pa,original.subject).T).as_rotvec()/(tb-ta)
+                live_gaze=Rotation.from_matrix(
+                    look_at(p+eps*camera_velocity[:3],original.subject)@
+                    look_at(p-eps*camera_velocity[:3],original.subject).T).as_rotvec()/(2*eps)
+                # The viewing direction follows the measured camera, including
+                # its slower arrival after avoidance, rather than a stale
+                # planned angular speed that leaves a terminal centroid bias.
+                ff[3:]=live_gaze+geometric_twist[3:]-planned_gaze
+                ff_acc[3:]=0.
     frequency = min(float(getattr(c, 'tpr_servo_frequency', 12.)), .6/dt)
     desired_acc = ff_acc+2*frequency*(ff-camera_velocity)+frequency**2*error
     desired = J@measured+dt*(desired_acc-Jdot@measured)
+    if semantic_axis is not None:
+        desired[:3]-=semantic_axis*min(0.,float(semantic_axis@desired[:3]))
     # The actuator envelope is anchored to measured velocity, and ALSO to the
     # last command, so servo mismatch is never hidden by resetting history.
     A, lo, hi = c.bounds(state[3:], dt, commanded_q)
@@ -636,10 +752,16 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
     # Acceleration HOCBF: hddot+2*k*hdot+k^2*h >= 0. All pairs
     # can activate; near-feature switches retain individual primitive rows.
     k = 2.
-    lower_acc = -curvature-2*k*rate-k*k*h
+    # Moving crossing normals rotate; the static-wall exponential gain
+    # demands immediate radial retreat far outside the collision envelope.
+    # Use the existing moving-surface gain, retaining independent nonlinear
+    # swept certificates, actuator bounds and the original separation margin.
+    from .body_anticipation import barrier_gains
+    gain=barrier_gains(c.collision,indices)
+    lower_acc = -curvature-2*gain*rate-gain*gain*h
     active = (distances < .35) | (rate < -.1)
     R = rows[active]
-    velocity_low = (-k*h-motion)[active]
+    velocity_low = (-gain*h-motion)[active]
     low = np.maximum(R@measured+dt*lower_acc[active], velocity_low)
     sd, sG = c.self_collision.terms(state)
     sR = sG@integration_matrix(state[2])
@@ -653,10 +775,13 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
     R, low = np.vstack([R, sR[smask]]), np.r_[low, slow]
     A, lo, hi = np.vstack([A, R]), np.r_[lo, low], np.r_[hi, np.full(len(R), np.inf)]
     preferred = measured.copy()
+    predictive_command=measured.copy()
     mark('task_and_barriers')
     kinematic_preference_active=False
+    kinematic_recovery_preference=False
     if not brake and not preparing:
         preferred = c.reconfiguration.update(c, state, measured, trajectory_time, dt, base_z, base_rotation, commanded_q)
+        predictive_command=preferred.copy()
         if c.coordination_reference is not None:
             # Cross-phase allocation is only a subordinate configuration goal.
             preferred = c.coordination_reference
@@ -668,13 +793,31 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
             # delaying body preparation until then wastes the verified lead.
             trace=witness['trace'];knots=np.array([row['t'] for row in trace])
             states=np.array([row['state'] for row in trace]);controls=np.array([row['control'] for row in trace])
-            expected=np.array([np.interp(trajectory_time,knots,states[:,j]) for j in range(9)])
+            # Redundancy belongs to the camera's achieved position on a bow.
+            # A wall-clock sample across its turn can demand the opposite
+            # configuration while the camera is still traversing that turn.
+            witness_time=(getattr(c,'achieved_progress',feedback_progress) if getattr(c,'arrival_reanchored',False)
+                else feedback_progress) if combo else trajectory_time
+            expected=np.array([np.interp(witness_time,knots,states[:,j]) for j in range(9)])
             delta=expected-state;delta[2]=(delta[2]+np.pi)%(2*np.pi)-np.pi
             if np.linalg.norm(delta[:2])<=.25 and np.max(abs(delta[2:]))<=.5:
-                preferred=np.array([np.interp(trajectory_time+dt,knots,controls[:,j]) for j in range(8)])
+                preferred=np.array([np.interp(witness_time+dt,knots,controls[:,j]) for j in range(8)])
                 correction=2.*np.r_[delta[:2]@np.array([np.cos(state[2]),np.sin(state[2])]),delta[2:]]
                 preferred+=np.clip(correction,-.25*c.limits.velocity,.25*c.limits.velocity)
                 kinematic_preference_active=True
+            elif combo:
+                # Outside the witness neighbourhood, its controls are not an
+                # execution certificate. Its comfortable configuration may
+                # still serve as a bounded recovery goal under fresh checks.
+                displacement=delta[:2]
+                heading=np.array([np.cos(state[2]),np.sin(state[2])])
+                # Recover the verified pose branch, including heading. A
+                # shortest turn toward position alone can select the opposite
+                # arm configuration and prevent backing out of a completed bow.
+                drive=np.clip(2.*displacement@heading,-.25,.25)
+                turn=1.5*delta[2]
+                preferred=np.r_[drive,np.clip(turn,-.8,.8),np.clip(.8*delta[3:],-.4,.4)]
+                kinematic_recovery_preference=True
     elif brake:
         preferred = np.zeros(8)
     mark('prediction')
@@ -691,6 +834,92 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
         metric[:2] = 200.
     H = np.diag(metric+.1)
     g = -metric*preferred-.1*measured
+    from .body_anticipation import base_preference,path_frame
+    escape_axis=semantic_axis
+    if combo and semantic_axis is not None:
+        frame=path_frame(c,received,p,trajectory_time)
+        if frame is not None:escape_axis=frame[3]
+    escape_key=(id(received),original.phase(trajectory_time)['name'] if combo else None)
+    if getattr(c,'body_escape_key',None)!=escape_key:
+        c.body_escape_key=escape_key;c.body_escape_memory={}
+    body_preference,body_info=base_preference(c.collision,state,measured,base_z,base_rotation,escape_axis,c.body_escape_memory,
+        camera_locked=free_transfer_control is None)
+    from .combo import is_combo
+    anticipatory=(rate<-.02)&(distances<.65)&(distances+1.5*np.minimum(rate,0.)<.12)
+    # Keep at most two witnesses per articulated part; point density must not
+    # multiply the importance of one observed obstacle.
+    reserve_mask=np.zeros_like(anticipatory)
+    for body in range(8):
+        candidates=np.argwhere(anticipatory&(c.collision.geometry.shape_bodies[None,:]==body))
+        if len(candidates):
+            order=np.argsort([distances[i,j]+rate[i,j] for i,j in candidates])[:2]
+            for i,j in candidates[order]:reserve_mask[i,j]=True
+    reserve_R=rows[reserve_mask]
+    reserve_target=np.maximum(0.,-motion[reserve_mask]-1.2*(distances[reserve_mask]-.10))
+    body_priority=bool((body_preference is not None or len(reserve_R)) and not brake and not preparing and
+                       combo)
+    body_info['whole_body_reserve_rows']=int(len(reserve_R))
+    manifold_rows=np.empty((0,8));manifold_target=np.empty(0)
+    forward_limit=np.inf
+    if combo and semantic_axis is not None:
+        original=getattr(received,'original',received);phase=original.phase(trajectory_time)
+        first=received.sample(phase['start_s'])[0];last=received.sample(phase['end_s'])[0]
+        chord=last-first;length=np.linalg.norm(chord)
+        if length>1e-6:
+            tangent=chord/length
+            transverse=np.eye(3)-np.outer(tangent,tangent)
+            path_key=(id(received),phase['name'])
+            if getattr(c,'path_shape_key',None)!=path_key:
+                from .intent_paths import positions_at
+                probes=positions_at(received,np.linspace(phase['start_s'],phase['end_s'],41))
+                c.path_shape_straight=bool(np.max(np.linalg.norm((probes-first)@transverse,axis=1))<.003)
+                c.path_shape_key=path_key
+            if c.path_shape_straight:
+                # For a straight authored action, use its geometric path as
+                # a manifold while allowing forward progress to advance. This
+                # preserves the shot instead of producing a reactive zigzag.
+                _,_,basis=np.linalg.svd(tangent[None,:])
+                normals=basis[1:]
+                manifold_rows=normals@J[:3]
+                transverse_acceleration=-8.*camera_velocity[:3]+16.*(first-p)
+                manifold_target=normals@(J[:3]@measured+dt*(transverse_acceleration-Jdot[:3]@measured))
+                forward_limit=np.sqrt(2*.5*max(0.,float((last-p)@tangent)))
+            else:
+                at=float(np.clip(getattr(c,'achieved_progress',trajectory_time),phase['start_s'],phase['end_s']))
+                ta=max(phase['start_s'],at-.01);tb=min(phase['end_s'],at+.01)
+                tangent=received.sample(tb)[0]-received.sample(ta)[0]
+                if np.linalg.norm(tangent)>1e-8:
+                    tangent/=np.linalg.norm(tangent)
+                    _,_,basis=np.linalg.svd(tangent[None,:]);normals=basis[1:]
+                    manifold_rows=normals@J[:3]
+                    knots,points=c.progress_cache
+                    lengths=np.linalg.norm(np.diff(points,axis=0),axis=1)
+                    valid=np.flatnonzero(lengths>1e-6)
+                    curvature=np.zeros(3)
+                    if len(valid)>2:
+                        nearest=int(np.argmin(abs((knots[valid]+knots[valid+1])/2-at)))
+                        left,right=valid[max(0,nearest-1)],valid[min(len(valid)-1,nearest+1)]
+                        if right>left:
+                            ta=(points[left+1]-points[left])/lengths[left]
+                            tb=(points[right+1]-points[right])/lengths[right]
+                            separation=.5*(lengths[left]+lengths[right])+lengths[left+1:right].sum()
+                            curvature=(tb-ta)/max(separation,1e-6)
+                    transverse_acceleration=(curvature*(camera_velocity[:3]@tangent)**2
+                        -8.*camera_velocity[:3]+16.*(received.sample(at)[0]-p))
+                    manifold_target=normals@(J[:3]@measured+dt*(transverse_acceleration-Jdot[:3]@measured))
+                    remaining=np.vstack([received.sample(at)[0],points[knots>at]])
+                    arc=float(np.linalg.norm(np.diff(remaining,axis=0),axis=1).sum())
+                    forward_limit=np.sqrt(2*.5*arc)
+            # Slow forward progress smoothly before exhausting the camera's
+            # geometric interval; joint acceleration limits alone do not imply
+            # a fixed camera stopping acceleration at every configuration.
+            remaining_feature=max(0.,float((last-p)@semantic_axis))
+            forward_limit=min(forward_limit,2.*remaining_feature)
+    if body_preference is not None and not brake and not preparing:
+        # Only the subordinate configuration objective changes: exact camera
+        # equality, all body barriers and actuator limits still take priority.
+        H[:2,:2]+=np.diag([60.,40.])
+        g[:2]-=np.array([60.,40.])*body_preference
     geometry_preference_active = False
     guidance = getattr(c, 'geometry_guidance', None)
     if (guidance is not None and not brake and not preparing
@@ -703,6 +932,85 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
         geometry_preference_active = True
     mark('geometry_preferences')
     def hierarchy(bounds_lo):
+        if free_transfer_control is not None:
+            # A connector is a configuration goal, with no camera task. Reuse
+            # every physical row and the mandatory nonlinear certificates.
+            transfer_H=np.diag(np.r_[40.,20.,np.full(6,4.)] if getattr(c,'free_configuration_preview',False) else np.r_[4.,2.,np.ones(6)])
+            transfer_g=-transfer_H@free_transfer_control
+            if body_preference is not None and not getattr(c,'free_configuration_preview',False):
+                transfer_H[:2,:2]+=np.diag([20.,10.])
+                transfer_g[:2]-=np.array([20.,10.])*body_preference
+            answer,residual=qp_with_reserve(transfer_H,transfer_g,A,bounds_lo,hi,previous,
+                reserve_R,reserve_target,25./max(1,len(reserve_R)))
+            return answer,residual,True
+        if body_priority or (combo and len(manifold_rows) and not brake and not preparing):
+            # Imminent chassis crossings need motion BEFORE the instantaneous
+            # distance barrier activates. A camera equality must not consume
+            # all of that acceleration reserve. The semantic direction remains
+            # a constraint; camera pose tracking becomes a subordinate cost.
+            axis=semantic_axis
+            AA,ll,hh=A,bounds_lo,hi
+            if axis is not None:
+                AA=np.vstack([A,axis@J[:3]]);ll=np.r_[bounds_lo,0.];hh=np.r_[hi,forward_limit]
+            if len(manifold_rows):
+                AA=np.vstack([AA,manifold_rows]);ll=np.r_[ll,manifold_target];hh=np.r_[hh,manifold_target]
+            task_weights=(np.array([1.,1.,1.,3.,3.,3.]) if body_priority else np.array([10.,10.,10.,30.,30.,30.]))
+            task_J=task_weights[:,None]*J
+            primary_H=task_J.T@task_J+.05*np.eye(8)
+            primary_g=-task_J.T@(task_weights*desired)-.05*preferred
+            posture_null=(np.eye(8) if body_priority else np.eye(8)-np.linalg.pinv(J,rcond=1e-6)@J)
+            def posture_cost(metric,goal):
+                nonlocal primary_H,primary_g
+                projected=posture_null.T@metric@posture_null
+                primary_H+=projected;primary_g-=projected@goal
+            if kinematic_preference_active and not body_priority:
+                posture_cost((10. if getattr(c,'arrival_reanchored',False) else 1.)*np.eye(8),preferred)
+            elif kinematic_recovery_preference and not body_priority:
+                recovery_weights=np.r_[5.,5.,np.ones(6)]
+                posture_cost(np.diag(recovery_weights),preferred)
+            body_info['configuration_recovery_goal_active']=kinematic_recovery_preference
+            predictive_preference=bool(c.reconfiguration.info.get('tpr_prediction_valid') and
+                c.reconfiguration.info.get('tpr_prediction_path_progress_free'))
+            # Away from observed hazards, the complete current-state FK lift
+            # is the better redundancy guide. A short path-progress preview
+            # must not pull a freshly re-anchored arrival off that branch.
+            if kinematic_preference_active and not body_priority and getattr(c,'arrival_reanchored',False):
+                predictive_preference=False
+            if predictive_preference:
+                posture_cost(10.*np.eye(8),predictive_command)
+            body_info['verified_path_preview_preference']=predictive_preference
+            anchor_key=(id(getattr(received,'original',received)),original.phase(trajectory_time)['name'])
+            if getattr(c,'posture_anchor_key',None)!=anchor_key:
+                c.posture_anchor_key=anchor_key;c.posture_anchor=state[3:].copy()
+            joint_margin=np.minimum(state[3:]-JOINT_LOWER,JOINT_UPPER-state[3:])
+            reserve_weights=3.*np.maximum(0.,(.30-joint_margin)/.30)**2
+            restoration=np.clip(.8*(c.posture_anchor-state[3:]),-.4,.4)
+            posture_cost(np.diag(np.r_[0.,0.,reserve_weights]),np.r_[0.,0.,restoration])
+            if body_preference is not None and not predictive_preference:
+                primary_H[:2,:2]+=np.diag([10.,5.])
+                primary_g[:2]-=np.array([10.,5.])*body_preference
+            reserve_rows=reserve_R if not predictive_preference else np.empty((0,8))
+            def primary_solve(matrix,lower,upper):
+                return qp_with_reserve(primary_H,primary_g,matrix,lower,upper,previous,
+                    reserve_rows,reserve_target,25./max(1,len(reserve_rows)))
+            try:
+                answer,residual=primary_solve(AA,ll,hh)
+            except RuntimeError:
+                # If an exact path equality is momentarily outside the
+                # acceleration envelope, retain its geometric objective.
+                # Dropping it entirely caused a large, unnecessary detour.
+                primary_H+=100.*manifold_rows.T@manifold_rows
+                primary_g-=100.*manifold_rows.T@manifold_target
+                body_info['path_manifold_feasible']=False
+                try:
+                    if axis is None:raise RuntimeError('no directed axis')
+                    answer,residual=primary_solve(np.vstack([A,axis@J[:3]]),
+                        np.r_[bounds_lo,0.],np.r_[hi,forward_limit])
+                    body_info['direction_constraint_feasible']=True
+                except RuntimeError:
+                    answer,residual=primary_solve(A,bounds_lo,hi)
+                    body_info['direction_constraint_feasible']=False
+            return answer,residual,bool(np.max(np.abs(J@answer-desired))<=2e-6)
         try:
             answer, residual = qp(H, g, np.vstack([A, J]), np.r_[bounds_lo, desired], np.r_[hi, desired], previous)
             return answer, residual, True
@@ -748,7 +1056,7 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
     rho = None
     actuator_task_feasible = None
     rho_method = 'linear_program_optimum'
-    if len(R):
+    if len(R) and free_transfer_control is None:
         scale = np.maximum(np.linalg.norm(R, axis=1)*dt, 1e-5)
         if task_feasible:
             rho = task_margin_witness(command,J,desired,actuator_A,actuator_lo,actuator_hi,R,low,scale)
@@ -821,8 +1129,15 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
                   full_base_twist_measured=base_twist is not None,
                   self_clearance_lower_m=self_clearance,
                   scope='local model feasibility; agent owns task-space changes')
+    if free_transfer_control is not None:
+        status='free_transfer'
+        report.update(status=status,camera_task_feasible=None,camera_actuator_feasible=None,
+            rho_definition=None,scope='configuration transfer; camera task not requested; physical constraints and swept checks retained')
     mark('continuous_certificates')
     info = dict(position_error=float(np.linalg.norm(error[:3])), orientation_error=float(np.linalg.norm(error[3:])),
+                free_camera_transfer=free_transfer_control is not None,
+                body_anticipation=body_info,
+                feedback_progress_s=feedback_progress,
                 solver_stage_wall_s=timings,
                 qp_violation=violation, solve_s=time.perf_counter()-started, command_position_violation=0.,
                 command_diff_drive_violation=0., command_sweep_lower_m=clearance, clearance_m=float(distances.min()),

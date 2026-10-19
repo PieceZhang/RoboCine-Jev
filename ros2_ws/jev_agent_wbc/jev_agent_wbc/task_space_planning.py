@@ -20,6 +20,14 @@ RADIUS = .06
 CAPS = dict(radial_m=1.5,lateral_m=1.5,height_m=.65,yaw_rad=np.pi,pitch_rad=np.pi/2,roll_rad=np.pi/2)
 
 
+def configure_combo_samples(search, original):
+    """Long combos retain the same check spacing instead of hitting the 8 s cap."""
+    from .combo import is_combo
+    if is_combo(original):
+        required=int(np.ceil((original.duration+POLICY.terminal_hold_s-search.t)/search.policy.step_s))+2
+        search.policy=replace(search.policy,max_samples=max(search.policy.max_samples,required))
+
+
 def verification_snapshot(scene,state,previous,t,base_z,limits,measured_control,commanded_q,base_rotation):
     return digest(dict(scene=scene,state=np.asarray(state),previous=np.asarray(previous),time_s=t,
         base_z=base_z,limits=asdict(limits),measured_control=measured_control,
@@ -123,6 +131,7 @@ def diagnose(original,scene,state,previous,t,base_z,limits,commanded_q=None,acti
     search=KinematicSearch(state,previous,t,base_z,limits,measured_control=measured_control,
         commanded_q=commanded_q,base_rotation=base_rotation)
     if budget.single_candidate:search.policy=replace(search.policy,step_s=.1)
+    configure_combo_samples(search,original)
     from .search_configuration import capability
     robot_capability=capability(search,original.subject)
     # The installed curve already has a complete, approved FK witness. Online
@@ -130,7 +139,8 @@ def diagnose(original,scene,state,previous,t,base_z,limits,commanded_q=None,acti
     # and shot intent below still inspect the entire remaining curve. Re-solving
     # the full redundant trajectory here delayed confirmation of short-lived
     # servo disagreement beyond its deadline.
-    local=bool(budget.single_candidate and active is not original and accepted_intent)
+    from .combo import is_combo
+    local=bool(is_combo(original) or (budget.single_candidate and active is not original and accepted_intent))
     end=min(active.duration+POLICY.terminal_hold_s,t+max(2.,budget.activation_lead_s+.8)) if local else active.duration+POLICY.terminal_hold_s
     kinematics=search.lift(virtual,end)
     metrics=intent_prediction(spec,virtual,observed,t,history,step=.1)
@@ -223,6 +233,7 @@ def build(original,active,strategy,scene,state,previous,t,base_z,limits,
     if construction_plan is not None:
         search.config=dict(search.config or {}, allocations=(construction_plan['allocation'],))
         search.policy=replace(search.policy,step_s=.15)
+    configure_combo_samples(search,original)
     spec=IntentSpec(original,observed.get('subject_model'),observed.get('intrinsics'))
     def project(path):
         if path.program.get('curve_family')=='global_endpoint_polynomial':
@@ -318,6 +329,7 @@ def verify(candidate,approval,original,scene,state,previous,t,base_z,limits,
     search=KinematicSearch(state,previous,t,base_z,limits,measured_control=measured_control,
         commanded_q=commanded_q,base_rotation=base_rotation,scene=scene,
         search_config=candidate.consequences.get('search_config'))
+    configure_combo_samples(search,original)
     identical_startup=(startup and candidate.kinematics is not None and candidate.kinematics.get('feasible') and
         candidate.consequences.get('initial_verification_snapshot')==verification_snapshot(
             scene,state,previous,t,base_z,limits,measured_control,commanded_q,base_rotation))

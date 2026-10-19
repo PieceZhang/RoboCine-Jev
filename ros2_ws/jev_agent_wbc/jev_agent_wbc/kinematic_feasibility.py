@@ -345,7 +345,9 @@ class KinematicSearch:
                 dm=primitive_values(collision.geometry,minus,centers-collision.velocities[indices]*eps,self.base_z,rm)-radii[:,None]
                 curvature=(dp-2*distances+dm)/eps**2
                 gap=distances-collision.margin-.006
-                lows=np.maximum(rows_collision@velocity+dt*(-curvature-4*rate-4*gap)[mask],(-2*gap-all_motion)[mask])
+                from .body_anticipation import barrier_gains
+                gains=barrier_gains(collision,indices)
+                lows=np.maximum(rows_collision@velocity+dt*(-curvature-2*gains*rate-gains*gains*gap)[mask],(-gains*gap-all_motion)[mask])
                 sd, sg = self.self_collision.terms(state)
                 smask = sd < .08
                 rows_collision = np.vstack([rows_collision,(sg@integration_matrix(state[2]))[smask]])

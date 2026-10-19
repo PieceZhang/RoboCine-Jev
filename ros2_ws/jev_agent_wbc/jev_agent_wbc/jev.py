@@ -541,11 +541,15 @@ class CandidateDecider:
                 allowed=evidence['construction'].get('allowed_directions')
                 families={k:v for k,v in FAMILIES.items()
                           if allowed is None or set(options(k))&set(allowed)}
+                if evidence['construction'].get('combo_fixed_phase_clock'):
+                    families={k:('Preserve every ordered action and transition at its authored time. '
+                        'Jointly construct one continuous piecewise camera/body trajectory; '+v)
+                        for k,v in families.items() if k in ('joint_curve','joint_vertical')}
                 answer=self.client.ask(evidence,{'generator':choice(
                     'Select the ONE generator and displacement plane that should construct the executable repair.',families)})
                 return dict(stage=stage,strategy=answer['generator']['choice'],single_candidate=True)
             family=evidence['search_options']['selected_family']
-            plans=options(family)
+            plans=options(family,combo=bool(evidence['construction'].get('combo_fixed_phase_clock')))
             allowed=evidence['construction'].get('allowed_directions',plans)
             plans={k:v for k,v in plans.items() if k in allowed}
             descriptions={k:(('Let the single joint fit choose a small coupled displacement from a neutral seed.'
@@ -562,10 +566,20 @@ class CandidateDecider:
             strategies = {k: v for k, v in STRATEGIES.items()
                           if k != 'restore' or evidence.get('active_modification', False)}
             strategy_labels = {('combined' if geometry_mode and k=='joint' else k):k for k in strategies}
-            answer = self.client.ask(evidence, {'strategy': choice(
+            questions={'strategy': choice(
                 'Which bounded repair family is worth computing for this shot? This grants no execution permission.',
-                {**{label:strategies[k] for label,k in strategy_labels.items()}, 'refuse': 'No repair family is worth computing within the remaining budget; continue existing safe control.'})})
+                {**{label:strategies[k] for label,k in strategy_labels.items()}, 'refuse': 'No repair family is worth computing within the remaining budget; continue existing safe control.'})}
+            bundled=bool(intent_mode and evidence.get('bundle_search_choices'))
+            if bundled:
+                from .search_configuration import PROFILES
+                questions['configuration']=choice(
+                    'Choose the numerical search configuration together with the repair family using the same current geometry and capability evidence. This saves one network round trip; all candidate and execution checks remain mandatory.',
+                    {key:value['description'] for key,value in PROFILES.items()})
+            answer = self.client.ask(evidence, questions)
             selected=answer['strategy']['choice']
+            if bundled and selected!='refuse':
+                return dict(stage='configuration',strategy=strategy_labels.get(selected,selected),
+                            search_config=answer['configuration']['choice'],bundled_strategy=True)
             return dict(stage=stage, strategy=strategy_labels.get(selected,selected))
         if stage == 'configuration':
             self.client.policy = CANDIDATE_POLICY

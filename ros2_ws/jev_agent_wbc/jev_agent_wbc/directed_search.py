@@ -39,6 +39,20 @@ def construction_evidence(original, active, scene, t, activation,mount_height_m=
     primary=np.array([0.,0.,1.]) if 'pedestal' in motion else chord
     allowed=[name for name,direction in directions.items()
              if abs(direction@chord)<.8 and abs(direction@primary)<.8]
+    from .combo import is_combo
+    if is_combo(original):
+        phase=original.phase(activation)
+        if motion in ('movein','moveout'):
+            primary=active.sample(activation)[0]-original.subject
+        elif 'truck' in motion:
+            primary=original.sample(phase['start_s'])[1][:,1]
+        elif motion=='orbit':
+            radial=active.sample(activation)[0]-original.subject
+            primary=np.array([-radial[1],radial[0],0.])
+        elif motion=='transition':
+            primary=original.sample(phase['end_s'])[0]-original.sample(phase['start_s'])[0]
+        primary=primary/max(np.linalg.norm(primary),1e-8)
+        allowed=[name for name,direction in directions.items() if abs(direction@primary)<.8]
     probes={k:[] for k in directions if k!='adaptive'}
     broad_probes={k:[] for k in directions if k!='adaptive'}
     for at in times:
@@ -63,11 +77,13 @@ def construction_evidence(original, active, scene, t, activation,mount_height_m=
             scope='necessary geometric seed bound; not an IK or collision certificate')
         if peak>upper:allowed=[name for name in allowed if name!='above']
     return dict(protocol='single_candidate/v1', activation_s=activation,
+        combo_fixed_phase_clock=is_combo(original),shot_phase=original.task['shot_phase'],
         original_clock_end_s=original.duration, reference_samples=rows,
         axes_world={k:v.tolist() for k,v in directions.items()},
         allowed_directions=allowed,
         manipulator_workspace=workspace,
-        direction_domain='Exclude detours predominantly parallel to the primary or companion motion; no candidate was generated to make this restriction.',
+        direction_domain=('Exclude directions predominantly parallel to the current main action; preserve the entire phase sequence.'
+            if is_combo(original) else 'Exclude detours predominantly parallel to the primary or companion motion; no candidate was generated to make this restriction.'),
         displaced_point_probes={k:dict(min_surface_distance_m=min(v) if v else None,
             displacement_m=.25,scope='isolated offset points; not a generated path or body certificate') for k,v in probes.items()},
         broad_displaced_point_probes={k:dict(min_surface_distance_m=min(v) if v else None,
@@ -76,7 +92,7 @@ def construction_evidence(original, active, scene, t, activation,mount_height_m=
         required='exactly one construction, one continuous allocation check; no fallback candidates')
 
 
-def options(family):
+def options(family,combo=False):
     if family not in FAMILIES:
         raise ValueError('unknown directed generator')
     directions = (('adaptive','left','right','outer') if family=='joint_curve' else
@@ -85,15 +101,30 @@ def options(family):
                       plane_tolerance_m=.025 if family.startswith('joint_') else 0.,
                       # Delay the middle of the motion enough to preserve
                       # acceleration reserve while the redundant posture opens.
-                      tempo=4.,allocation='anticipatory',search_config='base') for name in directions}
+                      tempo=1. if combo else 4.,allocation='anticipatory',search_config='base') for name in directions}
 
 
 def generate(original, active, scene, activation, model, intrinsics, budget, plan,initial_boundary=None):
+    from .combo import is_combo,combo_curves
     family=plan['family'];direction=plan['direction']
-    allowed=options(family)
+    allowed=options(family,combo=is_combo(original))
     if direction not in allowed or plan != allowed[direction]:
         raise ValueError('construction contract outside typed choices')
     d=axes(original,active,activation)[direction]
+    if is_combo(original):
+        if family not in ('joint_curve','joint_vertical'):
+            raise ValueError('combo currently requires phase-preserving joint construction')
+        paths=combo_curves(original,active,activation,model,intrinsics,1,d,
+            plan['amplitude_m'],initial_boundary,plan['tempo'])
+        for path in paths:
+            path.program['construction_contract']=dict(plan)
+            if np.any(d) and family.startswith('joint_'):
+                chord=original.sample(original.duration)[0]-active.sample(activation)[0]
+                normal=np.array([0.,0.,1.]) if family=='joint_curve' else np.cross(d,chord)
+                normal/=max(np.linalg.norm(normal),1e-8)
+                path.program.update(construction_axis_world=d.tolist(),
+                    construction_plane_normal_world=normal.tolist(),construction_plane_tolerance_m=plan['plane_tolerance_m'])
+        return paths
     if initial_boundary is not None and activation!=0.:
         raise ValueError('initial boundary requires the unstarted shot')
     if family in ('joint_curve','joint_vertical'):

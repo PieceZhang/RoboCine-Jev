@@ -34,7 +34,7 @@ class RuntimeLidar:
     def __init__(self):
         self.mapping = DynamicLidarMap(voxel_size=.035, map_radius=4.5, retention_s=.5, minimum_clearance=.025,
                                        minimum_height=.03, maximum_height=1.6,
-                                       velocity_window_s=.8, fusion_window_s=.20)
+                                       velocity_window_s=.8, fusion_window_s=.20, cluster_distance=.08)
         self.revision = 0
         self.last = -float('inf')
         self.subject_observation = None

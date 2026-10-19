@@ -166,9 +166,9 @@ def test_async_pending_job_never_blocks_and_old_guide_expires():
 
 
 def test_existing_single_motion_scenarios_keep_original_allocation():
-    for folder in (ROOT/'scenarios').iterdir():
-        if not (folder/'task.json').is_file():
-            continue
+    from jev_agent_wbc.scenarios import NAMES
+    for name in NAMES:
+        folder=ROOT/'scenarios'/name
         runtime = json.loads((folder/'runtime_scene.json').read_text())
         reference = OriginalReference(folder/'task.json', runtime['subject']['position'])
         preview = CoordinationPreview(); preview.set_trajectory(reference)

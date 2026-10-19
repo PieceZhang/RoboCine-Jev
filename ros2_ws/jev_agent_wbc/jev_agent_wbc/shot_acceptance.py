@@ -29,7 +29,7 @@ ACCEPTANCE_PROTOCOL = dict(
     diagnostics_only=["occlusion", "visible_coverage", "reference_process_offset",
                       "reference_process_view_and_scale", "reference_range_and_clock"],
     threshold_source="unchanged_existing_strict_shape_direction_frame_and_safety_checks",
-    supported_scope="single_directed_motion; adjacent same-motion phases are merged",
+    supported_scope="ordered_directed_motion_phases; adjacent same-motion phases merged; explicit transitions checked separately",
 )
 
 
@@ -106,17 +106,27 @@ def evaluate_shot(original, model, times, positions, rotations, measurements, pr
         duration=end
         def sample(self,t):
             return np.array([np.interp(t,times,positions[:,j]) for j in range(3)]),np.eye(3),np.zeros(6)
+        def progress_time(self,t):
+            return float(np.interp(t,times,progress))
     executed=Executed(); executed.original=original
-    supported=len(spec.segments)==1 and spec.segments[0]["supported"]
+    supported=bool(spec.segments) and all(s['supported'] for s in spec.segments)
     quality=curve_quality(executed) if supported and end>times[0] else None
     # The old geometric clock must stay ordered, but its final value need not
     # reach original.duration when the chosen terminal frame is already valid.
     ordered=bool(np.all(np.diff(progress)>=-1e-7) and progress[0]<=1e-6)
     motion=False
+    phase_evidence=[]
     if supported:
-        feature=spec.features(spec.segments[0],positions,rotations)
-        sign=np.sign(spec.segments[0]["end_value"]-spec.segments[0]["start_value"])
-        motion=bool(np.isfinite(feature).all() and sign*(feature[-1]-feature[0])>1e-7)
+        for segment in spec.segments:
+            ids=np.flatnonzero((progress>=segment['start_s']-1e-7)&(progress<=segment['end_s']+1e-7))
+            moved=False
+            if len(ids)>=2:
+                feature=spec.features(segment,positions[ids],rotations[ids])
+                sign=np.sign(segment['end_value']-segment['start_value'])
+                moved=bool(np.isfinite(feature).all() and sign*(feature[-1]-feature[0])>1e-7)
+            phase_evidence.append(dict(motion=segment['motion'],start_s=segment['start_s'],
+                end_s=segment['end_s'],samples=len(ids),motion_present=moved))
+        motion=all(p['motion_present'] for p in phase_evidence)
     # Project the unoccluded subject with the existing silhouette-grid test.
     # Occluders and missing visibility do not masquerade as out-of-frame content.
     clear_scene=dict(valid=True,observation_stamp=0.,centers=[],radii=[],velocities=[])
@@ -128,8 +138,9 @@ def evaluate_shot(original, model, times, positions, rotations, measurements, pr
     checks=dict(
         safety=_check(safety_pass,source=safety_source),
         direction=_check(None if quality is None else quality["direction_pass"] and ordered and motion,
-            reason=None if supported else "unsupported_or_multiple_distinct_motion_segments",
+            reason=None if supported else "unsupported_motion_segment",
             motion_present=motion,progress_order_valid=ordered,
+            phases=phase_evidence,
             reverse_motion=None if quality is None else quality["reverse_motion"],
             reverse_unit=None if quality is None else quality["reverse_unit"]),
         natural_curve=_check(None if quality is None else quality["strict_full_curve_pass"],
@@ -138,10 +149,21 @@ def evaluate_shot(original, model, times, positions, rotations, measurements, pr
             in_frame_min=minimum,required_in_frame_min=.98,
             source="unoccluded_calibrated_subject_projection_not_RGB"),
         terminal_frame=_check(terminal.get("pass_check"),measurements=terminal))
+    from .combo import is_combo
+    if is_combo(original):
+        from .floating_camera import camera_motion_limits
+        limits=camera_motion_limits(list(zip(positions,rotations)),times)
+        checks['transition_continuity']=_check(limits['camera_limits_pass'],
+            measurements=limits,source='measured_full_combo_speed_acceleration_angular_speed_including_joins')
     failed=[name for name,value in checks.items() if value["status"]=="fail"]
     unknown=[name for name,value in checks.items() if value["status"]=="unverified"]
     if not execution_ok: failed.append("execution_error")
-    return native(dict(protocol=deepcopy(ACCEPTANCE_PROTOCOL),checks=checks,
+    protocol=deepcopy(ACCEPTANCE_PROTOCOL)
+    if is_combo(original):
+        protocol['version']='shot_acceptance/v2_combo'
+        protocol['primary_checks'].append('transition_continuity')
+        protocol['shape']['scope']='each_main_action_and_explicit_transition; full_combo_sum_is_diagnostic'
+    return native(dict(protocol=protocol,checks=checks,
         status="fail" if failed else "unverified" if unknown else "pass",
         accepted=bool(not failed and not unknown),failed_checks=failed,unverified_checks=unknown,
         motion_complete=bool(checks["direction"]["pass_check"] and terminal.get("pass_check")),
