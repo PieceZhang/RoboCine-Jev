@@ -1,0 +1,32 @@
+#usda 1.0
+(
+    defaultPrim = "Ground"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "Ground"
+{
+    def Cube "floor" (
+        prepend apiSchemas = ["PhysicsCollisionAPI", "MaterialBindingAPI"]
+    )
+    {
+        double size = 1
+        double3 xformOp:translate = (0, 0, -0.05)
+        double3 xformOp:scale = (200, 200, 0.1)
+        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        color3f[] primvars:displayColor = [(0.35, 0.38, 0.42)]
+        rel material:binding:physics = </Ground/PhysicsMaterial>
+    }
+
+    def Material "PhysicsMaterial" (
+        prepend apiSchemas = ["PhysicsMaterialAPI", "PhysxMaterialAPI"]
+    )
+    {
+        float physics:staticFriction = 1
+        float physics:dynamicFriction = 1
+        float physics:restitution = 0
+        token physxMaterial:frictionCombineMode = "multiply"
+        token physxMaterial:restitutionCombineMode = "multiply"
+    }
+}

@@ -1,0 +1,53 @@
+{
+  "date": "2026-10-19",
+  "agile": {
+    "url": "https://github.com/nvidia-isaac/WBC-AGILE",
+    "tag": "v1.2",
+    "commit": "ad4ff6ee6b38da207592b3e71dcee4c118049f6d",
+    "local": "upstream/WBC-AGILE",
+    "reason": "Official v1.2 README explicitly targets Isaac Lab v2.3.2 and Isaac Sim 5.1, matching the installed simulator; current v1.3 requires Sim6/Python3.12.",
+    "note": "v1.2 setup script retains an older v2.3.1 tag check; deployment follows the release README and uses pinned v2.3.2 directly."
+  },
+  "isaaclab": {
+    "url": "https://github.com/isaac-sim/IsaacLab",
+    "tag": "v2.3.2",
+    "commit": "37ddf626871758333d6ed89cf64ad702aef127d0",
+    "local": "upstream/IsaacLab"
+  },
+  "simulator": {
+    "version": "5.1.0.0",
+    "source": "existing read-only env_isaaclab system-site-packages",
+    "python": "3.11.16"
+  },
+  "robot": {
+    "name": "Unitree G1 29 DOF",
+    "usd": "assets/G1/g1.usd",
+    "variants": {
+      "Physics": "PhysX",
+      "left_hand": "None",
+      "right_hand": "None"
+    }
+  },
+  "controller": {
+    "policy": "policies/unitree_g1_velocity_history.pt",
+    "io": "config/policy_io.yaml",
+    "task": "Velocity-G1-History-v0",
+    "physics_hz": 200,
+    "policy_hz": 50,
+    "observation_dim": 255,
+    "action_dim": 14,
+    "actuator": "official G1_29DOF_DELAYED_DC_MOTOR"
+  },
+  "metadata_patches": [
+    {
+      "path": "patches/isaaclab_sim51_metadata.patch",
+      "reason": "Sim 5.1 FastAPI requires Starlette0.45.3; Lab originally pins0.49.1, not satisfiable together."
+    },
+    {
+      "path": "patches/agile_sim51_metadata.patch",
+      "reason": "AGILE old protobuf3.20.3 conflicts with Lab>=4.25.8 and wandb; use >=4.25.8,<7 pinned6.33.6. Preserve installed matplotlib3.10.3 instead of legacy3.6.0 to keep the validated runtime. AGILE datasets2.19.0 requires fsspec<=2024.3.1, while Sim5.1 fixes2024.6.1; select compatible datasets2.21.0 and pyarrow16.1.0."
+    }
+  ],
+  "constraint_file": "config/constraints.txt",
+  "dependency_check": "results/pip_check.txt"
+}

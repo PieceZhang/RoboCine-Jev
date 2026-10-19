@@ -1,0 +1,81 @@
+{
+  "created": "2026-10-19",
+  "repositories": [
+    {
+      "name": "LeggedManip_Lab",
+      "url": "https://github.com/zzzJie-Robot/LeggedManip_Lab.git",
+      "commit": "4e12109d1eccb1d9da2e4a35f189fabea3f13677",
+      "license_files": [
+        "vendor/LeggedManip_Lab/LICENSE"
+      ]
+    },
+    {
+      "name": "Isaac-sim-go2-with-arm",
+      "url": "https://github.com/nayon007/Isaac-sim-go2-with-arm.git",
+      "commit": "1a0607b1b571302df72ceab35dafcd6c3a1103ef",
+      "license_files": [
+        "vendor/Isaac-sim-go2-with-arm/LICENSE"
+      ]
+    },
+    {
+      "name": "IsaacLab",
+      "url": "https://github.com/isaac-sim/IsaacLab.git",
+      "commit": "b0542fe2d45bf91c4e1d9ef6952b9c709c80b4e8",
+      "license_files": [
+        "vendor/IsaacLab/LICENSE",
+        "vendor/IsaacLab/LICENSE-mimic"
+      ]
+    }
+  ],
+  "selected_robot": "Go2-Piper",
+  "wbc_policy_input": 210,
+  "wbc_policy_output": 18,
+  "policies": [
+    {
+      "path": "vendor/LeggedManip_Lab/mujoco/deploy/policy/go2_piper/policy.pt",
+      "bytes": 1111382,
+      "sha256": "72d9f22c633081e8d4b9693e6fda54dba6cdd036a102f330c1bfe096e43b4da8"
+    },
+    {
+      "path": "vendor/LeggedManip_Lab/mujoco/deploy/policy/go2_piper/wbc/policy.pt",
+      "bytes": 1111510,
+      "sha256": "c5f57c79bc01d8b8f2c0846163b149e3f53de39291770a1ccb230ef3be6b800e"
+    }
+  ],
+  "physics_dt_s": 0.005,
+  "control_decimation": 4,
+  "ros2_bridge_required_for_wbc": false,
+  "d1_model": "6 arm revolute joints plus 2 finger prismatic joints; separate model, never use Piper policy",
+  "agent_adaptation": false,
+  "local_patches": [
+    {
+      "path": "isaaclab_sim51_metadata.patch",
+      "sha256": "04b21c46ff17a6dc309e3fd53d871ccab0d62c14ccc56c36fb7b13ac6937e20e",
+      "reason": "Isaac Sim5.1 FastAPI0.115.7 requires Starlette<0.46; align unused livestream dependency metadata only"
+    }
+  ],
+  "generated_d1": {
+    "root": "assets/generated/go2_d1/go2_d1.usd",
+    "import_report": "assets/generated/go2_d1/import_report.json",
+    "importer": "isaacsim.asset.importer.urdf-2.4.30",
+    "movable_joint_count": 20,
+    "dynamics_validated": false,
+    "layer_sha256": {
+      "go2_d1.usd": "dc7a12ec691fb6a7c63ab58c6bb0a003d6b67a847a07bc233617685bbc6f02a0",
+      "configuration/go2_d1_robot.usd": "4df49117738c6613d7ed3a70c0a97834926512336f5f0fc379ff174c9ba2f1fe",
+      "configuration/go2_d1_base.usd": "9f354edf2649d9cf4b33fe83b0d03e87d9b77e90647fe715e0442b03a0b39371",
+      "configuration/go2_d1_physics.usd": "90d9dcfbe00bde5b1d26ca97355173aaacff493777bc64583994dba4c273d15f",
+      "configuration/go2_d1_sensor.usd": "9eec9e4fc3ed4b6383fe61ed7939e4773286c3cfd79010d75a4ca4ce718bbe3a"
+    }
+  },
+  "final_validation": {
+    "summary": "results/validation_03/summary.json",
+    "all_pass": true,
+    "run_complete": true,
+    "validator_sha256": "c3280c6e34d0f3438913bd73377212bc32533ad5cc4f16a3c0250920afe181d6",
+    "simulated_seconds": 80.0,
+    "wall_seconds": 80.8476285636425,
+    "independent_pose_audit": "results/validation_03/independent_pose_audit.json",
+    "asset_closure": "results/validation_03/asset_closure.json"
+  }
+}

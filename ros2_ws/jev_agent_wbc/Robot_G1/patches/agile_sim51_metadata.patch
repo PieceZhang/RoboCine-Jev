@@ -1,0 +1,29 @@
+diff --git a/pyproject.toml b/pyproject.toml
+index 5b29917..6d04755 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -24,21 +24,21 @@ dependencies = [
+     # Core dependencies (requirements-core.txt)
+     "tensordict==0.8.3",
+     "wandb==0.22.2",
+-    "protobuf==3.20.3",
++    "protobuf>=4.25.8,<7",
+     "tqdm>=4.64.0",
+     "numpy>=1.23.0",
+     "scipy>=1.9.0",
+     "pyyaml>=6.0",
+     "gym>=0.21.0",
+     # Visualization dependencies (requirements-viz.txt)
+-    "matplotlib==3.6.0",
++    "matplotlib==3.10.3",
+     "seaborn==0.13.2",
+     "plotly==5.0.0",
+     "pandas==2.3.1",
+     "beautifulsoup4==4.14.2",
+     "jinja2>=3.1.0",
+     # Extra dependencies (requirements-extras.txt)
+-    "datasets==2.19.0",
++    "datasets==2.21.0",
+     "dearpygui==2.1.0",
+     # Sim2Mujoco dependencies
+     "mujoco>=3.3.6",

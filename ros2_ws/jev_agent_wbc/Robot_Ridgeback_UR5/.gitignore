@@ -1,0 +1,6 @@
+assets/
+.venv/
+__pycache__/
+*.pyc
+results/*.log
+results/asset_inspection.usda

@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "created_utc": "2026-10-19T10:00:09.096151+00:00",
+  "scope": "Local models, controllers and nominal unobstructed Isaac Sim validation. No avoidance Agent adaptation.",
+  "simulator": {
+    "isaacsim": "5.1.0.0",
+    "python": "3.11",
+    "existing_python": "/home/w84384651/miniconda3/envs/env_isaaclab/bin/python",
+    "existing_python_packages_upgraded": false
+  },
+  "all_primary_motion_targets_passed": true,
+  "robots": [
+    {
+      "robot": "G1",
+      "directory": "Robot_G1",
+      "readme": "Robot_G1/README.md",
+      "entrypoint": "Robot_G1/run.sh",
+      "validation": "Robot_G1/results/acceptance_01/summary.json",
+      "validation_sha256": "a57a418580b7492f1e5f4a0d91b777e95bc3890ab55be3b33f11067153d71ba1",
+      "passed": true,
+      "physics_hz": 200,
+      "policy_or_control_hz": 50,
+      "simulated_seconds": 65.0
+    },
+    {
+      "robot": "Go2 + Piper",
+      "directory": "Robot_Go2",
+      "readme": "Robot_Go2/README.md",
+      "entrypoint": "Robot_Go2/run.sh",
+      "validation": "Robot_Go2/results/validation_03/summary.json",
+      "validation_sha256": "10c54437ec469d0bbf9d2fd4644dade0d9974844dcc58024404bd896e1403734",
+      "passed": true,
+      "physics_hz": 200,
+      "policy_or_control_hz": 50,
+      "simulated_seconds": 80.0
+    },
+    {
+      "robot": "Ridgeback + UR5",
+      "directory": "Robot_Ridgeback_UR5",
+      "readme": "Robot_Ridgeback_UR5/README.md",
+      "entrypoint": "Robot_Ridgeback_UR5/run.sh",
+      "validation": "Robot_Ridgeback_UR5/results/acceptance_03/acceptance.json",
+      "validation_sha256": "99b96307bc6635fb4e637c9e58428572d69402b6c76acbb42c3c73ed611d31a1",
+      "passed": true,
+      "physics_hz": 100,
+      "policy_or_control_hz": 100,
+      "simulated_seconds": 71.0
+    }
+  ],
+  "g1_final_environment_check": "Robot_G1/results/final_env_smoke_01/summary.json",
+  "go2_independent_pose_audit": "Robot_Go2/results/validation_03/independent_pose_audit.json",
+  "go2_d1_reference": {
+    "usd": "Robot_Go2/assets/generated/go2_d1/go2_d1.usd",
+    "imported": true,
+    "import_report": "Robot_Go2/assets/generated/go2_d1/import_report.json",
+    "dynamics_validated": false
+  },
+  "limitations": [
+    "G1 lateral velocity has a measured gain bias; stability acceptance is not precision speed servoing.",
+    "Go2 acceptance uses Piper and mixed-frame end-effector commands; D1 and ARX5 are different configurations.",
+    "Ridgeback uses native fixed-root planar x/y/yaw joints and a measured 3 mm ground gap; mecanum wheel friction and vertical base dynamics are not validated.",
+    "All tests cover the recorded flat-ground nominal scenarios, without an avoidance Agent."
+  ]
+}

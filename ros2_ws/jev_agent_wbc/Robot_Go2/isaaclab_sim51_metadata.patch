@@ -1,0 +1,13 @@
+diff --git a/source/isaaclab/setup.py b/source/isaaclab/setup.py
+index 2210c4c..0d9033f 100644
+--- a/source/isaaclab/setup.py
++++ b/source/isaaclab/setup.py
+@@ -37,7 +37,7 @@ INSTALL_REQUIRES = [
+     # make sure this is consistent with isaac sim version
+     "pillow==11.3.0",
+     # livestream
+-    "starlette==0.49.1",
++    "starlette==0.45.3",  # Isaac Sim 5.1 pins FastAPI 0.115.7 (<0.46 Starlette).
+     # testing
+     "pytest",
+     "pytest-mock",

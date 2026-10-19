@@ -1,0 +1,11 @@
+[
+  {"name":"stand", "seconds":4.0, "velocity":[0,0,0]},
+  {"name":"forward", "seconds":8.0, "velocity":[0.3,0,0]},
+  {"name":"backward", "seconds":8.0, "velocity":[-0.3,0,0]},
+  {"name":"left", "seconds":8.0, "velocity":[0,0.25,0]},
+  {"name":"right", "seconds":8.0, "velocity":[0,-0.25,0]},
+  {"name":"diagonal", "seconds":8.0, "velocity":[0.25,0.2,0]},
+  {"name":"yaw_left", "seconds":8.0, "velocity":[0,0,0.4]},
+  {"name":"yaw_right", "seconds":8.0, "velocity":[0,0,-0.4]},
+  {"name":"stop", "seconds":5.0, "velocity":[0,0,0]}
+]

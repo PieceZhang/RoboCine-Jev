@@ -1,0 +1,206 @@
+[
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/g1_29dof_with_hand_rev_1_0_base.usd",
+    "path": "assets/G1/configuration/g1_29dof_with_hand_rev_1_0_base.usd",
+    "size": 39608737,
+    "sha256": "6fcaca1f97069e4ead1f63569233bf5b77047224dfc6f2987972a3a271a213d1"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/g1_29dof_with_hand_rev_1_0_physics.usd",
+    "path": "assets/G1/configuration/g1_29dof_with_hand_rev_1_0_physics.usd",
+    "size": 34618,
+    "sha256": "a5dd8e61a634043a65e90251eec4a3c7f25d84a999fa02a3bf3ec6fd67d4df67"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/g1_29dof_with_hand_rev_1_0_physics_simplified.usd",
+    "path": "assets/G1/configuration/g1_29dof_with_hand_rev_1_0_physics_simplified.usd",
+    "size": 45853,
+    "sha256": "6e3b209e49661613b41ff3d6227b0cc6a8abe188a5623dacdf9f72d983f9a0cc"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/g1_29dof_with_hand_rev_1_0_robot.usd",
+    "path": "assets/G1/configuration/g1_29dof_with_hand_rev_1_0_robot.usd",
+    "size": 6472,
+    "sha256": "7cb780b1368e41388e0acf620a67fd92e934b8d976d6c3d0e5fdac2acdc79e31"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/g1_29dof_with_hand_rev_1_0_robot.usda",
+    "path": "assets/G1/configuration/g1_29dof_with_hand_rev_1_0_robot.usda",
+    "size": 14036,
+    "sha256": "d465d4c4ee6bd4863556f86e306bfb0eeaee125128a17a24bbe52d5340f3e5d7"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/g1_29dof_with_hand_rev_1_0_sensor.usd",
+    "path": "assets/G1/configuration/g1_29dof_with_hand_rev_1_0_sensor.usd",
+    "size": 626,
+    "sha256": "6fe3ecff8ef0694ad98abe2640f7bb2cf20ab261d512e14dd5e59059e2c71878"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/g1_Gripper_three_finger_hand_physics_right.usd",
+    "path": "assets/G1/configuration/g1_Gripper_three_finger_hand_physics_right.usd",
+    "size": 3145,
+    "sha256": "1d80c24130bf627e74f1a2d1fb6d5c542bf301e2c9134ca6ab4b957d8574b035"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/g1_left_hand_inspire_left_physics.usd",
+    "path": "assets/G1/configuration/g1_left_hand_inspire_left_physics.usd",
+    "size": 7625,
+    "sha256": "ba21f81cfe11012a6b638026c1ed4575b570279e576c33dc0f9e9fd0467ab8a3"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/g1_left_hand_three_finger_hand_physics_left.usd",
+    "path": "assets/G1/configuration/g1_left_hand_three_finger_hand_physics_left.usd",
+    "size": 8758,
+    "sha256": "ad7d74e9f9c799905403facd0854a6ede226f214d180347589ef22ed554ff558"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/g1_right_hand_inspire_right_physics.usd",
+    "path": "assets/G1/configuration/g1_right_hand_inspire_right_physics.usd",
+    "size": 6385,
+    "sha256": "80d17504a064c2d8ea0f0b73faec8fdfc6aa52e9d1a2b4f1282663bab0c6fcc5"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/g1_right_hand_three_finger_hand_physics_right.usd",
+    "path": "assets/G1/configuration/g1_right_hand_three_finger_hand_physics_right.usd",
+    "size": 7306,
+    "sha256": "60ef3566eda5e4498ee32db3118d8604d53d719777e7c775e61eccceccbf0080"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/inspire_hand/g1_29dof_rev_1_0_with_inspire_hand_retarget_inspire_white_physics.usd",
+    "path": "assets/G1/configuration/inspire_hand/g1_29dof_rev_1_0_with_inspire_hand_retarget_inspire_white_physics.usd",
+    "size": 19388,
+    "sha256": "b919d2d94b1b2f258a240d91e33d2949474a9a4bcea4ec1ddd199aa820c6f739"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/inspire_hand/inspire_left_base.usd",
+    "path": "assets/G1/configuration/inspire_hand/inspire_left_base.usd",
+    "size": 39091374,
+    "sha256": "8f2c874e8da2df72e1d0f878bdeeb09e354b01ad3da61ff154162f58e0443862"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/inspire_hand/inspire_left_hand.usd",
+    "path": "assets/G1/configuration/inspire_hand/inspire_left_hand.usd",
+    "size": 8244,
+    "sha256": "367aba8d30cd652edfefde5a7c4a90f37e377a9d9df581198250491fcb39db80"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/inspire_hand/inspire_left_physics.usd",
+    "path": "assets/G1/configuration/inspire_hand/inspire_left_physics.usd",
+    "size": 24734,
+    "sha256": "a4ce0bc116ac095c86ec2a9b2cb64ffdc4de310d1f6016d96239f4cf2ca05900"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/inspire_hand/inspire_left_robot.usd",
+    "path": "assets/G1/configuration/inspire_hand/inspire_left_robot.usd",
+    "size": 2393,
+    "sha256": "e770ca8e13127e42396496398d63d603129fb1a12e3bbcf487e9618919c86596"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/inspire_hand/inspire_right_base.usd",
+    "path": "assets/G1/configuration/inspire_hand/inspire_right_base.usd",
+    "size": 39085536,
+    "sha256": "17e806184d5c16f25faa804b37d60cbcf3552c9fe2675c682b404b799e714805"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/inspire_hand/inspire_right_hand.usd",
+    "path": "assets/G1/configuration/inspire_hand/inspire_right_hand.usd",
+    "size": 7370,
+    "sha256": "b0ac16df84588b418d9ac32840a5eeb73d705f93514f592c7465504d0c4bfcd3"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/inspire_hand/inspire_right_physics.usd",
+    "path": "assets/G1/configuration/inspire_hand/inspire_right_physics.usd",
+    "size": 29448,
+    "sha256": "cda3bedd1c36d5b489359443b55062558746ccecdd9eeff5e7a5112674ecf141"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/inspire_hand/inspire_right_robot.usd",
+    "path": "assets/G1/configuration/inspire_hand/inspire_right_robot.usd",
+    "size": 2291,
+    "sha256": "006b1ff2e6a179693bdb77255d14d024fbab6624337667c245fc2161b92f57e0"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/three_finger_hand/three_finger_hand_base_left.usd",
+    "path": "assets/G1/configuration/three_finger_hand/three_finger_hand_base_left.usd",
+    "size": 18672470,
+    "sha256": "ccb6aca64eacdc7385b8cbb18ce55ce8f4d056d6d8c132f349026a87d0e0d776"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/three_finger_hand/three_finger_hand_base_right.usd",
+    "path": "assets/G1/configuration/three_finger_hand/three_finger_hand_base_right.usd",
+    "size": 18674253,
+    "sha256": "cac840e4351a1243aabed94970ec0c0e4ef688c8d4f13f6035da29a5fa2397a3"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/three_finger_hand/three_finger_hand_physics_left.usd",
+    "path": "assets/G1/configuration/three_finger_hand/three_finger_hand_physics_left.usd",
+    "size": 34385,
+    "sha256": "d96f4f28fc316061e25ff3c4ec737a67adc6766434814be712b0fd70643e69c8"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/three_finger_hand/three_finger_hand_physics_right.usd",
+    "path": "assets/G1/configuration/three_finger_hand/three_finger_hand_physics_right.usd",
+    "size": 10838,
+    "sha256": "d0625204ac01a876d7e89388f87181b341b2af75dc1cccd21d87ba629c57e535"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/three_finger_hand/three_fingers_left_hand.usd",
+    "path": "assets/G1/configuration/three_finger_hand/three_fingers_left_hand.usd",
+    "size": 4161,
+    "sha256": "39ffa37b47a0f7ee24457a58a7a8408b4ca28192a602a8d1f1414bfae985d3c9"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/three_finger_hand/three_fingers_left_hand_robot.usd",
+    "path": "assets/G1/configuration/three_finger_hand/three_fingers_left_hand_robot.usd",
+    "size": 4383,
+    "sha256": "eeb7e1ddbd839aa34c724f3ec69c377e69018d872837e0235ac2d5f093078d4e"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/three_finger_hand/three_fingers_right_hand.usd",
+    "path": "assets/G1/configuration/three_finger_hand/three_fingers_right_hand.usd",
+    "size": 6942,
+    "sha256": "8d98822225508f0a78ff7335a71c8346411e813339018b878b8e7247213af0dc"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/configuration/three_finger_hand/three_fingers_right_hand_robot.usd",
+    "path": "assets/G1/configuration/three_finger_hand/three_fingers_right_hand_robot.usd",
+    "size": 4904,
+    "sha256": "75988c25bf31159262f108d3b613e010b582f82edcfd98e570c60b9eb489a42e"
+  },
+  {
+    "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Unitree/G1/g1.usd",
+    "path": "assets/G1/g1.usd",
+    "size": 8639,
+    "sha256": "448e37857ce9bec3bf29c41c88dd81932cd9b0ad2a107bb307353168b33a7266"
+  },
+  {
+    "url": "https://media.githubusercontent.com/media/nvidia-isaac/WBC-AGILE/ad4ff6ee6b38da207592b3e71dcee4c118049f6d/agile/data/policy/velocity_g1/unitree_g1_velocity_history.pt",
+    "path": "policies/unitree_g1_velocity_history.pt",
+    "size": 677232,
+    "sha256": "f58db6f61c7546941fe814ac6f571a11e894260e9e638f99eadd9125a4e8ab12"
+  },
+  {
+    "url": "https://media.githubusercontent.com/media/nvidia-isaac/WBC-AGILE/ad4ff6ee6b38da207592b3e71dcee4c118049f6d/agile/data/policy/velocity_g1/unitree_g1_velocity_e2e.onnx",
+    "path": "policies/unitree_g1_velocity_e2e.onnx",
+    "size": 714347,
+    "sha256": "8995f2462ba2d0d83afe08905148f6373990d50018610663a539225d268ef33b"
+  },
+  {
+    "url": "https://media.githubusercontent.com/media/nvidia-isaac/WBC-AGILE/ad4ff6ee6b38da207592b3e71dcee4c118049f6d/agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_recurrent_student.pt",
+    "path": "policies/unitree_g1_velocity_height_recurrent_student.pt",
+    "size": 2072958,
+    "sha256": "a0151975a757a33f0f5ed236d5616e2a98643abe2b36e50ac9ad01b6dd1f6d7e"
+  },
+  {
+    "url": "https://media.githubusercontent.com/media/nvidia-isaac/WBC-AGILE/ad4ff6ee6b38da207592b3e71dcee4c118049f6d/agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_recurrent_student_checkpoint.pt",
+    "path": "policies/unitree_g1_velocity_height_recurrent_student_checkpoint.pt",
+    "size": 6651125,
+    "sha256": "aeb654e2a34231b0458635caf8cb2307b075fb7b033e51bb8e3f9de3a918424b"
+  },
+  {
+    "url": "https://media.githubusercontent.com/media/nvidia-isaac/WBC-AGILE/ad4ff6ee6b38da207592b3e71dcee4c118049f6d/agile/data/policy/velocity_height_g1/unitree_g1_velocity_height_teacher.pt",
+    "path": "policies/unitree_g1_velocity_height_teacher.pt",
+    "size": 500080,
+    "sha256": "e2bcf9704d94c6ca8b9baf0a73c2c7e06ffb6e9bdf856ef012442eb05d6cca54"
+  }
+]

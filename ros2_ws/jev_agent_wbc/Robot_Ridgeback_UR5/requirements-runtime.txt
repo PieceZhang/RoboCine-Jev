@@ -1,0 +1,6 @@
+# Read-only existing Isaac runtime. Do not pip-install over another robot's env.
+# Python 3.11.16; NVIDIA driver 580.178.04; CUDA-capable RTX 5090.
+isaacsim==5.1.0.0
+numpy==1.26.0
+scipy==1.15.3
+torch==2.7.0

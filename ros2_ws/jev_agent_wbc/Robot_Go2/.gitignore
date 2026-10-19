@@ -1,0 +1,7 @@
+.venv/
+.cache/
+vendor/
+assets/generated/
+results/**/diagnostic.usd
+results/**/diagnostic.png
+__pycache__/

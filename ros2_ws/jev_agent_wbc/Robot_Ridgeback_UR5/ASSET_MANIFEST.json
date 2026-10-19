@@ -1,0 +1,50 @@
+{
+  "robot": "Clearpath Ridgeback + Universal Robots UR5",
+  "isaac_sim_asset_version": "5.1",
+  "entry": "assets/Isaac/Robots/Clearpath/RidgebackUr/ridgeback_ur5.usd",
+  "origin": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/",
+  "source_documentation": "https://docs.isaacsim.omniverse.nvidia.com/5.1.0/assets/usd_assets_robots.html",
+  "asset_license": "BSD-3 (per NVIDIA asset catalog)",
+  "runtime_builtins": [
+    "OmniPBR.mdl"
+  ],
+  "files": [
+    {
+      "path": "assets/Isaac/Environments/Grid/Materials/Textures/WireframeBlur_basecolor.png",
+      "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Grid/Materials/Textures/WireframeBlur_basecolor.png",
+      "bytes": 436257,
+      "sha256": "deab39088eaf39ed7be951966c5e6bd5e58b90ab64743b0cdc8e5579fd5a99d9"
+    },
+    {
+      "path": "assets/Isaac/Environments/Grid/Materials/Textures/WireframeBlur_blue.png",
+      "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Grid/Materials/Textures/WireframeBlur_blue.png",
+      "bytes": 1474958,
+      "sha256": "44fc0e82007bb0bd94631cd7ec45986a71ed74b9413899fbffac13efe151be4b"
+    },
+    {
+      "path": "assets/Isaac/Environments/Grid/Materials/Textures/Wireframe_blue.png",
+      "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Grid/Materials/Textures/Wireframe_blue.png",
+      "bytes": 111895,
+      "sha256": "940b96ee8c8e53bd1acbc770d4ca0ac98bed9c96439ab386d1b27dbc9790cc4e"
+    },
+    {
+      "path": "assets/Isaac/Environments/Grid/default_environment.usd",
+      "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Environments/Grid/default_environment.usd",
+      "bytes": 13622,
+      "sha256": "8a21c317d638d33a4e6c20c958a7ed8f4d8c5195efd7e20f1b85178b4a15638a"
+    },
+    {
+      "path": "assets/Isaac/Robots/Clearpath/RidgebackUr/configuration/ridgeback_ur5_robot_schema.usd",
+      "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Clearpath/RidgebackUr/configuration/ridgeback_ur5_robot_schema.usd",
+      "bytes": 2850,
+      "sha256": "dde116748089e2761dba2fc3eb75795b235faf4a98226b4855606588a96a9d23"
+    },
+    {
+      "path": "assets/Isaac/Robots/Clearpath/RidgebackUr/ridgeback_ur5.usd",
+      "url": "https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/5.1/Isaac/Robots/Clearpath/RidgebackUr/ridgeback_ur5.usd",
+      "bytes": 7527823,
+      "sha256": "ee5701cbc4bdd07e59c63424bd751e4e6cad0585a2f9111a2a38642862780e64"
+    }
+  ],
+  "downloaded_closure_complete": true
+}
