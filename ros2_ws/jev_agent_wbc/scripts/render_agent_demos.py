@@ -141,8 +141,11 @@ class Run:
         requests = [(i, e) for i, e in enumerate(self.events) if e['event'] in ('strategy_requested','search_configuration_requested','selection_requested')]
         # One serial model worker: pair requests by stage and original evidence timestamp.
         for a in self.api:
+            if a.get('error') or not a.get('response'):
+                continue  # Retries are audit evidence, not completed model decisions.
             questions=a.get('request', {}).get('questions', {})
-            stage = 'strategy' if 'strategy' in questions else 'configuration' if 'configuration' in questions else 'selection'
+            stage = ('strategy' if {'strategy', 'generator'} & questions.keys() else
+                     'configuration' if {'configuration', 'construction'} & questions.keys() else 'selection')
             state = a.get('request', {}).get('state', '')
             decoder = json.JSONDecoder(); evidence = None
             for pos in (i for i, ch in enumerate(state) if ch == '{'):

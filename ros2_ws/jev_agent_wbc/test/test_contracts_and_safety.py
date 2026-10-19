@@ -443,3 +443,25 @@ def test_refined_ramp_certificate_bounds_dense_ramp_with_tilted_base():
         if i < 400:
             robot = advance(robot, old+(t+.5*h)/.08*(new-old), h)
     assert bound <= minimum+1e-9
+
+
+def test_reused_ramp_oracle_matches_fresh_and_rejects_wrong_acquisition():
+    from jev_agent_wbc.actuation import certify_control_ramp
+    from jev_agent_wbc.arm_comfort import COMFORT_POSE
+    state=np.r_[0.,0.,.3,COMFORT_POSE]
+    rotation=Rotation.from_euler('xyz',[.03,-.02,.3]).as_matrix()
+    scene=dict(format='jvs_lidar_surfels/v1',surfel_centers=np.array([[0.,.8,.3]]),
+        surfel_radius=.04,surfel_velocities=np.array([[0.,-.15,0.]]),
+        surfel_track_ids=np.array([1]),observation_stamp=0.,minimum_clearance_m=.025)
+    old=np.array([.1,.2,.1,-.1,.05,.1,-.03,.04]);new=old+.01
+    oracle=DynamicCollision(scene,.1)
+    for certificate in (None,.3):
+        kw=dict(steps=8,base_rotation=rotation,constant_certificate=certificate)
+        fresh=certify_control_ramp(scene,state,old,new,.1,.08,**kw)
+        reused=certify_control_ramp(scene,state,old,new,.1,.08,collision=oracle,**kw)
+        assert fresh==reused
+        assert oracle.physical_time==.1
+    with pytest.raises(ValueError,match='same current scene'):
+        certify_control_ramp(dict(scene),state,old,new,.1,.08,collision=oracle)
+    with pytest.raises(ValueError,match='timestamp'):
+        certify_control_ramp(scene,state,old,new,.2,.08,collision=oracle)

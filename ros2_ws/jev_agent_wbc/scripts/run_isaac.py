@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Headless, lockstep PhysX suite; one Kit startup, short independent shots.
+"""Headless PhysX with nonblocking controller transport and actuator watchdog.
 
 Sparse dual LiDAR uses real PhysX closest-hit queries (not obstacle truth).
 Robot/camera poses and contact audits come from PhysX. The detached reference
 camera follows the original path in the same live scene and render pass. The
-stabilized virtual camera supplies Agent camera feedback by default. SAM is run
+raw physical camera supplies Agent camera feedback by default. SAM is run
 separately after Kit exits so the two large GPU consumers never overlap.
 """
 import argparse
+import gc
 import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -26,7 +28,7 @@ import jvs_isaac_sim as backend
 
 def arguments():
     parser = backend.build_parser()
-    parser.set_defaults(headless=True, physics_hz=1000., enable_lidar=False,
+    parser.set_defaults(headless=True, physics_hz=100., enable_lidar=False,
                         actuator_armature=0., arm_drive_stiffness=1800.,
                         arm_drive_damping=100000., wheel_drive_damping=100000.,
                         solver_velocity_iterations=128, caster_friction=0.,
@@ -43,14 +45,23 @@ def arguments():
     parser.add_argument('--api-url', default='http://127.0.0.1:8000/v1/systemone')
     from jev_agent_wbc.camera_output import add_camera_arguments
     add_camera_arguments(parser)
-    parser.set_defaults(camera_output='stabilized')
+    parser.set_defaults(camera_output='execution')
     parser.add_argument('--virtual-stabilizer-ros', action='store_true', help='independent reference-aware virtual camera via timestamped ROS batches')
-    parser.add_argument('--skip-reference-video', action='store_true', help='record raw/stabilized/overview only')
+    parser.add_argument('--skip-reference-video', action='store_true', help='omit the original-reference comparison view')
     parser.add_argument('--record', action='store_true')
+    parser.add_argument('--save-replay', action='store_true',
+                        help='save measured link poses for a separate offline render; no RGB work during execution')
     parser.add_argument('--record-fps', type=float, default=8.)
     parser.add_argument('--width', type=int, default=384)
     parser.add_argument('--height', type=int, default=288)
-    parser.add_argument('--pace', type=float, default=.025, help='maximum sim/wall rate; 0 means unpaced')
+    parser.add_argument('--render-subframes', type=int, choices=(1,2), default=1,
+                        help='same-time render subframes; no material changes occur inside the shot')
+    parser.add_argument('--pace', type=float, choices=(1.,), default=1., help='real-time target; slowdown is disabled')
+    parser.add_argument('--command-timeout', type=float, default=.10)
+    parser.add_argument('--sensor-timeout', type=float, default=.20)
+    parser.add_argument('--planning-timeout', type=float, default=1.)
+    parser.add_argument('--startup-command-timeout', type=float, default=.20)
+    parser.add_argument('--single-candidate', action='store_true')
     parser.add_argument('--agent-period', type=float, default=.5)
     parser.add_argument('--activation-lead', type=float, default=.9)
     parser.add_argument('--candidate-budget', type=int, default=2)
@@ -59,29 +70,50 @@ def arguments():
     parser.add_argument('--prediction-horizon', type=float, default=8.)
     parser.add_argument('--prediction-step', type=float, default=.1)
     parser.add_argument('--audit-prediction', action='store_true', help='save bounded observation snapshots for offline predictor diagnostics')
+    parser.add_argument('--lidar-backend',choices=['native','scalar'],default='native')
+    parser.add_argument('--lidar-query-threads',type=int,choices=range(1,9),default=8)
+    parser.add_argument('--lidar-processing',choices=['async','sync'],default='async')
+    parser.add_argument('--lidar-pipeline',action=argparse.BooleanOptionalAction,default=True,
+                        help='overlap read-only ray queries with CPU supervision; join before any physical write/render')
     parser.add_argument('--lidar-static-input',choices=['cpu_fixture','full_raycast'],default='cpu_fixture',
                         help='CPU calibrated static background + real moving ray hits, or full observed surfaces')
     parser.add_argument('--motor-targets',choices=['cpu_hold','physical_slew'],default='physical_slew',
                         help='physical drive interface; shared WBC still uses the unmodified CPU endpoint command contract')
     parser.add_argument('--duration-limit',type=float,help='diagnostic executed prefix only; never a completed-shot result')
+    parser.add_argument('--profile-loop', action='store_true', help='save cProfile data for the live loop (diagnostic overhead)')
+    parser.add_argument('--validate-fast-paths', action='store_true',
+                        help='diagnostic comparison with wrapper states and uncached raycasts')
+    parser.add_argument('--fabric', action=argparse.BooleanOptionalAction, default=True,
+                        help='render from PhysX Fabric without per-step USD transform writeback')
+    parser.add_argument('--physics-threads', type=int, default=1,
+                        help='optional PhysX CPU dispatcher thread count for single-scene benchmarks')
     parser.add_argument('--base-support',choices=['upright','free'],default='upright',
                         help='upright matches CPU planar-base roll/pitch assumptions; XYZ and yaw remain dynamic')
     parser.add_argument('--solver-position-iterations',type=int,default=255)
     parser.add_argument('--no-preview', action='store_true', help='ablate inherited allocation MPC, retaining safety and bounded task planner')
     parser.add_argument('--allocation-preview', action='store_true', help='enable inherited shot-specific base-allocation MPC for ablation')
-    parser.add_argument('--async-coordination', action='store_true',
+    parser.add_argument('--async-coordination', action='store_true', default=True,
                         help='run the cross-phase allocation in its live nonblocking worker instead of lockstep')
     parser.add_argument('--acceleration-reserve', type=float, default=1.,
                         help='operating acceleration / physical acceleration; evaluation limits stay fixed')
     parser.add_argument('--yaw-acceleration-reserve', type=float, default=None,
                         help='optional separate operating fraction for chassis yaw acceleration')
     args = parser.parse_args()
+    from jev_agent_wbc.realtime import RuntimePolicy
+    RuntimePolicy(args.command_timeout, args.sensor_timeout, args.planning_timeout, args.startup_command_timeout)
+    if args.virtual_stabilizer_ros:
+        parser.error('blocking ROS stabilizer batches are incompatible with this realtime runner')
+    if args.motor_targets != 'physical_slew':
+        parser.error('realtime watchdog requires the acceleration-limited physical_slew drive')
+    if (not math.isfinite(args.physics_hz) or args.physics_hz < 50
+            or abs(args.physics_hz/50-round(args.physics_hz/50)) > 1e-8):
+        parser.error('physics-hz must be a multiple of 50 and at least 50')
     backend.validate_args(args)
+    if args.physics_threads is not None and args.physics_threads < 1:
+        parser.error('physics-threads must be positive')
     if args.arm_drive_stiffness<=0 or args.wheel_drive_damping<=0:
         parser.error('physical inverse-dynamics drive requires positive stiffness and damping')
     if not 1<=args.solver_position_iterations<=255:parser.error('solver position iterations must be in [1,255]')
-    if args.physics_hz < 200 or abs(args.physics_hz/50-round(args.physics_hz/50)) > 1e-8:
-        parser.error('physics-hz must be a multiple of 50 and at least 200')
     if not 0 < args.acceleration_reserve <= 1:
         parser.error('acceleration-reserve must be in (0,1]')
     if args.yaw_acceleration_reserve is not None and not 0 < args.yaw_acceleration_reserve <= 1:
@@ -103,7 +135,8 @@ def run_case(args, app, name, mode, output):
     from jev_agent_wbc.sensors import RuntimeLidar, RAYS
     from physx_compat import install_worker_adapter, subject_from_returns, MotorTargets, configure_rolling_contacts, generalized_gravity
     install_worker_adapter()
-    from jev_agent_wbc.engine import CinematicEngine
+    from jev_agent_wbc.realtime_engine import RealtimeEngine
+    from jev_agent_wbc.realtime import RuntimePolicy, realtime_assessment
     from jev_agent_wbc.candidates import SearchBudget
     from jev_agent_wbc.evaluation import EVALUATION_PROTOCOL, save_json, trajectory_summary
     from jev_agent_wbc.dynamic_collision import DynamicCollision
@@ -125,7 +158,12 @@ def run_case(args, app, name, mode, output):
     save_json(output/'original_task.json', reference.task)
     save_json(output/'runtime_scene.json', fixture)
     save_json(output/'evaluation_protocol.json', EVALUATION_PROTOCOL)
-    engine = audit = recorder = stabilizer_client = None
+    engine = audit = recorder = stabilizer_client = lidar_worker = None
+    lidar_failed = False
+    native_ray = None
+    restore_gc = False
+    replay_poses = []
+    execution_journal = None
     from jev_agent_wbc.camera_output import CameraOutput
     camera_output = CameraOutput.from_args(args)
     camera_samples = []
@@ -134,6 +172,10 @@ def run_case(args, app, name, mode, output):
     prediction_snapshots = []
     recording_error = ''
     physical_summary = None
+    tick_times, tick_lags, tick_stages = [], [], []
+    run_start = run_end = None
+    loop_profile = None
+    fast_path_validation = dict(state_samples=0, ray_samples=0, passed=None)
     physical_limits = limits = Limits()
     gravity_max = np.zeros(8)
     feedforward_max = np.zeros(8)
@@ -215,6 +257,11 @@ def run_case(args, app, name, mode, output):
 
         sim = SimulationContext(physics_dt=1/args.physics_hz, rendering_dt=.02, stage_units_in_meters=1.)
         sim.get_physics_context().set_solver_type(args.solver_type)
+        if args.physics_threads is not None:
+            from omni.physx import get_physx_interface
+            get_physx_interface().set_thread_count(args.physics_threads)
+        from isaacsim.core.simulation_manager import SimulationManager
+        SimulationManager.enable_fabric(args.fabric)
         sim.initialize_physics()
         sim.play()
         robot = SingleArticulation(robot_path)
@@ -272,7 +319,10 @@ def run_case(args, app, name, mode, output):
         previous_motor_control = np.zeros(8)
         effort_caps=np.asarray(robot.dof_properties['maxEffort'][indices],float)
 
-        def apply():
+        physics_robot = robot._articulation_view._physics_view
+        physics_camera = camera_body._rigid_prim_view._physics_view
+
+        def apply(physical_state=None):
             nonlocal previous_drive_velocity, previous_motor_control
             raw_gravity=np.asarray(robot._articulation_view._physics_view.get_gravity_compensation_forces()[0])
             gravity=generalized_gravity(raw_gravity,len(names),indices)
@@ -282,15 +332,14 @@ def run_case(args, app, name, mode, output):
                 raise RuntimeError('inconsistent PhysX floating-base mass/force dimensions')
             root_dofs=len(raw_gravity)-len(names)
             acceleration=np.zeros(len(raw_gravity))
-            actual_joint_velocity=np.asarray(robot.get_joint_velocities(indices))
+            actual_joint_velocity=(physics_robot.get_dof_velocities()[0, indices]
+                if physical_state is None else np.r_[physical_state[4],physical_state[3][2:]])
             acceleration[root_dofs+indices]=(drive_velocity-actual_joint_velocity)*args.physics_hz
             if root_dofs:
-                _,quat=robot.get_world_pose()
-                rotation=Rotation.from_quat(np.roll(quat,-1)).as_matrix()
+                rotation=(Rotation.from_quat(physics_robot.get_root_transforms()[0,3:7]).as_matrix()
+                    if physical_state is None else physical_state[2])
                 yaw=np.arctan2(rotation[1,0],rotation[0,0])
                 forward=np.array([np.cos(yaw),np.sin(yaw),0.]);left=np.array([-forward[1],forward[0],0.])
-                actual_local=rotation.T@robot.get_linear_velocity()
-                actual_control=np.r_[actual_local[0],robot.get_angular_velocity()[2],actual_joint_velocity[2:]]
                 wl,wr=actual_joint_velocity[:2]
                 wheel_control=np.r_[(wl+wr)*limits.wheel_radius/2,
                                    (wr-wl)*limits.wheel_radius/limits.wheel_separation,
@@ -333,35 +382,93 @@ def run_case(args, app, name, mode, output):
         robot.set_joint_velocities(np.zeros(len(names)))
 
         def observe():
-            bp, bq = robot.get_world_pose()
-            br = Rotation.from_quat(np.roll(bq, -1)).as_matrix()
+            root_pose = physics_robot.get_root_transforms()[0].copy()
+            bp = root_pose[:3]
+            br = Rotation.from_quat(root_pose[3:7]).as_matrix()
             yaw = float(np.arctan2(br[1, 0], br[0, 0]))
-            state = np.r_[bp[:2], yaw, robot.get_joint_positions(indices[2:])]
-            velocities = robot.get_joint_velocities(indices)
-            local_v = br.T@robot.get_linear_velocity()
-            measured = np.r_[local_v[0], robot.get_angular_velocity()[2], velocities[2:]]
-            cp, cq = camera_body.get_world_pose()
-            cr = Rotation.from_quat(np.roll(cq, -1)).as_matrix()
+            state = np.r_[bp[:2], yaw, physics_robot.get_dof_positions()[0,indices[2:]]]
+            velocities = physics_robot.get_dof_velocities()[0,indices]
+            twist = physics_robot.get_root_velocities()[0]
+            local_v = br.T@twist[:3]
+            measured = np.r_[local_v[0], twist[5], velocities[2:]]
+            camera_pose = physics_camera.get_transforms()[0].copy()
+            cp = camera_pose[:3]
+            cr = Rotation.from_quat(camera_pose[3:7]).as_matrix()
+            if args.validate_fast_paths:
+                old_bp, old_bq = robot.get_world_pose()
+                old_br = Rotation.from_quat(np.roll(old_bq,-1)).as_matrix()
+                old_cp, old_cq = camera_body.get_world_pose()
+                comparisons = [(bp,old_bp),(br,old_br),(cp,old_cp),
+                    (cr,Rotation.from_quat(np.roll(old_cq,-1)).as_matrix()),
+                    (state[3:],robot.get_joint_positions(indices[2:])),
+                    (velocities,robot.get_joint_velocities(indices)),
+                    (twist,np.r_[robot.get_linear_velocity(),robot.get_angular_velocity()])]
+                for actual, expected in comparisons:
+                    np.testing.assert_array_equal(actual,expected)
+                fast_path_validation['state_samples'] += 1
             return state, bp, br, measured, velocities[:2], local_v[1], cp, cr
 
         query = get_physx_scene_query_interface()
+        if args.lidar_backend == 'native':
+            from physx_lidar import NativeRaycaster
+            native_ray = NativeRaycaster(query,RAYS,robot_scope,output,threads=args.lidar_query_threads)
+        import carb
+        ray_directions = tuple(carb.Float3(*map(float, direction)) for direction in RAYS)
+        raycast_closest = query.raycast_closest
+        hit_classes = {}
+        wall_points = np.array([[3.5,y,z] for y in np.linspace(-1.5,1.5,41)
+                                for z in np.arange(.1,.8,.075)])
         lidar = RuntimeLidar()
         subject_track = None
 
-        def scan(state, bp, stamp):
+        def scan(state, bp, stamp, batch=None):
             nonlocal subject_track
             origins = lidar.origins(state, bp[2])
             returns, subject_returns = [], []
             self_returns = total_returns = 0
             audit_hits = {} if abs(stamp) < 1e-8 else None
-            for origin in origins:
+            if native_ray is not None:
+                if batch is None:batch = native_ray.scan(origins,validate=abs(stamp)<1e-8)
+                flags, hits = batch['flags'],batch['hit']
+                self_returns = int(flags[:,:,0].sum())
+                total_returns = int(hits.sum())
+                for points, present, mask in zip(batch['positions'],hits,flags):
+                    external = present & ~mask[:,0]
+                    selected = external & (mask[:,1] if args.lidar_static_input=='cpu_fixture' else True)
+                    cloud = points[selected].astype(float)
+                    if args.lidar_static_input=='cpu_fixture':cloud=np.vstack([cloud,wall_points])
+                    returns.append(cloud)
+                    subject_returns.extend(points[external & mask[:,2]].astype(float))
+                if abs(stamp)<1e-8:
+                    audit_hits = {k:v for k,v in enumerate(batch['audit'])}
+                    fast_path_validation['ray_samples'] += 2*len(RAYS)
+            for origin in (origins if native_ray is None else []):
                 points = []
-                for direction in RAYS:
-                    hit = query.raycast_closest(tuple(origin), tuple(direction), 4.5)
+                ray_origin = carb.Float3(*map(float, origin))
+                for ray_index, direction in enumerate(ray_directions):
+                    hit = raycast_closest(ray_origin, direction, 4.5)
+                    if args.validate_fast_paths and abs(stamp) < 1e-8:
+                        old_hit = query.raycast_closest(tuple(origin),tuple(RAYS[ray_index]),4.5)
+                        assert hit['hit'] == old_hit['hit']
+                        if hit['hit']:
+                            # Compare every field consumed by the sensor adapter.
+                            # protoIndex is unused (the scene has no point instancers).
+                            np.testing.assert_array_equal(tuple(hit['position']),tuple(old_hit['position']))
+                            for field in ('collision','rigidBody'):
+                                assert hit[field] == old_hit[field], (field,hit[field],old_hit[field])
+                        fast_path_validation['ray_samples'] += 1
                     if hit.get('hit'):
                         total_returns += 1
+                        key = (hit.get('collision', ''), hit.get('rigidBody', ''))
+                        classification = hit_classes.get(key)
+                        if classification is None:
+                            paths = tuple(map(str, key))
+                            classification = (any(p.startswith(robot_scope+'/') for p in paths),
+                                any(p.startswith('/World/Moving/') for p in paths),
+                                'BlueSubject' in paths[0])
+                            hit_classes[key] = classification
+                        is_self, is_moving, is_subject = classification
                         if audit_hits is not None:
-                            key = (str(hit.get('collision', '')), str(hit.get('rigidBody', '')))
                             record = audit_hits.setdefault(key, dict(collision=key[0], rigid_body=key[1], count=0, sample_points=[]))
                             record['count'] += 1
                             if len(record['sample_points']) < 3:
@@ -370,36 +477,39 @@ def run_case(args, app, name, mode, output):
                         # simulator sensor adapter. Discard its first hit but
                         # do not raycast through the robot: occlusion remains.
                         # No external object identity, pose or velocity is used.
-                        if any(str(hit.get(key, '')).startswith(robot_scope+'/') for key in ('collision', 'rigidBody')):
+                        if is_self:
                             self_returns += 1
                             continue
                         point = hit['position']
-                        if args.lidar_static_input=='full_raycast' or any(
-                                str(hit.get(key,'')).startswith('/World/Moving/') for key in ('collision','rigidBody')):
+                        if args.lidar_static_input=='full_raycast' or is_moving:
                             points.append(point)
-                        if 'BlueSubject' in str(hit.get('collision', '')):
+                        if is_subject:
                             subject_returns.append(point)
                 points=np.asarray(points).reshape(-1,3)
                 if args.lidar_static_input=='cpu_fixture':
                     # Exactly the static calibration used by RuntimeLidar.synthetic_scan.
                     # Moving position/velocity truth is never supplied to mapping.
-                    wall_points=np.array([[3.5,y,z] for y in np.linspace(-1.5,1.5,41)
-                                          for z in np.arange(.1,.8,.075)])
                     points=np.vstack([points,wall_points])
                 returns.append(points)
-            subject_track = dict(valid=False, orientation_valid=False, stamp_s=stamp,
+            acquired_subject = dict(valid=False, orientation_valid=False, stamp_s=stamp,
                                  reason='no_current_subject_lidar_returns')
             if subject_returns:
                 estimate = subject_from_returns(np.asarray(subject_returns), subject_data, stamp)
                 if estimate['valid']:
-                    subject_track = estimate
-            snapshot = lidar.integrate(state, bp[2], stamp, returns, origins)
-            snapshot['sensor_diagnostics'] = dict(self_returns_discarded=self_returns,
+                    acquired_subject = estimate
+            diagnostics = dict(self_returns_discarded=self_returns,
                 total_returns=total_returns, static_input=args.lidar_static_input,
                 self_filter='known_robot_collision_prim_prefix; first-hit occlusion retained')
             if audit_hits is not None:
                 save_json(output/'initial_raycast_audit.json', dict(robot_scope=robot_scope,
                     returns=list(audit_hits.values()), role='offline sensor identity audit; not supplied to planner'))
+            if lidar_worker is not None:
+                lidar_worker.submit(state,bp[2],stamp,returns,origins,
+                    dict(subject=acquired_subject,diagnostics=diagnostics))
+                return None
+            subject_track = acquired_subject
+            snapshot = lidar.integrate(state,bp[2],stamp,returns,origins)
+            snapshot['sensor_diagnostics'] = diagnostics
             return snapshot
 
         # Acquire actual timestamped pre-roll observations. Giving a frozen
@@ -416,15 +526,25 @@ def run_case(args, app, name, mode, output):
         state, bp, br, measured, wheels, lateral, cp, cr = observe()
         if not len(observed['surfel_centers']):
             raise RuntimeError('PhysX LiDAR startup produced no observed surface map')
+        if args.validate_fast_paths:
+            assert fast_path_validation['ray_samples'] == 2*len(RAYS)
+            fast_path_validation['passed'] = True
         save_json(output/'initial_observed_scene.json', observed)
-        engine = CinematicEngine(reference, observed, output, mode=mode, api_url=args.api_url, model=args.model, limits=limits,
+        if args.lidar_processing == 'async':
+            from jev_agent_wbc.async_lidar import AsyncLidar
+            lidar_worker = AsyncLidar(lidar)
+        engine = RealtimeEngine(reference, observed, output, mode=mode, api_url=args.api_url, model=args.model, limits=limits,
+                                 physical_limits=physical_limits,
+                                 runtime_policy=RuntimePolicy(args.command_timeout,args.sensor_timeout,
+                                     args.planning_timeout,args.startup_command_timeout),
                                  subject_model=subject_data,
                                  preview=args.allocation_preview and not args.no_preview,
                                  coordination_async=args.async_coordination,
                                  budget=SearchBudget(max_proposals=args.candidate_proposals, decision_period_s=args.agent_period,
                                      activation_lead_s=args.activation_lead, max_rollouts=args.candidate_budget,
                                      max_horizon_s=args.prediction_horizon, prediction_step_s=args.prediction_step,
-                                     candidate_wall_budget_s=args.candidate_wall_budget),
+                                     candidate_wall_budget_s=args.candidate_wall_budget,
+                                     single_candidate=args.single_candidate),
                                  intrinsics=[.5/np.tan(np.deg2rad(27.5))*args.height/args.width,
                                              .5/np.tan(np.deg2rad(27.5)), .5, .5])
         audit = PhysicsAudit(str(output), physical_limits, 1/args.physics_hz)
@@ -437,6 +557,10 @@ def run_case(args, app, name, mode, output):
 
         def stabilize_batch(samples):
             nonlocal stabilized_pose
+            if camera_output.source == 'execution':
+                sample = samples[-1]
+                camera_output.accept_raw(sample['t'], sample['ap'], sample['ar'])
+                return
             if stabilizer_client:
                 values = stabilizer_client.update(samples)
             else:
@@ -454,42 +578,105 @@ def run_case(args, app, name, mode, output):
             stabilized_pose = (np.array(values[-1]['p']), np.array(values[-1]['r']))
 
         def camera_sample(stamp, position, rotation):
+            if camera_output.source == 'execution':
+                return dict(t=float(stamp), ap=position, ar=rotation)
             rp, rr, _ = engine.active.sample(stamp)
             return dict(t=float(stamp), rp=rp.tolist(), rr=rr.tolist(),
                         ap=position.tolist(), ar=rotation.tolist())
 
         stabilize_batch([camera_sample(0., cp, cr)])
 
+        contact_paths = {}
+
         def on_contacts(headers, data):
             for h in headers:
-                paths = [str(PhysicsSchemaTools.intToSdfPath(v)) for v in (h.actor0, h.actor1)]
-                is_robot = any(p.startswith(robot_scope+'/') for p in paths)
-                other = any(not p.startswith(robot_scope+'/') and
-                            not p.startswith('/World/groundPlane/') for p in paths)
+                key = (h.actor0, h.actor1)
+                cached = contact_paths.get(key)
+                if cached is None:
+                    paths = [str(PhysicsSchemaTools.intToSdfPath(v)) for v in key]
+                    is_robot = any(p.startswith(robot_scope+'/') for p in paths)
+                    other = any(not p.startswith(robot_scope+'/') and
+                                not p.startswith('/World/groundPlane/') for p in paths)
+                    cached = contact_paths[key] = (paths, is_robot, other)
+                paths, is_robot, other = cached
                 if is_robot and other:
                     contacts.append(dict(t=physical_t, actors=paths, points=int(h.num_contact_data), kind=str(h.type)))
+                    if h.num_contact_data and engine.watchdog is not None:
+                        engine.escalate('measured_external_contact', physical_t)
                     if len(contacts) <= 3:
                         print('CONTACT_DEBUG '+json.dumps(contacts[-1]), flush=True)
 
         subscription = get_physx_simulation_interface().subscribe_contact_report_events(on_contacts)
         if args.record or args.publish_camera_ros:
             recorder = RGBPair(stage, sim, args, output, robot_scope, subject_data)
+            # Initialize render products before arming the live controller.
+            # This is a measured t=0 image, never preplanning a trajectory.
+            rp, rr, _ = reference.sample(0.)
+            recorder.capture(0., rp, rr, cp, cr, subject_track, stabilized_pose=stabilized_pose)
         print(f'JEV_ISAAC_READY case={name} mode={mode} surfaces={len(observed["surfel_centers"])}', flush=True)
+        from jev_agent_wbc.async_journal import AsyncJournal
+        execution_journal = AsyncJournal(output/'execution.jsonl')
+        if args.profile_loop:
+            import cProfile
+            loop_profile = cProfile.Profile()
+            loop_profile.enable()
+        # The finite live segment retains its telemetry intentionally. Cyclic
+        # collection can otherwise scan the entire Kit object graph mid-tick.
+        # Reference counting stays active; restore collection after physical time.
+        gc.collect()
+        restore_gc = gc.isenabled()
+        gc.disable()
         run_start = time.monotonic()
-        next_frame = 0.
+        engine.arm(run_start)
+        next_frame = 1/args.record_fps if recorder else 0.
         substeps = round(args.physics_hz*dt)
+        from jev_agent_wbc.kc_svsdf import CollisionGeometry
+        physical_geometry = CollisionGeometry()
+        current_collision = None
         previous_command = np.zeros(8)
         end_time = reference.duration+POLICY.terminal_hold_s
         if args.duration_limit is not None:end_time=min(end_time,args.duration_limit)
         for k in range(round(end_time/dt)+1):
+            tick_started = time.monotonic()
+            rays_pending = False
+            ray_finish_wall = 0.
             t = k*dt
-            mover_positions = audit_movers(t, display=True)
+            # Display-only USD copies are needed at capture/UI times; collider
+            # targets and readback audits still run at every physical substep.
+            mover_positions = audit_movers(t, display=not args.headless or
+                bool(recorder and t+1e-8 >= next_frame))
+            observation_wall = time.monotonic()
             state, bp, br, measured, wheels, lateral, cp, cr = observe()
             # Match runner.py: a velocity command starts from the measured
             # joint position. Reset the DRIVE reference, never physical state.
             q_command=state[3:].copy()
-            if k % 5 == 0:
-                observed = scan(state, bp, t)
+            if lidar_worker is not None and not lidar_failed:
+                try:
+                    packet = lidar_worker.poll(t)
+                    if packet is not None:
+                        observed = packet['snapshot']
+                        observed['sensor_diagnostics'] = packet['extra']['diagnostics']
+                        subject_track = packet['extra']['subject']
+                except RuntimeError as error:
+                    engine.trip(str(error),t)
+                    lidar_failed = True
+            if k % 5 == 0 and not lidar_failed:
+                # Pre-roll already acquired t=0 after the last physical step.
+                # Startup rendering does not advance time. Reuse that exact
+                # measurement instead of blocking first dispatch on a duplicate.
+                if k != 0 or abs(float(observed['observation_stamp'])-t) > 1e-10:
+                    try:
+                        if args.lidar_pipeline and native_ray is not None and lidar_worker is not None:
+                            native_ray.begin(lidar.origins(state,bp[2]))
+                            rays_pending=True
+                            acquired=None
+                        else:
+                            acquired = scan(state,bp,t)
+                        if acquired is not None:observed=acquired
+                    except RuntimeError as error:
+                        if lidar_worker is None:raise
+                        engine.trip(str(error),t)
+                        lidar_failed=True
                 if args.record:
                     sensor_folder = output/'observations'
                     sensor_folder.mkdir(exist_ok=True)
@@ -505,8 +692,10 @@ def run_case(args, app, name, mode, output):
                     active_is_original=engine.active is reference))
             output_p, output_r = camera_output.pose(t)
             engine.set_camera_output(t, output_p, output_r, source=camera_output.source)
+            sensor_done = time.monotonic()
             try:
                 command, info = engine.step(state, observed, t, dt, base_z=bp[2], base_rotation=br, commanded_q=q_command, measured_control=measured,
+                                           observation_wall=observation_wall,
                                            measured_base_twist=np.r_[robot.get_linear_velocity(),robot.get_angular_velocity()])
             except Exception:
                 from dataclasses import asdict
@@ -518,10 +707,35 @@ def run_case(args, app, name, mode, output):
                 raise
             info['agent_camera_input']={key:engine.actual_feedback[key] for key in
                 ('camera_output_source','stamp_s','camera_position','camera_quaternion_xyzw')}
-            info['motor_ramp_sweep_lower_m'] = certify_control_ramp(observed, state, previous_command, command,
-                t, dt, bp[2], steps=substeps, constant_certificate=info['command_sweep_lower_m'], base_rotation=br)
-            truth = DynamicCollision(runtime_scene.truth_collision(t), t, uncertainty_rate=0.)
+            # A worker certificate refers to an older measurement. Recheck the
+            # issued command on CURRENT geometry before it reaches the drives.
+            if current_collision is None or current_collision.scene is not observed:
+                current_collision = DynamicCollision(observed, t, geometry=physical_geometry)
+            else:
+                current_collision.set_time(t)
+            proof = current_collision.sweep(state, command, dt, bp[2], max_samples=33, base_rotation=br)
+            lower = float(proof['lower'].min())
+            ramp_lower = None
+            try:
+                if not np.isfinite(lower) or lower < current_collision.margin:
+                    raise RuntimeError('current_state_sweep_failed')
+                # Retain the existing interpolation gate, now anchored to the
+                # current measured velocity rather than an older worker state.
+                ramp_lower = certify_control_ramp(observed,state,measured,command,t,dt,bp[2],
+                    steps=substeps,constant_certificate=lower,base_rotation=br,collision=current_collision)
+            except RuntimeError as error:
+                engine.escalate(str(error), t)
+                command = np.zeros(8)
+            info['command_sweep_lower_m'] = lower
+            info['motor_ramp_sweep_lower_m'] = ramp_lower
+            info['runtime_fault'] = engine.watchdog.fault
+            info['safety_brake'] = engine.watchdog.fault is not None
+            info['brake_collision_certified'] = False if engine.watchdog.fault else None
+            # This instantaneous endpoint sweep does not certify the actual
+            # acceleration-limited braking path; retain measured physical audit.
+            truth = DynamicCollision(runtime_scene.truth_collision(t), t, uncertainty_rate=0.,geometry=physical_geometry)
             clearance = float(truth.clearance(state, bp[2], br).min())
+            info['emergency_stop_required'] = engine.watchdog.emergency_stop_required
             fk, fr, _ = whole_body_kinematics(state, bp[2], br)
             info['fk_position_error_m'] = float(np.linalg.norm(fk-cp))
             measured_scene = camera_scene(dict(observed, subject_model=subject_data,
@@ -537,32 +751,56 @@ def run_case(args, app, name, mode, output):
                 measured_obstacles=dict(zip(mover_names, mover_positions.tolist()))))
             rows[-1]['runtime_tracks'] = observed.get('tracks', [])
             rows[-1]['sensor_diagnostics'] = observed.get('sensor_diagnostics', {})
-            with (output/'execution.jsonl').open('a') as execution_journal:
-                execution_journal.write(json.dumps(native(rows[-1]), allow_nan=False)+'\n')
+            # Until this barrier, all main-thread PhysX access is read-only.
+            # The CPU geometry/Agent transport above consumes the last completed
+            # map, exactly as in non-pipelined asynchronous mapping. Never update
+            # collider targets, drive tensors, simulation or RGB while rays run.
+            if rays_pending:
+                ray_finish_started=time.monotonic()
+                try:
+                    scan(state,bp,t,batch=native_ray.finish())
+                except Exception as error:
+                    engine.trip('lidar_query_failed: '+str(error),t)
+                    lidar_failed=True
+                    rows[-1]['info'].update(runtime_fault=engine.watchdog.fault,safety_brake=True)
+                ray_finish_wall=time.monotonic()-ray_finish_started
+            execution_journal.write(json.dumps(native(rows[-1]), allow_nan=False)+'\n')
+            if args.save_replay:
+                replay_poses.append(robot._articulation_view._physics_view.get_link_transforms()[0].copy())
+            control_done = time.monotonic()
             if recorder and t+1e-8 >= next_frame:
                 rp, rr, _ = reference.sample(t)
                 recorder.capture(t, rp, rr, cp, cr, subject_track, stabilized_pose=stabilized_pose)
                 next_frame += 1/args.record_fps
+            render_done = time.monotonic()
             if k % 50 == 0:
                 print(json.dumps(dict(case=name, mode=mode, t=t, clearance=clearance, contacts=len(contacts),
                     jev_calls=engine.jev.decider.client.calls, installed=engine.installed_plans)), flush=True)
             if t >= end_time:
+                run_end = time.monotonic()
                 break
             requested_command = command.copy()
             physics_camera_batch = []
             motor_feedback=measured.copy()
             motor_wheel_feedback=wheels.copy()
+            measured_state=(state,bp,br,measured,wheels,lateral,cp,cr)
             for j in range(substeps):
                 physical_t = t+(j+1)/args.physics_hz
+                # Enforce command/sensor leases at the drive rate too, including
+                # wall time consumed by RGB capture or a stalled main callback.
+                requested_command = engine.watchdog.command(physical_t,time.monotonic(),
+                    float(observed['observation_stamp']),alive=engine.process.is_alive())
+                if physical_t >= reference.duration:
+                    requested_command = np.zeros(8)
                 # Match the CPU command contract: constant endpoint velocity
                 # throughout the control interval when command_ramp is false.
                 command = (previous_command+(j+.5)/substeps*(requested_command-previous_command)
                            if limits.command_ramp else requested_command)
-                motor_positions=np.asarray(robot.get_joint_positions(indices[2:]))
+                motor_positions=measured_state[0][3:]
                 drive_velocity = (motors.step(command,1/args.physics_hz,motor_feedback,motor_positions,motor_wheel_feedback) if args.motor_targets=='physical_slew'
                                   else np.r_[limits.wheels@command,command[2:]])
-                q_command = np.asarray(robot.get_joint_positions(indices[2:])).copy()+drive_velocity[2:]/args.physics_hz
-                apply()
+                q_command = motor_positions.copy()+drive_velocity[2:]/args.physics_hz
+                apply(measured_state)
                 move_obstacles(physical_t)
                 sim.step(render=False)
                 audit_movers(physical_t)
@@ -572,15 +810,25 @@ def run_case(args, app, name, mode, output):
                 physics_camera_batch.append(camera_sample(physical_t, measured_state[6], measured_state[7]))
                 audit.record(physical_t, measured_state[0][3:], measured_state[3], measured_state[4], measured_state[5])
             stabilize_batch(physics_camera_batch)
+            physics_done = time.monotonic()
             previous_command = requested_command
-            if k % 10 == 0:
+            if not args.headless and recorder is None and k % 10 == 0:
                 sim.render()
+            tick_times.append(time.monotonic()-tick_started)
+            tick_stages.append(dict(t=t, sensor_s=sensor_done-tick_started,
+                supervision_and_audit_s=control_done-sensor_done-ray_finish_wall,
+                lidar_finish_s=ray_finish_wall,rgb_s=render_done-control_done,
+                physics_and_stabilizer_s=physics_done-render_done,
+                display_s=time.monotonic()-physics_done))
+            tick_lags.append(max(0.,time.monotonic()-run_start-(k+1)*dt))
             if args.pace > 0:
                 slack = (k+1)*dt/args.pace-(time.monotonic()-run_start)
                 if slack > 0:
                     time.sleep(slack)
         del subscription
     except Exception as error:
+        if args.validate_fast_paths and isinstance(error, AssertionError):
+            fast_path_validation['passed'] = False
         failure = f'{type(error).__name__}: {error}'
         if engine:
             engine._write('run_failed', len(rows)*dt, failure=failure,
@@ -588,6 +836,36 @@ def run_case(args, app, name, mode, output):
         import traceback
         traceback.print_exc()
     finally:
+        if loop_profile is not None:
+            loop_profile.disable()
+            loop_profile.dump_stats(str(output/'loop_profile.pstats'))
+        if run_start is not None and run_end is None:
+            run_end = time.monotonic()
+        if restore_gc:
+            gc.enable()
+            restore_gc = False
+        if execution_journal is not None:
+            execution_journal.close()
+        if replay_poses:
+            replay_dir=output/'replay'
+            replay_dir.mkdir(exist_ok=False)
+            np.savez_compressed(replay_dir/'measured_links.npz',
+                transforms=np.asarray(replay_poses),times=np.asarray([r['t'] for r in rows]),
+                paths=np.asarray(robot._articulation_view._physics_view.link_paths[0],dtype=str))
+            stage.Flatten().Export(str(replay_dir/'scene.usdc'))
+            save_json(replay_dir/'manifest.json',dict(protocol='measured_link_poses/v1',
+                measured=True,role='offline presentation only; not a second physical execution',
+                samples=len(replay_poses),rgb_work_during_live_loop=False,
+                source_clock='telemetry.t',positions='PhysX articulation link transforms',
+                recording_does_not_change_agent_or_physics=True))
+        if engine and engine.watchdog and engine.watchdog.fault and not failure:
+            failure = 'runtime_fail_safe: '+engine.watchdog.fault['reason']
+        if lidar_worker is not None:
+            lidar_worker.close()
+            save_json(output/'lidar_timing.json',lidar_worker.samples)
+        if native_ray is not None:
+            native_ray.close()
+            save_json(output/'native_lidar_timing.json',native_ray.timings)
         if audit:
             physical_summary = audit.finish()
         if recorder:
@@ -597,8 +875,19 @@ def run_case(args, app, name, mode, output):
                 recording_error = f'{type(error).__name__}: {error}'
                 print(f'RECORDER_CLOSE_ERROR {error}', flush=True)
         summary = trajectory_summary(rows, reference, {} if engine is None else engine.summary(), failure, physical_summary)
+        if camera_output.source == 'execution' and summary.get('physical_camera_tracking'):
+            summary['physical_camera_tracking']['role'] = 'primary Agent and visual evaluation input'
         contact_count = sum(c['points'] > 0 for c in contacts)
         summary.update(backend='isaac_physx', physics_hz=args.physics_hz, wall_s=time.monotonic()-begin,
+            pace=args.pace, physics_waits_for_agent=False,
+            fabric_enabled=args.fabric,
+            lidar_backend=args.lidar_backend,lidar_processing=args.lidar_processing,
+            lidar_query_threads=args.lidar_query_threads,
+            lidar_pipeline=args.lidar_pipeline,
+            native_rays_validated=0 if native_ray is None else native_ray.validated_rays,
+            physics_threads=args.physics_threads,
+            render_subframes=args.render_subframes,
+            fast_path_validation=fast_path_validation if args.validate_fast_paths else None,
             mode=mode, case=name, observation_source='dual_physx_sparse_lidar_raycast', contacts=contact_count,
             contact_notifications=len(contacts),
             coordination_async=args.async_coordination,
@@ -607,7 +896,7 @@ def run_case(args, app, name, mode, output):
                 if args.yaw_acceleration_reserve is not None else args.acceleration_reserve),
             camera_output_source=camera_output.source,
             camera_output_role='primary Agent and visual evaluation input',
-            raw_camera_role='intermediate physical diagnostic',
+            raw_camera_role=('primary Agent input' if camera_output.source == 'execution' else 'intermediate physical diagnostic'),
             sensor_limitation='PhysX first-hit raycasting; no RTX material/noise/motion-distortion simulation',
             lidar_static_input=args.lidar_static_input, motor_targets=args.motor_targets,
             diagnostic_duration_limit_s=args.duration_limit,
@@ -648,7 +937,7 @@ def run_case(args, app, name, mode, output):
                 [r['visual'] for r in rows],[r['progress_s'] for r in rows],
                 safety_pass=summary['safety_pass'],execution_ok=not failure,
                 intrinsics=engine.intrinsics,motion_end_s=engine.active.duration,
-                legacy_intent=measured_intent,safety_source='PhysX contacts and raw 1kHz actuator audit')
+                legacy_intent=measured_intent,safety_source=f'PhysX contacts and raw {args.physics_hz:g}Hz actuator audit')
             attach_acceptance(summary,acceptance)
         save_json(output/'summary.json', summary)
         save_json(output/'telemetry.json', rows)
@@ -672,6 +961,18 @@ def run_case(args, app, name, mode, output):
             api_records=([json.loads(line) for line in api_log.read_text().splitlines() if line]
                          if api_log.exists() else [])
             summary=assess_physx(summary,rows,api_records)
+            timing=dict(pace=args.pace, executed_sim_s=rows[-1]['t'],
+                execution_wall_s=run_end-run_start,
+                sim_wall_ratio=rows[-1]['t']/max(run_end-run_start,1e-9),
+                max_tick_wall_s=max(tick_times,default=0.),
+                p99_tick_wall_s=float(np.percentile(tick_times,99)) if tick_times else 0.,
+                ticks_over_20ms=sum(x>.02 for x in tick_times),
+                max_lag_s=max(tick_lags,default=0.),
+                scope='live physics, sensors, watchdog, audit and RGB; startup/shutdown excluded')
+            summary['realtime']=realtime_assessment(timing,
+                None if engine.watchdog is None else engine.watchdog.fault, summary['shot_acceptance']['accepted'])
+            save_json(output/'realtime_timing.json',dict(tick_wall_s=tick_times,lag_s=tick_lags,
+                stages=tick_stages,**summary['realtime']))
             save_json(output/'summary.json',summary)
         print('JEV_ISAAC_RESULT '+json.dumps(summary), flush=True)
     return summary
@@ -702,7 +1003,8 @@ class RGBPair:
         keys = ['execution', 'overview']
         if self.recording and not getattr(args, 'skip_reference_video', False):
             keys.append('reference')
-        keys.append('stabilized')
+        if self.camera_output.source == 'stabilized':
+            keys.append('stabilized')
         for key in keys:
             folder = self.root/key
             folder.mkdir()
@@ -733,11 +1035,12 @@ class RGBPair:
         (self.root/'camera_output.json').write_text(json.dumps(dict(schema='camera_output/v1',
             source=source, image_directory=source, video=source+'.mp4' if self.recording else None,
             recorded=self.recording,
-            comparison=None if not self.recording or getattr(args, 'skip_reference_video', False) else 'comparison.mp4',
+            comparison=('comparison.mp4' if self.recording and source == 'stabilized'
+                        and not getattr(args, 'skip_reference_video', False) else None),
             views=[view for view in ('reference','execution','stabilized') if view in self.cameras],
-            delivery_views=['overview','reference','stabilized'],
+            delivery_views=['overview','reference',source],
             reference_source='original_reference_floating_camera_same_scene_time',
-            raw_role='intermediate physical diagnostic', fps=args.record_fps))+'\n')
+            raw_role='primary Agent input' if source == 'execution' else 'intermediate physical diagnostic', fps=args.record_fps))+'\n')
         from jev_agent_wbc.reference import look_at
         import numpy as np
         overview_position = np.array([2.6, -3.2, 2.1])
@@ -758,7 +1061,7 @@ class RGBPair:
         import numpy as np
         from jev_agent_wbc.contracts import native
         from scipy.spatial.transform import Rotation
-        if stabilized_pose is None:
+        if stabilized_pose is None and self.camera_output.source == 'stabilized':
             self.camera_output.update(t, rp, rr, ap, ar)
             value = self.camera_output.latest
             stabilized_pose = (np.array(value['stabilized_camera_position']), Rotation.from_quat(value['stabilized_camera_quaternion_xyzw']).as_matrix())
@@ -792,6 +1095,7 @@ class RGBPair:
         if abs(float(self.sim.current_time)-capture_clock_before) > 1e-8:
             raise RuntimeError('RGB capture advanced the physical simulation')
         record = dict(frame=len(self.frame_metadata), t=t, physical_time_before_capture=capture_clock_before, physical_time_after_capture=float(self.sim.current_time),
+            capture_protocol='same_render_pass_same_simulation_timestamp',
             reference_camera_position=rp, actual_camera_position=ap,
             reference_camera_source='original_reference_floating_camera',
             reference_scene_time_s=float(t),
@@ -809,7 +1113,10 @@ class RGBPair:
         if not self.frame_metadata:
             # A deterministic first-frame box from known evaluation fixture geometry,
             # used only to identify SAM's object, never as its measured mask.
-            for key, p, r in [('reference', rp, rr), ('execution', ap, ar), ('stabilized', *stabilized_pose)]:
+            seeds = [('reference', rp, rr), ('execution', ap, ar)]
+            if stabilized_pose is not None:
+                seeds.append(('stabilized', *stabilized_pose))
+            for key, p, r in seeds:
                 if key not in self.cameras:
                     continue
                 box = self.project_box(p, r)
@@ -827,7 +1134,7 @@ class RGBPair:
     def capture_rgb(self, key, index, advance_render=True):
         import numpy as np
         if advance_render:
-            self.rep.orchestrator.step(rt_subframes=2, delta_time=0.0, pause_timeline=False)
+            self.rep.orchestrator.step(rt_subframes=self.args.render_subframes, delta_time=0.0, pause_timeline=False)
         rgba = np.asarray(self.annotators[key].get_data())
         if rgba.ndim != 3 or rgba.shape[:2] != (self.args.height, self.args.width):
             raise RuntimeError(f'RGB annotator is not ready: {key} {rgba.shape}')
@@ -899,7 +1206,7 @@ class RGBPair:
                 same_render_pass=True,actor_visibility_modified=False,
                 scope='detached original-reference camera in current physical scene; comparison only, not Agent input'))
             try:
-                if self.recording and not getattr(self.args, 'skip_reference_video', False):
+                if self.recording and not getattr(self.args, 'skip_reference_video', False) and 'stabilized' in self.cameras:
                     from jev_agent_wbc.camera_output import write_three_camera_video
                     comparison = write_three_camera_video(self.root, self.frame_metadata, self.args.record_fps)
                     save_json(self.root/'comparison.json', comparison)

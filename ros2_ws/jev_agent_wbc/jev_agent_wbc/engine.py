@@ -60,12 +60,15 @@ class CinematicEngine:
     def __init__(self, original, scene, output, *, mode='jev', api_url=None, model='perplexity', limits=None,
                  decision_cooldown_s=None, preview=False, budget=None, intrinsics=None,
                  decider=None, planning_obstacle_avoidance=None, planner_model="floating_camera", coordination_async=False,
-                 subject_model=None, representation_boxes=3, geometry_preferences=True):
+                 subject_model=None, representation_boxes=3, geometry_preferences=True, runtime_policy=None):
         if mode not in ('jev', 'strict', 'rule'):
             raise ValueError('mode must be jev, rule or strict')
         if planner_model not in ("wbc", "floating_camera"):
             raise ValueError("unknown planner model")
         self.planner_model = planner_model
+        self.runtime_policy = runtime_policy
+        self.runtime_fault = None
+        self.math_started_wall = None
         self.subject_model = subject_model
         from .representation_jvs import JVSGeometryBackend
         self.geometry_backend = JVSGeometryBackend(representation_boxes)
@@ -172,7 +175,32 @@ class CinematicEngine:
             rotation = getattr(self, 'planning_base_rotation', None)
             kwargs['base_rotation'] = None if rotation is None else np.asarray(rotation).copy()
         self.math_kind = kind
+        self.math_started_wall = time.monotonic()
         self.math_future = self.pool.submit(function, *args, **kwargs)
+
+    def _runtime_deadline(self, t):
+        if self.runtime_policy is None or self.runtime_fault is not None:
+            return
+        now = time.monotonic()
+        stages = [('planning_pipeline_timeout', self.pipeline_started_wall),
+                  ('planning_'+self.math_kind+'_timeout',
+                   self.math_started_wall if self.math_future is not None else None),
+                  ('semantic_timeout', self.jev.submitted_wall if self.jev.future is not None else None)]
+        for reason, started in stages:
+            if started is not None and now-started > self.runtime_policy.planning_timeout_s:
+                self.runtime_fault = dict(reason=reason, time_s=t, elapsed_wall_s=now-started)
+                self._write('runtime_fault_latched', t, **{k:v for k,v in self.runtime_fault.items() if k!='time_s'},
+                            action='brake; discard late results; explicit rearm required')
+                self.pending_candidates.clear()
+                self._feedback(reason, t)
+                break
+
+    def _runtime_failure(self, reason, t):
+        if self.runtime_policy is not None and self.runtime_fault is None:
+            self.runtime_fault = dict(reason=reason, time_s=t)
+            self.pending_candidates.clear()
+            self._write('runtime_fault_latched', t, reason=reason,
+                        action='brake; discard late results; explicit rearm required')
 
     def _evidence(self, t):
         from .representation import TaskContext
@@ -328,7 +356,8 @@ class CinematicEngine:
                 self.last_subject_feedback_s=t
                 self._write('subject_state_feedback',t,comparison=comparison)
                 self._feedback('measured_subject_frame_mismatch',t,finish_pipeline=False)
-        if self.mode == 'strict' or t >= self.original.duration:
+        self._runtime_deadline(t)
+        if self.runtime_fault is not None or self.mode == 'strict' or t >= self.original.duration:
             return
         if self.math_future is not None and self.math_future.done():
             future, kind = self.math_future, self.math_kind
@@ -340,6 +369,7 @@ class CinematicEngine:
             if kind == 'candidates':
                 self.validation_attempts += 1
             if result.get('error'):
+                self._runtime_failure('planning_failure: '+str(result['error']), t)
                 if kind == 'candidates':
                     from collections import Counter
                     evaluations=result.get('evaluations',[])
@@ -479,9 +509,12 @@ class CinematicEngine:
                     self._write('configuration_preparation_planned',t,candidate_id=candidate.id,
                         preparation=result.get('kinematics',{}).get('preparation'),
                         accepted_intent_violations=result.get('intent',{}).get('intent_violations',[]))
+        if self.runtime_fault is not None:
+            return
         semantic = self.jev.poll()
         if semantic is not None:
             if 'error' in semantic:
+                self._runtime_failure('semantic_failure: '+str(semantic['error']), t)
                 self._feedback('semantic: '+semantic['error'], t)
             elif semantic['stage'] == 'strategy':
                 self._write('search_strategy', t, **semantic)
@@ -534,7 +567,7 @@ class CinematicEngine:
                         evidence=self.perception.snapshot(t), intrinsics=self.intrinsics, budget=self.budget,
                         commanded_q=None if commanded_q is None else np.asarray(commanded_q).copy())
                 self.pending_candidates = {}
-        if (self.math_future is None and self.jev.future is None and
+        if (self.runtime_fault is None and self.math_future is None and self.jev.future is None and
                 t-max(self.last_report_s, self.last_attempt_s) >= self.cooldown and
                 self.original.duration-t > self.budget.activation_lead_s+.8):
             self._submit_math('diagnose', diagnose_bounded, self.original, scene, np.asarray(state).copy(),
@@ -557,7 +590,8 @@ class CinematicEngine:
         self.update(state, scene, t, base_z, commanded_q)
         updated_wall=time.monotonic()
         target, rotation, feedforward = self.active.sample(t)
-        brake = t >= self.original.duration or t-float(scene['observation_stamp']) > .6
+        brake = (self.runtime_fault is not None or t >= self.original.duration
+                 or t-float(scene['observation_stamp']) > .6)
         if brake and t < self.original.duration:
             self._write('sensor_stale_braking', t, observation_stamp=scene['observation_stamp'])
         try:
@@ -619,6 +653,7 @@ class CinematicEngine:
         original_p, original_r, _ = self.original.sample(t)
         parameters = np.zeros(len(PARAMETERS)) if self.active is self.original else self.active.parameters(t)
         info.update(jev_busy=self.jev.future is not None, math_busy=self.math_future is not None,
+                    runtime_fault=self.runtime_fault,
                     active_decision='' if self.active is self.original else self.active.envelope.decision_id,
                     observed_visual_valid=self.observed_visual_valid,
                     parameters=parameters.tolist(), original_position=original_p.tolist(),
@@ -651,7 +686,7 @@ class CinematicEngine:
                 wall_s=time.monotonic()-self.pipeline_started_wall))
             self.pipeline_started_wall = None
         self.jev.close()
-        if self.geometry_feedback_future is not None:
+        if self.geometry_feedback_future is not None and self.runtime_policy is None:
             try:
                 feedback,_=self.geometry_feedback_future.result(timeout=30.)
                 self._write('geometry_execution_feedback',(self.actual_feedback or {}).get('time_s',feedback['stamp_s']),
@@ -668,6 +703,7 @@ class CinematicEngine:
 
     def summary(self):
         return dict(mode=self.mode, planner_model=self.planner_model, semantic_model=self.semantic_model, jev_calls=self.jev.decider.client.calls,
+            runtime_fault=self.runtime_fault,
             kinematic_gate='fk_constrained_continuous_lift/v1' if self.planner_model=='floating_camera' else None,
             wbc_algorithm='TPR-WBC' if self.limits.obstacle_avoidance else 'tracking-only',
             wbc_degraded_samples=self.wbc_degraded_samples,

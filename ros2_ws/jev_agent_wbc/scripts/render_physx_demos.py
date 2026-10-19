@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """PhysX presentation adapter around the current Representation film renderer.
 
-Display measured overview, live original-reference floating camera and stabilized
+Display measured overview, live original-reference floating camera and the declared
 Agent camera. Legacy recordings without a trusted live reference retain their
 explicit old view layout. All source streams and shared render code are preserved.
 """
@@ -9,12 +9,22 @@ import argparse
 import json
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw
+import numpy as np
 import render_agent_demos as renderer
 from physx_acceptance import assess_physx, POLICY_VERSION
 
 
 def film_views(source,reference):
+    replay=(reference.get('protocol')=='measured_state_replay_original_reference_same_timestamp/v1'
+            and reference.get('measured_state_replay') is True)
+    if replay:
+        if not (reference.get('valid') is True and reference.get('same_render_pass') is True
+                and reference.get('live_sensor_capture') is False):
+            raise ValueError('replay requires verified measured link transforms')
+        return [dict(stream='overview',title='PhysX 整机（实测状态重放）',agent_input=False),
+                dict(stream='reference',title='参考相机（原参考轨迹重绘）',agent_input=False),
+                dict(stream=source,title='原始相机（Agent 输入位姿重放）',agent_input=True)]
     trusted=(reference.get('protocol')=='original_reference_floating_camera_same_scene_time/v1'
              and reference.get('valid') is True and reference.get('same_render_pass') is True)
     if source=='stabilized' and not trusted:
@@ -23,7 +33,7 @@ def film_views(source,reference):
         return [
             dict(stream='overview',title='PhysX 整机实录（同步实测）',agent_input=False),
             dict(stream='reference',title='参考相机（原参考轨迹）',agent_input=False),
-            dict(stream='stabilized',title='增稳相机（Agent输入）' if source=='stabilized' else '增稳相机（诊断）',agent_input=source=='stabilized')]
+            dict(stream=source,title='增稳相机（Agent输入）' if source=='stabilized' else '原始相机（Agent输入）',agent_input=True)]
     return [
         dict(stream='overview',title='PhysX 整机实录（同步实测）',agent_input=False),
         dict(stream='execution',title='实际相机（Agent 默认输入）',agent_input=True),
@@ -41,6 +51,7 @@ def main():
         if renderer.read(folder/'summary.json').get('backend')!='isaac_physx':
             parser.error('this adapter accepts measured PhysX recordings only')
     original_render=renderer.render_run
+    original_frame=renderer.draw_frame
     original_text=renderer.txt
     labels={}
 
@@ -56,6 +67,8 @@ def main():
     def render_measured(run,write,timeline,preview):
         if args.acceptance_policy=='user_20261017':
             run.summary=assess_physx(run.summary,run.rows,run.api)
+        if run.summary.get('realtime') and not any(a.get('response') for a in run.api):
+            run.model=str(run.model)+'（配置值；无模型响应）'
         source=renderer.read(run.folder/'video/camera_output.json')['source']
         reference_file=run.folder/'video/reference_rendering.json'
         reference=renderer.read(reference_file) if reference_file.exists() else {}
@@ -83,16 +96,51 @@ def main():
         result=original_render(run,write,timeline,preview)
         result['physx_rgb_views']=views
         result['reference_camera_audit']=reference
+        for filename in ('runtime_events.jsonl','realtime_timing.json'):
+            if (run.folder/filename).exists():
+                result['input_sha256'][filename]=renderer.sha(run.folder/filename)
         return result
+
+    def runtime_frame(run,t,*pos,**kw):
+        frame=original_frame(run,t,*pos,**kw)
+        if not run.summary.get('realtime'):
+            return frame
+        draw=ImageDraw.Draw(frame)
+        row=run.rows[max(0,np.searchsorted(run.times,t,side='right')-1)]
+        fault=row['info'].get('runtime_fault')
+        emergency=row['info'].get('emergency_stop_required')
+        draw.rectangle((899,51,1919,88),fill=renderer.BG)
+        camera_metadata=renderer.read(run.folder/'video/camera_output.json')
+        replay=camera_metadata.get('capture_mode')=='offline_measured_state_replay'
+        caption=('无录制实测状态 · 离线重绘 · 实时结论见执行日志' if replay else
+                 'pace=1 · 按仿真时间连续回放 · 不代表墙钟实时')
+        original_text(draw,(900,53),caption,21,renderer.GOLD,width=990)
+        if replay:
+            index=max(0,np.searchsorted(run.frame_times,t+1e-9,side='right')-1)
+            draw.rectangle((16,483,750,510),fill=renderer.BG)
+            original_text(draw,(20,484),f"实测状态时刻 {run.frames[index]['t']:.2f} s；RGB 离线重绘",17,renderer.MUTED)
+        draw.rectangle((16,1020,1040,1077),fill=renderer.BG)
+        status=('停车保护不足，需要外部安全介入' if emergency else '故障锁存，驱动减速' if fault else '在线运行，无轨迹等待')
+        reason=(emergency or fault or {}).get('reason','')
+        original_text(draw,(20,1024),status+(' | '+reason if reason else ''),20,
+                      renderer.RED if fault else renderer.GREEN,width=1000)
+        timing=run.summary['realtime']
+        draw.rectangle((1040,1020,1919,1079),fill=renderer.BG)
+        original_text(draw,(1050,1024),
+            f"执行墙钟 {timing['execution_wall_s']:.2f}s · 仿真/墙钟 {timing['sim_wall_ratio']:.2f} · 无讲解停留",
+            18,renderer.MUTED,width=850)
+        return frame
 
     renderer.FPS=args.fps
     renderer.txt=physx_text
     renderer.render_run=render_measured
+    renderer.draw_frame=runtime_frame
     try:
         renderer.render_explicit_runs(args.runs,args.output,representation_panel=True)
     finally:
         renderer.txt=original_text
         renderer.render_run=original_render
+        renderer.draw_frame=original_frame
     manifest=args.output.with_suffix('.json')
     report=json.loads(manifest.read_text())
     report.update(physx_presentation_adapter_sha256=renderer.sha(__file__),

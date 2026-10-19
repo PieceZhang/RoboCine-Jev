@@ -1,5 +1,17 @@
 # Closed-loop video delivery
 
+User preference, updated 2026-10-19: unless explicitly stated otherwise, all Jev
+calls must use the official TypeSafe API at `https://api.typesafe.ai/v1/systemone`
+with the API key stored in the repository-root `typesafe_Jev_api_key` file.
+Timeouts or connection failures when calling the official API do not count as
+failures of the current test; record them as network-related, unverified trials.
+
+User preference, updated later 2026-10-17: new PhysX executions also use `pace=1`.
+Never pause physical time to wait for Agent trajectories. Use bounded asynchronous
+control and latched timeout/failure braking; late results cannot automatically
+resume motion. Report measured wall-clock pacing separately from shot/safety
+acceptance. Preserve historical slow recordings and frozen configurations.
+
 User preference, persisted 2026-10-16: every delivered CPU whole-body closed-loop
 video and PhysX whole-body closed-loop video must show the unified Representation.
 Use the default `scripts/render_agent_demos.py` or `scripts/render_tpr_demo.py`
@@ -21,10 +33,30 @@ the Representation-enabled renderer. Save provenance and decode-check the film.
 Keep recording changes in the presentation layer and preserve concurrent edits
 to execution, planning, control and PhysX compatibility code.
 
-PhysX preference, updated 2026-10-17: use the virtual stabilized camera as the
-default Agent camera feedback, retaining measured physical robot state. Rerun
+PhysX preference, updated later 2026-10-19: use validated 100 Hz physics and the raw physical
+camera as default Agent feedback, bypassing stabilizer computation. Retain the
+unchanged Agent/planning workflow, budgets, sensor coverage and safety gates.
+Use short diagnostic prefixes for speed iterations and a complete shortest
+existing shot for final verification. Rerun
 the closed loop when changing this source. Delivered PhysX films show measured
 overview, a detached camera following the original reference in the same current
-scene/time, and `增稳相机（Agent输入）`; omit raw execution RGB from the film.
+scene/time, and `原始相机（Agent输入）`. Historical stabilized films stay intact.
 Keep raw measurements for audit. Acceleration excess is diagnostic only for
 PhysX acceptance; network-only timeout trials are unverified, not failures.
+
+Measure complete real-time runs without live RGB recording. Preserve the full
+dual-scanner coverage and original mapping algorithm; timestamp asynchronous
+mapping results by acquisition time, bound in-flight work, and latch a brake on
+worker failure/backlog. Never relax command, sensor, planning or safety thresholds
+to obtain a timing pass. Report timing_pass separately from end-to-end success.
+Native read-only ray queries may overlap CPU supervision, but all query jobs must
+join before any PhysX scene mutation, rendering or physics advance.
+Lower frequencies require physical tracking/constraint comparisons; 100 Hz is
+preferred over the tested 50 Hz because it better preserves 200 Hz trajectories.
+
+Use --save-replay to save measured per-link transforms without live RGB work;
+render_physx_replay.py may later redraw them without integrating physics or
+rerunning Agent decisions. Label such video as measured-state replay, validate
+every rendered link pose and its timestamp, retain source hashes, then use the
+Representation-enabled render_physx_demos.py pipeline. A replay image is not a
+new sensor observation and must never be fed back to an earlier Agent decision.

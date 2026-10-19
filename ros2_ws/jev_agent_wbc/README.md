@@ -1,5 +1,103 @@
 # Jev 相机意图规划与独立执行层
 
+## PhysX 实时运行与故障处理（2026-10-17 夜间）
+
+`run_isaac.py` 默认且仅接受 `pace=1`。Agent/WBC 在独立进程消费有界观测队列；
+PhysX 轮询命令，既不预先等待轨迹，也不等待迟到结果。初始化只预热进程与渲染产品，
+首条规划从启动后的实测观测开始。PhysX 默认使用原始相机反馈、100 Hz 物理步进，保留实测物理机器人和原镜头时钟。
+
+命令租约默认 100 ms（观测产生至执行，墙钟与物理时钟均检查），首命令期限 200 ms，
+传感器期限 200 ms，规划阶段/整个决策流程墙钟期限 1 s。错误、超时、控制进程退出或
+最新状态扫掠检查失败均触发锁存制动，迟到结果不能自动恢复；新会话才可重新使能。
+控制命令再次按当前观测检查扫掠，物理驱动按原加速度限制执行减速，障碍与仿真继续运行。
+数值/语义失败也锁存；过期候选仍不能越过原安装检查。
+
+这些是面向真机接口的故障处理机制，并非已验证的硬件安全控制器。零速度目标并不证明
+减速途中或停车后不会遭到动态障碍碰撞；真实设备必须在独立驱动/安全控制器中实现同样的
+命令租约和急停。Python/Kit 主线程自身卡住时，软件无法让物理世界在墙钟上继续推进。
+当前端点扫掠证书不涵盖实际执行器减速路径，原始物理审计继续保留。
+
+`summary.json.realtime` 与 `realtime_timing.json` 独立记录完整物理循环耗时、累计延迟、
+仿真/墙钟比和故障。只有原镜头验收通过、无锁存故障、所有控制周期耗时及累计延迟均不超过
+20 ms 才报告实时成功；设置 `pace=1` 或将视频按仿真时间播放不会使失败结果变成实时成功。
+记录与无记录测试分开进行，不把初始化、离线电影编码或退出等待混入运行墙钟；在线 RGB 采集与 JPEG 写入计入。
+本轮六场景最终实测 **实时成功 0/6、安全通过 4/6**。8.4 秒场景需要约 52.5–58.5 秒墙钟，
+实际速度约为实时的 0.14–0.16 倍；两个横移场景在停车后被动态障碍撞击。
+故障发生在语义选择之前，没有官方 Jev 请求记录，因此模型规划能力仍未验证。
+这轮验证了异步拒收迟到命令和故障升级机制，没有证明真机安全或实时成功。
+[六场景测试 demo](results/physx_realtime_20261017/physx_realtime_six_demos.mp4)、
+[报告与复现](results/physx_realtime_20261017/REPORT.txt)、
+[独立实时/故障审计](results/physx_realtime_20261017/realtime_audit.json)。
+最终执行和源码分别为 `verified_recorded/` 与 `verified_code/`；其余目录保留开发诊断。
+
+```bash
+source /opt/ros/humble/setup.bash
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 OMNI_KIT_ACCEPT_EULA=YES \
+ TYPESAFE_API_KEY_FILE="$PWD/typesafe_Jev_api_key" \
+ JEV_PHYSX_NUMERIC_SITE="$PWD/ros2_ws/jev_agent_wbc/results/physx_cpu_parity_20261016/physx_numeric" \
+ /usr/bin/python3 ros2_ws/jev_agent_wbc/scripts/jvs_isaac_bootstrap.py \
+ --isaac-python /home/w84384651/miniconda3/envs/env_isaaclab/bin/python \
+ --runner ros2_ws/jev_agent_wbc/scripts/run_isaac.py -- \
+ --case all --mode jev --model jev-1.14.0 --api-url https://api.typesafe.ai/v1/systemone \
+ --pace 1 --single-candidate --candidate-proposals 1 --candidate-budget 1 \
+ --candidate-wall-budget .8 --record --output <新的结果目录>
+```
+
+## PhysX 执行加速初轮（2026-10-19，历史 200 Hz 配置）
+
+本轮当时采用 `physics_hz=200`、`camera_output=execution`、`pace=1`。50 Hz 控制周期内
+执行 4 次物理子步；原始相机直接反馈实测位姿，不计算增稳滤波，也不创建增稳 RGB 产品。
+CPU 相机默认值与 Agent 决策、候选生成、规划预算及超时阈值均不变。
+
+运行层启用 Fabric，减少逐步 USD 写回；复用同一物理时刻的张量状态、固定射线参数、
+碰撞身份和不可变机器人几何；仍执行全部 LiDAR 射线、动态扫掠、命令插值检查和每步物理审计。
+headless 模式仅在采集 RGB 时渲染，默认每帧 1 个同时间子帧，可用 `--render-subframes 2` 对照。
+
+`--duration-limit 2` 用于最短迭代前缀，不能计为完整镜头成功；最终对照使用原始 `movein`
+8 秒镜头加 0.4 秒终态确认。`--profile-loop` 保存细分 cProfile 数据，带 profiler 的数据
+不参与最终速度对比；`--validate-fast-paths` 在真实 PhysX 中核对张量/API 状态和射线输入等价。
+
+实测完整录制 8.4 秒场景的在线墙钟从 56.04 秒降至 12.12 秒（4.62 倍）；无录制为 9.04 秒。
+两次均触发既有超时，仍未实时成功；加速不等于完整规划性能已验证。
+[最终 demo](results/physx_speed_20261019/physx_200hz_raw_demo_verified.mp4)、
+[完整测量与限制](results/physx_speed_20261019/REPORT.txt)、
+[冻结源码复现入口](results/physx_speed_20261019/reproduce.py)。
+该入口先 source ROS，然后以 `--label <新目录名> -- --duration-limit 2` 运行短前缀，
+或以 `--label <新目录名> -- --record` 录制完整最短镜头。`--profile baseline` 运行资源完整的旧配置。
+实时成功仍以 `summary.json.realtime.success` 为准，不能仅凭进程退出码、`pace=1` 或视频时长认定。
+
+## PhysX 无录制实时执行（2026-10-19，100 Hz）
+
+当前默认物理频率为 100 Hz，控制仍为 50 Hz，原始相机反馈、求解器迭代数、全部射线、
+Agent 流程、规划预算和安全阈值保持不变。原生适配器在同一 PhysX 场景并行执行完整
+12,480 条首次命中查询，启动时逐条与 Python API 比对；固定 8 线程池避免反复创建线程。
+物理步进使用 1 个工作线程。只读射线查询与 CPU 监督计算重叠，修改或推进 PhysX 场景前
+必须等待查询完成；不跨越物理步进读取场景。
+建图在单独进程按原算法和采集时间戳处理，最多一个在途扫描；故障或积压触发锁存制动。
+主循环的循环垃圾回收移至有限镜头时段之外，证据文件异步写入。
+
+六个原有 8.4 秒短镜头的冻结副本均达到逐周期实时（各 420 个周期零超期、零累计滞后）。
+合入后的两次无录制复测均通过：8.4 秒仿真分别用时 8.406 秒、8.405 秒，最慢周期
+14.70 ms、15.48 ms；第一轮同时保存逐刚体状态用于稍后重绘。
+这只证明物理执行期限；当前官方 Jev 仍因原有 1 秒流水线超时或候选不合格而制动，
+端到端成功仍为 0/6、安全通过 4/6；两个横移场景停车后被动态障碍撞击。
+没有延长超时或缩减规划任务来换取成功。
+最终配置的 100 Hz 对照 200 Hz 在共同有效的 4.5 秒原轨迹前缀，相机位置差异 RMS 0.156 mm、
+最大 0.741 mm；早期 50 Hz 对照最大差异 4.81 mm，因此保留 100 Hz。
+原轨迹控制器随后出现约束不可行，该前缀对照不等于完整任务性能已验证。
+
+原生适配器限于已验证的 `omni.physx 107.3.26`、Linux CPython 3.11 ABI，需要 C++ 编译器
+及 Isaac 自带头文件；首次编译在实时段之前完成。其他版本可显式使用 `--lidar-backend scalar`；
+`--lidar-processing sync`、`--no-lidar-pipeline` 保留串行对照。真实采集时间戳和既有传感器租约始终保留。
+
+先用 `--save-replay` 执行无 RGB 闭环，随后单独运行 `scripts/render_physx_replay.py --run <运行目录>`
+（使用同一个 Isaac bootstrap），再用 `scripts/render_physx_demos.py --runs <运行目录> --output <新视频>`
+生成带 Representation 的电影。离线重绘直接使用逐刚体实测位姿、实测障碍位置和原始相机位姿，
+不进行物理积分，不调用 Agent，明确标为实测状态重放；原始实时日志和失败结果不变。
+[本轮报告与证据](results/physx_realtime_20261019/REPORT.txt)保留所有成功及未通过的诊断。
+[无录制实测状态的离线 demo](results/physx_realtime_20261019/physx_realtime_100hz_demo.mp4)
+已通过逐刚体位姿、零物理步进、相机时间戳和视频解码审计。
+
 ## 单候选构造实验（2026-10-17）
 
 `runner --single-candidate --preplan --mode jev` 在镜头时钟启动前，以实测相机位姿为
@@ -286,7 +384,7 @@ PYTHONPATH=ros2_ws/jev_agent_wbc OPENBLAS_NUM_THREADS=1 \
 
 快速 QP 也独立保留原预算停车界，即使异步预测缺失也逐步收敛至零命令。当前相机任务保留在快速 QP 中，未来分配替换会与其冲突的瞬时朝向/舒适姿态目标；失去预测时使用当前约束内的低底盘速度偏好。没有后置限幅，也没有新增任务输入、重定时或评估容差。现有避障、关节制动界及扫掠证书继续独立检查实际命令。未来预测不包含障碍物约束，日志明确 `coordination_certificate=False`；它不是未来碰撞安全或镜头可行性的证明。
 
-实时 ROS 使用独立进程：一次只允许一个预测任务，过期超过 0.6 秒、目标版本不一致或偏离预测状态的结果拒绝安装。CPU/PhysX 默认同步执行用于数值复现；同步预测可能耗时数百毫秒至数秒，不能宣称达到 50 Hz。PhysX 可添加 `--async-coordination` 验证非阻塞路径。原 `--allocation-preview` 是旧分配器消融路径，不叠加新的协调器。
+实时 ROS 使用独立进程：一次只允许一个预测任务，过期超过 0.6 秒、目标版本不一致或偏离预测状态的结果拒绝安装。CPU 默认同步执行用于数值复现；同步预测可能耗时数百毫秒至数秒，不能宣称达到 50 Hz。当前 PhysX `run_isaac.py` 使用独立控制进程，`--async-coordination` 已默认开启。原 `--allocation-preview` 是旧分配器消融路径，不叠加新的协调器。
 
 新增日志包括预测时间范围、实际/命令速度初值来源、预测残差与关节余量、相机速度残差、实际速度计算的关节制动余量、异步预测接受/拒绝次数。制动余量是给定操作减速度下的诊断量，不是鲁棒可行域保证。
 
@@ -392,7 +490,7 @@ OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 OMNI_KIT_ACCEPT_EULA=YES \
   /usr/bin/python3 ros2_ws/jev_agent_wbc/scripts/jvs_isaac_bootstrap.py \
   --isaac-python /home/w84384651/miniconda3/envs/env_isaaclab/bin/python \
   --runner ros2_ws/jev_agent_wbc/scripts/run_isaac.py -- \
-  --case orbit --mode both --physics-hz 1000 --pace 1 --record --output /tmp/jev_physx_new
+  --case orbit --mode both --physics-hz 100 --camera-output execution --pace 1 --record --output /tmp/jev_physx_new
 
 # Isaac 退出后独立离线评分，包括中止运行的已执行前缀
 /home/w84384651/miniconda3/envs/sam2/bin/python \

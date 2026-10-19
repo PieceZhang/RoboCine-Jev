@@ -166,3 +166,16 @@ def test_async_sam_keeps_the_frame_id_from_acquisition():
         assert result['stamp_s'] == 2.3
     finally:
         worker.close()
+
+
+def test_raw_measurement_bypasses_stabilizer_and_preserves_acquisition_pose(monkeypatch):
+    camera=CameraOutput('execution')
+    monkeypatch.setattr(camera.filter,'update',lambda *a:pytest.fail('stabilizer must be bypassed'))
+    position=np.array([.1,.2,.3]);rotation=Rotation.from_euler('xyz',[.1,.2,.3]).as_matrix()
+    camera.accept_raw(.005,position,rotation)
+    np.testing.assert_array_equal(camera.pose(.005)[0],position)
+    np.testing.assert_allclose(camera.pose(.005)[1],rotation,atol=1e-15)
+    assert not camera.latest['stabilization']['enabled']
+    assert 'stabilized_camera_position' not in camera.latest
+    with pytest.raises(ValueError,match='execution source'):
+        CameraOutput('stabilized').accept_raw(0.,position,rotation)

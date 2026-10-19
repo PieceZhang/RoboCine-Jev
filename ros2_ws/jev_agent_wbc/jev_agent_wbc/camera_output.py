@@ -52,6 +52,18 @@ class CameraOutput:
             stabilization=info)
         return np.asarray(p), np.asarray(r)
 
+    def accept_raw(self, t, position, rotation):
+        """Measured camera path: no stabilizer work and no synthetic stabilized pose."""
+        if self.source != 'execution':
+            raise ValueError('raw camera update requires execution source')
+        position = np.asarray(position)
+        quaternion = Rotation.from_matrix(rotation).as_quat().tolist()
+        self.latest = dict(t=float(t), camera_output_source=self.source,
+            camera_position=position.tolist(), camera_quaternion_xyzw=quaternion,
+            actual_camera_position=position.tolist(), actual_camera_quaternion_xyzw=quaternion,
+            stabilization=dict(enabled=False, reason='raw_physical_camera_input'))
+        return position, np.asarray(rotation)
+
     def pose(self, t=None):
         if self.latest is None or (t is not None and abs(t-self.latest['t']) > 1e-8):
             raise ValueError('no timestamp-matched camera output')

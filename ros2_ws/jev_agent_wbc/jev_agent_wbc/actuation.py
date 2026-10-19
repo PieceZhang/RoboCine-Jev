@@ -18,9 +18,13 @@ def advance_command(state, old, new, duration, ramp=False):
 
 
 def certify_control_ramp(scene, state, old, new, t, dt, base_z=0., steps=10, constant_certificate=None,
-                         base_rotation=None):
+                         base_rotation=None, *, collision=None):
     robot = np.asarray(state).copy()
-    collision = DynamicCollision(scene, t)
+    if collision is None:
+        collision = DynamicCollision(scene, t)
+    elif collision.scene is not scene or collision.physical_time != float(t):
+        raise ValueError('ramp certificate requires the same current scene and timestamp')
+    initial_collision = collision
     if constant_certificate is not None:
         delta = np.abs(new-old)
         # Conservative perturbation of the already-certified constant command.
@@ -35,7 +39,7 @@ def certify_control_ramp(scene, state, old, new, t, dt, base_z=0., steps=10, con
     change = np.abs(new-old)/steps
     for i in range(steps):
         command = old+(i+.5)/steps*(new-old)
-        collision = DynamicCollision(scene, t+i*interval)
+        collision = initial_collision.at_time(i*interval)
         rotation = (None if base_rotation is None else
                     Rotation.from_euler('z', robot[2]-state[2]).as_matrix()@base_rotation)
         certificate = collision.sweep(robot, command, interval, base_z, max_samples=3, base_rotation=rotation)
