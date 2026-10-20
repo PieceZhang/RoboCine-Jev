@@ -22,7 +22,7 @@ from .camera_intent import POLICY,IntentSpec
 from .shot_acceptance import evaluate_shot, attach_acceptance
 
 
-def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, budget=None, model='perplexity', disable_wbc_avoidance=False, target_replay=None, planning_wbc_avoidance=False, planner_model="floating_camera", representation_boxes=3, geometry_preferences=True,preplan=False,phase_program=False,async_control=False,execution=None):
+def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, budget=None, model='perplexity', disable_wbc_avoidance=False, target_replay=None, planning_wbc_avoidance=False, planner_model="floating_camera", representation_boxes=3, geometry_preferences=True,preplan=False,phase_program=False,async_control=False,execution=None,reactive_progress=False):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     scene = RuntimeScene(Path(case)/'runtime_scene.json')
@@ -64,7 +64,7 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
     engine = CinematicEngine(original, observed, output, mode=mode, api_url=api_url, model=model,
         subject_model=runtime['subject'],representation_boxes=representation_boxes,geometry_preferences=geometry_preferences,
         planner_model=planner_model, planning_obstacle_avoidance=True if planning_wbc_avoidance else None,
-        coordination_async=use_async,
+        coordination_async=use_async,reactive_progress=reactive_progress,
         preview=preview, budget=budget, limits=Limits(obstacle_avoidance=not disable_wbc_avoidance), intrinsics=[fy*288/384, fy, .5, .5])
     schedule, replayed = [], []
     if target_replay is not None:
@@ -247,6 +247,7 @@ def main():
     parser.add_argument('--candidate-proposals', type=int, default=6, help='maximum local numerical proposals')
     parser.add_argument('--single-candidate', action='store_true',help='Jev chooses one construction before generation; no fallback candidates')
     parser.add_argument('--async-control', action='store_true', help='bounded asynchronous sensing/configuration preview, independent of semantic candidate mode')
+    parser.add_argument('--reactive-progress',action='store_true',help='enable observed passage-clock control for unplanned single motions; preserve installed plans')
     parser.add_argument('--preplan',action='store_true',help='approve one measured-start candidate before starting the shot clock')
     parser.add_argument('--phase-program',action='store_true',help='official Jev selects screened phase geometry and timing; source task and deadlines preserved')
     parser.add_argument('--candidate-budget', type=int, default=2, help='maximum full counterfactual branches')
@@ -280,7 +281,7 @@ def main():
                               args.allocation_preview and not args.no_preview, budget, args.model, args.disable_wbc_avoidance,
                               None if args.target_replay_root is None else args.target_replay_root/f"{name}_jev",
                               planning_wbc_avoidance=args.planning_wbc_avoidance, planner_model=args.planner_model,
-                              representation_boxes=args.representation_boxes,geometry_preferences=args.geometry_preferences=='on',preplan=args.preplan,phase_program=args.phase_program,async_control=args.async_control)
+                              representation_boxes=args.representation_boxes,geometry_preferences=args.geometry_preferences=='on',preplan=args.preplan,phase_program=args.phase_program,async_control=args.async_control,reactive_progress=args.reactive_progress)
             results.append(dict(case=name, **result))
             save_json(args.output/'runs.json', results)
     return 0 if all(r['completed'] for r in results) else 2

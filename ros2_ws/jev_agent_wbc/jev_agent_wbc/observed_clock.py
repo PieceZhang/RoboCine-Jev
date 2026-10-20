@@ -58,7 +58,15 @@ def poll_guide(c,reference,state,at,z):
 def update(c,reference,state,velocity,at,z,rotation=None):
     guide=poll_guide(c,reference,state,at,z)
     last=getattr(c,'clock_observation',None)
-    if last is not None and at-last['at']<.1-1e-8:return last
+    if last is not None and at-last['at']<.1-1e-8:
+        # Observations choose a profile at 10 Hz; the servo follows its clock
+        # continuously between those updates. Holding the position target for
+        # 100 ms while issuing nonzero feedforward creates a stop/go reference.
+        if last.get('active'):
+            return dict(last,progress=min(last['phase_end'],
+                last['progress']+last['rate']*max(0.,at-last['at'])),
+                interpolated_command_clock=True)
+        return last
     collision=c.collision
     movers=np.flatnonzero(collision.track_ids>0)
     result=dict(at=float(at),active=False,rate=1.,source='observed_full_body_passage_clock')
@@ -77,7 +85,7 @@ def update(c,reference,state,velocity,at,z,rotation=None):
         # the command target may lead to recover physical tracking lag.
         progress=max(progress,min(progress+1.0,last['progress']+last['rate']*(at-last['at'])))
     progress=min(phase['end_s'],progress)
-    result.update(phase_start=phase['start_s'],projected_progress=projected_progress)
+    result.update(phase_start=phase['start_s'],phase_end=phase['end_s'],projected_progress=projected_progress)
     # Remaining authored time guides speed recovery without changing deadlines.
     desired=np.clip((phase['end_s']-progress)/max(.3,phase['end_s']-at-.3),.3,2.5)
     oldrate=1. if last is None else last['rate']

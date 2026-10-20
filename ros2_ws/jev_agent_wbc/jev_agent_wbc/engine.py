@@ -57,17 +57,34 @@ def needs_configuration_confirmation(diagnosis, feedback, t):
     return True
 
 
+def configure_reactive_progress(controller, original, active, enabled):
+    """Use a local passage clock only for an unplanned single action.
+
+    An installed candidate owns a verified camera clock and body allocation;
+    the optional reactive policy must not retime that approval. Combinations
+    retain their existing phase-aware controller. Disabled leaves backend
+    settings untouched, including physical-runtime experiments.
+    """
+    if not enabled:
+        return
+    from .combo import is_combo
+    unplanned = active is original and not is_combo(original)
+    controller.body_aware = unplanned
+    controller.observed_clock_enabled = unplanned
+
+
 class CinematicEngine:
     def __init__(self, original, scene, output, *, mode='jev', api_url=None, model='perplexity', limits=None,
                  decision_cooldown_s=None, preview=False, budget=None, intrinsics=None,
                  decider=None, planning_obstacle_avoidance=None, planner_model="floating_camera", coordination_async=False,
-                 subject_model=None, representation_boxes=3, geometry_preferences=True, runtime_policy=None):
+                 subject_model=None, representation_boxes=3, geometry_preferences=True, runtime_policy=None, reactive_progress=False):
         if mode not in ('jev', 'strict', 'rule'):
             raise ValueError('mode must be jev, rule or strict')
         if planner_model not in ("wbc", "floating_camera"):
             raise ValueError("unknown planner model")
         self.planner_model = planner_model
         self.runtime_policy = runtime_policy
+        self.reactive_progress = bool(reactive_progress)
         self.runtime_fault = None
         self.runtime_delays = set()
         self.runtime_retries = 0
@@ -146,6 +163,7 @@ class CinematicEngine:
             obstacle_avoidance_enabled=self.limits.obstacle_avoidance,
             wbc_algorithm='TPR-WBC' if self.limits.obstacle_avoidance else 'tracking-only',
             legacy_allocation_preview_ignored=bool(preview and self.limits.obstacle_avoidance),
+            reactive_progress_enabled=self.reactive_progress,
             planning_obstacle_avoidance_enabled=self.planning_limits.obstacle_avoidance,
             visual_intrinsics=intrinsics, semantic_policy=type(decider).__name__)
 
@@ -473,6 +491,8 @@ class CinematicEngine:
                 camera_quaternion_xyzw=Rotation.from_matrix(r).as_quat().tolist(),
                 progress_s=progress_at(self.active,camera_stamp),visual=visibility(p,r,observed,camera_stamp,
                     observed.get('subject_model'),self.intrinsics or default_intrinsics())))
+        configure_reactive_progress(self.wbc, self.original, self.active,
+                                    self.reactive_progress)
         self.wbc.update_collision_map(scene)
         self.wbc.set_time(t)
         self._monitor_visual(t)

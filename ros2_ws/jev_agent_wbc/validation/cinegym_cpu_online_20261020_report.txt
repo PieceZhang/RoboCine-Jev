@@ -1,0 +1,93 @@
+CineGym / 固定场景统一 CPU 闭环对照
+
+结论：观察到局部动态反应的实测改善。随机纯在线完整通过 5/32 → 11/32，安全完成 17/32 → 21/32。整体仍未达到满意的高成功率；不能据此宣称高层动态重规划能力已有明显改进。
+
+开始：2026-10-20T08:56:57+00:00；报告生成：2026-10-20T10:26:20.821037+00:00；累计 89.4 分钟。
+时间上限 90 分钟；本轮未执行 PhysX 或硬件验收。
+基线：e476c8650ff4dc348c3af5ec527fba5e68843859 的独立 git archive 快照。
+核心规划/控制/验收文件与此前 CPU 12/12 冻结证据一致。全量重叠比较见 frozen_cpu07_full_overlap.json：206 个共同文件中，另外两处差异是几何编译缓存输入规范和传感器覆盖验证脚本；本次两版共同使用当前 commit 的实现。
+
+实验配置与场景
+CPU 固定积分 20 ms，LiDAR 名义 10 Hz，0.8 s 观测预热，pace=1；官方 https://api.typesafe.ai/v1/systemone，jev-1.14.0。
+每次一个 Jev 构造、一个数值候选，候选墙钟预算 6 s，激活提前量 3.2 s；预规划模式增加 --preplan，纯在线无启动前规划。预规划之后仍允许在线监测和重规划。
+优化版增加 --reactive-progress。其余实际启动参数和每个四向对照的 task/scene 经自动核对：True，160 次运行、40 个场景。
+随机场景来自预先保留的 8 个新种子，4 个单运镜、4 个双运镜，简单/中等各半。每个种子依次派生线性单障碍、非匀速单障碍、多动态障碍、加入地面方块四级；四级共享种子，不能视为 32 个独立样本。
+全部 32 个派生场景均重新通过离线 CPU 可行轨迹复核，含完整方块体积和原运镜验收。此证明仅用于场景核查，未发送给 Jev，也未供 agent 执行。L1 的地面穿越修正在最终测试前完成。
+离线可行见证是已知完整场景下的存在性证明，不保证仅凭当前观测的在线策略一定可解。
+固定集只取 6 个单运镜和 2 个双运镜；4 个三运镜场景按用户限制排除。双运镜缺失连接段由官方 Jev 预先补齐一次，两版/两模式共享同一输入、原阶段时间和总截止时间，不使用旧评测中的额外自由连接时间。因此不能直接把本次固定合计指标等同于历史 12/12。
+版本与测试清单在 final_schedule.json 生成时冻结；此后未再根据测试结果调整策略。基线/优化版执行顺序交错，原始日志和每批源码散列均保留。
+
+最终结果
+完整通过 = 完成执行 ＋ 原有运镜验收通过 ＋ 独立连续安全和执行器检查通过。
+安全完成必须完成全程；中途停止的安全前缀不能计入。独立审核使用 5 ms 采样与速度 Lipschitz 下界，必要时细化到 1 ms；包含停止前最后状态、外部完整体积包络、自碰撞、关节范围和原有 1e-6 绝对执行器残差。
+网络未验证单列，不算算法失败。
+
+场景 | 模式 | 基线完整通过 | 优化完整通过 | 基线安全完成 | 优化安全完成
+随机合计（8新种子×4级） | 预规划＋在线 | 5/32 | 4/32 | 7/32 | 6/32
+随机合计（8新种子×4级） | 纯在线 | 5/32 | 11/32 | 17/32 | 21/32
+随机单运镜 | 预规划＋在线 | 5/16 | 4/16 | 5/16 | 4/16
+随机单运镜 | 纯在线 | 3/16 | 9/16 | 7/16 | 11/16
+随机双运镜 | 预规划＋在线 | 0/16 | 0/16 | 2/16 | 2/16
+随机双运镜 | 纯在线 | 2/16 | 2/16 | 10/16 | 10/16
+随机简单 | 预规划＋在线 | 4/16 | 3/16 | 4/16 | 3/16
+随机简单 | 纯在线 | 2/16 | 5/16 | 4/16 | 8/16
+随机中等 | 预规划＋在线 | 1/16 | 1/16 | 3/16 | 3/16
+随机中等 | 纯在线 | 3/16 | 6/16 | 13/16 | 13/16
+L1 单个线性动态障碍 | 预规划＋在线 | 1/8 | 1/8 | 2/8 | 2/8
+L1 单个线性动态障碍 | 纯在线 | 2/8 | 5/8 | 6/8 | 7/8
+L2 单个非匀速动态障碍 | 预规划＋在线 | 2/8 | 2/8 | 3/8 | 3/8
+L2 单个非匀速动态障碍 | 纯在线 | 3/8 | 5/8 | 6/8 | 7/8
+L3 多个动态障碍 | 预规划＋在线 | 1/8 | 1/8 | 1/8 | 1/8
+L3 多个动态障碍 | 纯在线 | 0/8 | 1/8 | 3/8 | 4/8
+L4 动态障碍＋地面方块 | 预规划＋在线 | 1/8 | 0/8 | 1/8 | 0/8
+L4 动态障碍＋地面方块 | 纯在线 | 0/8 | 0/8 | 2/8 | 3/8
+固定合计（6单＋2双） | 预规划＋在线 | 6/8 | 6/8 | 7/8 | 7/8
+固定合计（6单＋2双） | 纯在线 | 0/8 | 2/8 | 6/8 | 8/8
+固定单运镜 | 预规划＋在线 | 6/6 | 6/6 | 6/6 | 6/6
+固定单运镜 | 纯在线 | 0/6 | 2/6 | 4/6 | 6/6
+固定双运镜 | 预规划＋在线 | 0/2 | 0/2 | 1/2 | 1/2
+固定双运镜 | 纯在线 | 0/2 | 0/2 | 2/2 | 2/2
+
+最终计划 160 次，实际审计 160 次；完整运行清单完成：True。
+未知试验：baseline=0, optimized=0
+
+动态反应与重规划判断
+baseline / preplan：运行中新计划安装 0 次；存在运行中新安装且最终完整通过的场景 0/32。
+optimized / preplan：运行中新计划安装 0 次；存在运行中新安装且最终完整通过的场景 0/32。
+baseline / online：运行中新计划安装 2 次；存在运行中新安装且最终完整通过的场景 0/32。
+optimized / online：运行中新计划安装 3 次；存在运行中新安装且最终完整通过的场景 0/32。
+纯在线完整通过的配对统计：{"paired_episodes": 32, "wins": 7, "losses": 1, "episode_sign_test_p": 0.0703125, "independent_seed_clusters": 8, "cluster_mean_delta": 0.1875, "seed_bootstrap_95_percent_interval": [0.0, 0.40625], "seed_block_sign_flip_two_sided_p": 0.25, "caution": "The four levels share each seed. Episode sign tests are descriptive; seed-level intervals are exploratory with only eight independent seeds."}
+纯在线安全完成的配对统计：{"paired_episodes": 32, "wins": 4, "losses": 0, "episode_sign_test_p": 0.125, "independent_seed_clusters": 8, "cluster_mean_delta": 0.125, "seed_bootstrap_95_percent_interval": [0.0, 0.375], "seed_block_sign_flip_two_sided_p": 1.0, "caution": "The four levels share each seed. Episode sign tests are descriptive; seed-level intervals are exploratory with only eight independent seeds."}
+按独立种子成组的双侧符号翻转检验，完整通过的 p=0.25；本批证据不足以认定总体存在统计显著改进。收益集中于单运镜，双运镜完整通过数没有增加。
+局部动态反应的收益应与高层重规划分开解释。新策略让未规划单运镜按实际几何进度让行，原截止时间、方向、构图和终帧标准均未放宽；它不等价于 Jev 成功产生并安装了新轨迹。
+本轮未保留候选构造/验证的实验性修改。8 个独立种子及异步工作线程的时延波动，不足以支撑广泛泛化或硬件实时性的结论。总体是否达到满意成功率，应以上表的完整通过率判断，不能仅看未发生碰撞。
+
+失败定位
+1. 统一配置后，单个线性障碍仍有启动规划拒绝；随机初始构型、相机运动几何与全身分配已能触发数值构造失败。离线存在可行见证，说明局部搜索失败不能解释为场景全局无解。离线见证通过时序调整得到，而启动阶段的单候选接口不提供 body_timing 家族，这也限制了可搜索的解。
+2. 在线曲线接续实验曾使候选通过构造，但后续出现激活过期或验证状态邻域失配。较短激活时间与完整验证耗时互相制约；延长提前量又会保留过长的原路径前缀。这些实验没有稳定改善闭环结果，未放宽阈值，也未作为最终改动保留。
+3. 多障碍时，部分失败日志显示单独的执行器约束可行，加入当前碰撞约束后局部控制不可行；部分机械臂已接近关节边界。局部让行不能代替更早的全身空间准备和可靠重规划。
+4. 已安装的新计划仍可能太晚，且不能抹掉此前的方向/自然曲线违例。安装数不等于任务成功数。
+5. test2_L4_boxes 的预规划对照存在一次 API 选择差异：两次完整请求内容相同，基线选择 outer，优化运行选择 adaptive，后者启动构造被拒绝。此时局部控制开关尚未执行。该结果照常保留，说明本批预规划差异还包含官方 API 选择波动；证据见 preplan_api_variation.json。
+baseline 数值拒绝前八项：[["joint_curve_search:joint_curve_shape", 97], ["joint_curve_search:coarse_qp_primal infeasible", 81], ["kinematic_gate:whole_body_collision", 6], ["joint_curve_search:coarse_qp_primal infeasible inaccurate", 6], ["kinematic_gate:kinematic_qp_infeasible", 4], ["joint_curve_search:coarse_qp_maximum iterations reached", 4], ["kinematic_gate:kinematic_tracking_unreachable", 3], ["cinematic_curve_direction_or_shape", 3]]
+baseline 安装拒绝：{"configuration_left_verified_kinematic_neighborhood": 18, "latest_verification_expired": 7}
+optimized 数值拒绝前八项：[["joint_curve_search:joint_curve_shape", 90], ["joint_curve_search:coarse_qp_primal infeasible", 84], ["kinematic_gate:kinematic_tracking_unreachable", 5], ["cinematic_curve_direction_or_shape", 5], ["kinematic_gate:kinematic_qp_infeasible", 5], ["kinematic_gate:whole_body_collision", 5], ["camera_collision", 5], ["joint_curve_search:coarse_qp_primal infeasible inaccurate", 5]]
+optimized 安装拒绝：{"camera_left_verified_state_neighborhood": 5, "latest_verification_expired": 6, "configuration_left_verified_kinematic_neighborhood": 19}
+
+保留的改动及分类
+Agent 策略补充：根据当前参考是否已有独立验证的计划切换局部反应策略；对未规划单运镜启用几何进度与观测让行，安装计划后遵循已批准的时序和全身分配，双运镜保留既有阶段控制。此项复用已有模块，适合作为方法消融项，尚不足以宣称独立重大论文贡献。
+工程优化：10 Hz 观测更新之间持续推进控制参考时钟，避免位置参考停住而前馈仍非零；增加 --reactive-progress 显式开关，默认关闭；统一场景、配置、源码快照与独立安全审核。
+修改 engine.py、runner.py、observed_clock.py，新增 test_reactive_progress.py。冻结候选源码的 9 项相关测试通过。未修改碰撞/运动学/安装门限及运镜验收。
+启动示例：在已有官方 Jev CPU 命令上增加 --reactive-progress；预规划再增加 --preplan。完整可重放命令见 final_optimized/runs/*/command.json，补丁见 retained_candidate.patch。
+
+授权受限的分支
+数值规划失败明细原先已记录，但没有进入合并的 Jev 构造请求。准备了把最近三次失败时间、构造参数、数值拒绝原因发送给官方 API 的修正。自动审批拒绝该试验，理由是新增内部运行元数据未在此前明确授权的外发类别中；已向用户提出补充授权问题，该分支未运行、未合入。最终评估的 Jev 客户端和 API evidence 函数与基线相同。
+
+证据索引
+comparison.json / comparison.csv：完整审计结果、分组统计与配对统计。
+comparison.png / comparison.pdf：四级随机性及固定场景对照图。
+protocol_verification.json：实际参数、输入一致性和动作数量复核。
+derived_scene_witness_audit.json：32 个派生场景离线可行性复核。
+final_baseline、final_optimized：冻结源码、命令、API 回包、事件和实际执行遥测。
+baseline_*、*_trial、*_dev、replay_*.json：开发和被否决的实验，不混入最终测试。
+
+完整证据目录：/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/results/cinegym_cpu_online_20261020_1657
