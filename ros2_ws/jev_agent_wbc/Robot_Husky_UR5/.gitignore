@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+/results/
+/assets/source/
+
+/ocs2/.cache/
+
+/results/ocs2_*/

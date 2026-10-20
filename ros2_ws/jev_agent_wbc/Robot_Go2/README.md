@@ -1,5 +1,22 @@
 # Go2＋机械臂本地部署
 
+本轮按用户更新后的范围交付 **基础稳定运动与相机任务接口**，停止进一步精密停车优化。最终基础配置是 `D3 / vxy_p05_v1 / fresh_actual_output_continuity_v2`，对应完整连续实测 `results/adaptive_suite_planar_brake_01`；控制源与该轮冻结副本逐字一致。
+
+```bash
+./run_basic_wbc.sh --preflight
+./run_basic_wbc.sh --output results/my_basic_run
+```
+
+该专用入口固定实际验证过的九段连续配置：2 秒初始稳定，九段各 5 秒运动和 5 秒停车，共 92 秒；200 Hz 物理、50 Hz 策略、每周期四次原生写回，`pace=1`，计时后才拍摄 RGB。输出目录必须是新目录。**入口保留原严格验收退出码：两段精密停车失败时仍退出 2，原 `summary.json.all_pass=false` 不改写。** 基础层独立结论见 `WBC_READINESS.json.basic_control` 与根级基础审计。
+
+这次九项速度方向与原相机 RMSE 判据全部通过，4500 帧限位、驱动、自碰撞、原生输入域反馈通过，92 秒仿真用时 92.00008 秒。基础层最差末半秒：全部关节 span 25.066 mrad、机身位移 4.106 mm、相机位移 11.171 mm；最终线速度 0.01562 m/s、角速度 0.03702 rad/s。七段满足原精密停车标准，**左转与相机运动后的精密停车仍失败**；不宣称全部关节完全静止或全程精密相机误差均在容差内。
+
+独立基础审计按降低后的粗停车范围重算九项全部通过，原始数据与源绑定无错误；实际 XY 制动输入审计也通过。报告为 `../validation/wbc_go2_planar_basic01_independent_20261020.json` 与 `../validation/wbc_go2_planar_input01_independent_20261020.json`，原精密失败不变。
+
+公共接口保持原 WORLD 绝对时间 `TimedTask`，显式转换相机语义轴与光学轴，返回实测相机误差、双部件占据体及五类约束状态。当前只协商 `timed_camera_se3`；任意机身姿态、区域避让、接触规划、环境避障和全姿态传感器覆盖不作支持声明。未知地图反馈 `unknown`，未集成或不支持与数学不可行分开表示。具体时效、限幅与失败原因见 [WBC.md](WBC.md)。
+
+下文旧 `run.sh`、80 秒初验及调试记录属于历史入口；基础交付默认使用上面的 `run_basic_wbc.sh`。原始结果、失败和严格门禁均保留。
+
 本目录保存用户指定的两个官方仓库及其模型、控制器、策略。全身控制主平台选择 **Go2＋Agilex Piper**，因为 LeggedManip_Lab 同时提供匹配的 USD、WBC 配置和已导出的 TorchScript 策略。Go2＋D1 保留为独立参考平台，不能使用 Piper 的策略。
 
 ## 运行
@@ -94,3 +111,7 @@ D1 已成功导入为 `assets/generated/go2_d1/go2_d1.usd`，包括约 28 MB 的
 `--sensor-audit` 记录完整机身姿态下的扫描与本体遮挡；`--sensor-rgb` 在运行后检查实际 RGB 与拍摄方向。
 配置、输出及未验证范围见 [三平台传感器安装说明](../SENSOR_INSTALLATION.md)。
 此标定仅用于 Go2-Piper；D1 需独立标定。新增传感器尚未接通避障 Agent，历史 WBC 验收不代表新安装已完成物理或全姿态视场验收。
+
+## 新相机任务适配核验（2026-10-20）
+
+已核实当前入口为 **Go2-Piper WBC 210 输入 / 18 输出**；新增完整光学外参及倾斜 `link0` 的精确 mixed-frame 转换。真实站立相机小轨迹通过（RMSE 19.1 mm / .0115 rad），持续移动基座的联合试验失败（RMSE .33064 m / .06077 rad），并出现超出上游配置命令外域和 yaw 方向错误；该失败证据完整保留。可调用外域预检与能力限制见 [WBC.md](WBC.md) 和 [WBC_READINESS.json](WBC_READINESS.json)。不能将原生末端输入支持等同任意相机/身体控制。

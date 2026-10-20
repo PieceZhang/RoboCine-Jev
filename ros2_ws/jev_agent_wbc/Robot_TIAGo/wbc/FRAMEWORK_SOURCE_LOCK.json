@@ -1,0 +1,41 @@
+{
+  "schema": "tiago_framework_source_lock/v1",
+  "verified_date": "2026-10-20",
+  "repositories": [
+    {
+      "name": "cognitive_robot_abstract_machine",
+      "repository": "https://github.com/cram2/cognitive_robot_abstract_machine.git",
+      "branch": "main",
+      "commit": "7b27424de7768798dc561f447e11c2a8eb86c307",
+      "source_subdirectory": "giskardpy"
+    },
+    {
+      "name": "giskardpy",
+      "repository": "https://github.com/SemRoCo/giskardpy.git",
+      "branch": "giskard_library",
+      "commit": "045e951fd70882e13036e6bc40e0b4badd13299d",
+      "source_subdirectory": ""
+    },
+    {
+      "name": "giskardpy_ros",
+      "repository": "https://github.com/SemRoCo/giskardpy_ros.git",
+      "branch": "ros2-jazzy-main",
+      "commit": "a0cb4a8ad5e91d2d552467c7952eb7546f87d9bf",
+      "source_subdirectory": ""
+    }
+  ],
+  "primary_documentation": [
+    {
+      "url": "https://github.com/SemRoCo/giskardpy",
+      "finding": "README redirects current core to cram2 monorepo"
+    },
+    {
+      "url": "https://github.com/cram2/cognitive_robot_abstract_machine/tree/main/giskardpy",
+      "finding": "current Giskard core; piqp plus semantic_digital_twin/krrood dependencies"
+    },
+    {
+      "url": "https://github.com/SemRoCo/giskardpy_ros/tree/ros2-jazzy-main",
+      "finding": "legacy ROS2 wrapper documented for Ubuntu24.04/Jazzy, supplied TIAGo config uses dual-arm names"
+    }
+  ]
+}

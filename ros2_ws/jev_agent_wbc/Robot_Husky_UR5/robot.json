@@ -1,0 +1,89 @@
+{
+  "name": "Husky A200 + UR5",
+  "robot_key": "husky",
+  "usd": "assets/husky_ur5_v2.usda",
+  "articulation_root": "/husky_base_link",
+  "base_link": "husky_base_link",
+  "ee_link": "ur5_wrist_3_link",
+  "wheel_radius_m": 0.1651,
+  "wheel_separation_m": 0.5708,
+  "left_wheels": [
+    "husky_front_left_wheel_joint",
+    "husky_rear_left_wheel_joint"
+  ],
+  "right_wheels": [
+    "husky_front_right_wheel_joint",
+    "husky_rear_right_wheel_joint"
+  ],
+  "wheel_signs": {},
+  "sensors": "sensors.json",
+  "joints": [
+    {
+      "name": "ur5_shoulder_pan_joint",
+      "home": 0,
+      "lower": -6.283185307179586,
+      "upper": 6.283185307179586,
+      "velocity": 0.65,
+      "effort": 150,
+      "kp": 6000,
+      "kd": 400
+    },
+    {
+      "name": "ur5_shoulder_lift_joint",
+      "home": -1.2,
+      "lower": -6.283185307179586,
+      "upper": 6.283185307179586,
+      "velocity": 0.65,
+      "effort": 150,
+      "kp": 6000,
+      "kd": 400
+    },
+    {
+      "name": "ur5_elbow_joint",
+      "home": 1.8,
+      "lower": -3.141592653589793,
+      "upper": 3.141592653589793,
+      "velocity": 0.65,
+      "effort": 150,
+      "kp": 6000,
+      "kd": 400
+    },
+    {
+      "name": "ur5_wrist_1_joint",
+      "home": -0.6,
+      "lower": -6.283185307179586,
+      "upper": 6.283185307179586,
+      "velocity": 0.65,
+      "effort": 28,
+      "kp": 2500,
+      "kd": 150
+    },
+    {
+      "name": "ur5_wrist_2_joint",
+      "home": 1.5707963267948966,
+      "lower": -6.283185307179586,
+      "upper": 6.283185307179586,
+      "velocity": 0.65,
+      "effort": 28,
+      "kp": 2500,
+      "kd": 150
+    },
+    {
+      "name": "ur5_wrist_3_joint",
+      "home": 0,
+      "lower": -6.283185307179586,
+      "upper": 6.283185307179586,
+      "velocity": 0.65,
+      "effort": 28,
+      "kp": 2500,
+      "kd": 150
+    }
+  ],
+  "base_max_speed_mps": 0.25,
+  "base_max_yaw_radps": 0.45,
+  "notes": [
+    "Four rolling wheels and skid steering: world lateral travel uses turn-drive-turn, never body vy.",
+    "Physical wheel-ground slip must be measured; .5708 m is geometric track, not a fitted skid-steer track."
+  ],
+  "heading_timeout_s": 60.0
+}

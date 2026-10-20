@@ -1,0 +1,50 @@
+{
+  "schema": "robot_source_lock/v1",
+  "repositories": [
+    {
+      "name": "pal_gripper",
+      "repository": "https://github.com/pal-robotics/pal_gripper.git",
+      "commit": "485b535532c04b0ce31a00ad431d99e2714c0d54",
+      "branch": "humble-devel"
+    },
+    {
+      "name": "pal_hey5",
+      "repository": "https://github.com/pal-robotics/pal_hey5.git",
+      "commit": "344de441fa3c378573dd7f6e04dc7ec4f8cb0cab",
+      "branch": "humble-devel"
+    },
+    {
+      "name": "pal_urdf_utils",
+      "repository": "https://github.com/pal-robotics/pal_urdf_utils.git",
+      "commit": "e8600a339a3a9b7ffe67d1030190b97b67fb577b",
+      "branch": "humble-devel"
+    },
+    {
+      "name": "pmb2_robot",
+      "repository": "https://github.com/pal-robotics/pmb2_robot.git",
+      "commit": "e6584136f15356b8f4944c25d70fb8689e3355af",
+      "branch": "humble-devel"
+    },
+    {
+      "name": "tiago_robot",
+      "repository": "https://github.com/pal-robotics/tiago_robot.git",
+      "commit": "f1c33c92bdde7c1dd79f0c3e739e98a233dbd30b",
+      "branch": "humble-devel"
+    },
+    {
+      "name": "tiago_moveit_config",
+      "repository": "https://github.com/pal-robotics/tiago_moveit_config.git",
+      "commit": "a71258d5f22f2bd06ead8db78bba8cef7a58962e",
+      "branch": "humble-devel"
+    }
+  ],
+  "configuration": {
+    "base_type": "pmb2",
+    "end_effector": "pal-gripper",
+    "ft_sensor": "no-ft-sensor",
+    "camera_model": "no-camera",
+    "laser_model": "no-laser",
+    "use_sim_time": "true",
+    "is_public_sim": "true"
+  }
+}

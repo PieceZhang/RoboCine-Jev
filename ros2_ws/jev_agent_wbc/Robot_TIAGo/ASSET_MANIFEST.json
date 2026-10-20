@@ -1,0 +1,527 @@
+{
+  "schema": "robot_asset_manifest/v1",
+  "robot": "PAL Robotics TIAGo steel, PMB2 differential base, single 7-DoF arm and lifting torso",
+  "source_lock": "SOURCE_LOCK.json",
+  "source_repositories": [
+    {
+      "name": "pal_gripper",
+      "repository": "https://github.com/pal-robotics/pal_gripper.git",
+      "commit": "485b535532c04b0ce31a00ad431d99e2714c0d54",
+      "branch": "humble-devel"
+    },
+    {
+      "name": "pal_hey5",
+      "repository": "https://github.com/pal-robotics/pal_hey5.git",
+      "commit": "344de441fa3c378573dd7f6e04dc7ec4f8cb0cab",
+      "branch": "humble-devel"
+    },
+    {
+      "name": "pal_urdf_utils",
+      "repository": "https://github.com/pal-robotics/pal_urdf_utils.git",
+      "commit": "e8600a339a3a9b7ffe67d1030190b97b67fb577b",
+      "branch": "humble-devel"
+    },
+    {
+      "name": "pmb2_robot",
+      "repository": "https://github.com/pal-robotics/pmb2_robot.git",
+      "commit": "e6584136f15356b8f4944c25d70fb8689e3355af",
+      "branch": "humble-devel"
+    },
+    {
+      "name": "tiago_robot",
+      "repository": "https://github.com/pal-robotics/tiago_robot.git",
+      "commit": "f1c33c92bdde7c1dd79f0c3e739e98a233dbd30b",
+      "branch": "humble-devel"
+    },
+    {
+      "name": "tiago_moveit_config",
+      "repository": "https://github.com/pal-robotics/tiago_moveit_config.git",
+      "commit": "a71258d5f22f2bd06ead8db78bba8cef7a58962e",
+      "branch": "humble-devel"
+    }
+  ],
+  "configuration": {
+    "base_type": "pmb2",
+    "end_effector": "pal-gripper",
+    "ft_sensor": "no-ft-sensor",
+    "camera_model": "no-camera",
+    "laser_model": "no-laser",
+    "use_sim_time": "true",
+    "is_public_sim": "true",
+    "has_screen": "false",
+    "arm_type": "tiago-arm",
+    "wrist_model": "wrist-2017",
+    "has_thermal_camera": "false",
+    "no_safety_eps": "false",
+    "calibration_tool": "False",
+    "eye_hand_calibration_dir": "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/assets/sources/tiago_robot/tiago_description/urdf/calibration",
+    "camera_extrinsic_calibration_dir": "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/assets/sources/tiago_robot/tiago_description/urdf/calibration",
+    "is_multiple": "false",
+    "namespace": "",
+    "gazebo_version": "classic",
+    "multiple": "false"
+  },
+  "entry": "urdf/tiago_physics.urdf",
+  "sha256": "e7cd8a278157087dd8c162844c2e6123ca8260a4e1beb26a5dbc931178d3e756",
+  "original_resolved_urdf": "urdf/tiago.urdf",
+  "original_resolved_sha256": "85b9c3f1862cd33e4e47dba33b84816de4435345d8e575ba3602392254629a53",
+  "physics_preparation": {
+    "root": "base_link",
+    "removed_massless_ros_root": "base_footprint",
+    "root_origin_m": [
+      0.0,
+      0.0,
+      0.0985
+    ],
+    "removed_empty_leaf_frames": [
+      "base_imu_link",
+      "base_mic_front_left_link",
+      "base_mic_front_right_link",
+      "base_mic_back_left_link",
+      "base_mic_back_right_link",
+      "gripper_tool_link"
+    ],
+    "geometry_preserved": true,
+    "actuator_tree_preserved": true
+  },
+  "links": 44,
+  "joints": [
+    {
+      "name": "wheel_right_joint",
+      "type": "continuous",
+      "parent": "suspension_right_link",
+      "child": "wheel_right_link",
+      "limits": {
+        "effort": "6.0",
+        "velocity": "100.0"
+      }
+    },
+    {
+      "name": "wheel_left_joint",
+      "type": "continuous",
+      "parent": "suspension_left_link",
+      "child": "wheel_left_link",
+      "limits": {
+        "effort": "6.0",
+        "velocity": "100.0"
+      }
+    },
+    {
+      "name": "torso_lift_joint",
+      "type": "prismatic",
+      "parent": "torso_fixed_link",
+      "child": "torso_lift_link",
+      "limits": {
+        "effort": "2000",
+        "lower": "0.0",
+        "upper": "0.35",
+        "velocity": "0.07"
+      }
+    },
+    {
+      "name": "arm_1_joint",
+      "type": "revolute",
+      "parent": "torso_lift_link",
+      "child": "arm_1_link",
+      "limits": {
+        "effort": "43.0",
+        "lower": "0.0",
+        "upper": "2.748893571891069",
+        "velocity": "1.95"
+      }
+    },
+    {
+      "name": "arm_2_joint",
+      "type": "revolute",
+      "parent": "arm_1_link",
+      "child": "arm_2_link",
+      "limits": {
+        "effort": "43.0",
+        "lower": "-1.5707963267948966",
+        "upper": "1.090830782496456",
+        "velocity": "1.95"
+      }
+    },
+    {
+      "name": "arm_3_joint",
+      "type": "revolute",
+      "parent": "arm_2_link",
+      "child": "arm_3_link",
+      "limits": {
+        "effort": "26",
+        "lower": "-3.5342917352885173",
+        "upper": "1.5707963267948966",
+        "velocity": "2.35"
+      }
+    },
+    {
+      "name": "arm_4_joint",
+      "type": "revolute",
+      "parent": "arm_3_link",
+      "child": "arm_4_link",
+      "limits": {
+        "effort": "26",
+        "lower": "-0.39269908169872414",
+        "upper": "2.356194490192345",
+        "velocity": "2.35"
+      }
+    },
+    {
+      "name": "arm_5_joint",
+      "type": "revolute",
+      "parent": "arm_4_link",
+      "child": "arm_5_link",
+      "limits": {
+        "effort": "3",
+        "lower": "-2.0943951023931953",
+        "upper": "2.0943951023931953",
+        "velocity": "1.95"
+      }
+    },
+    {
+      "name": "arm_6_joint",
+      "type": "revolute",
+      "parent": "arm_5_link",
+      "child": "arm_6_link",
+      "limits": {
+        "effort": "6.6",
+        "lower": "-1.413716694115407",
+        "upper": "1.413716694115407",
+        "velocity": "1.76"
+      }
+    },
+    {
+      "name": "arm_7_joint",
+      "type": "revolute",
+      "parent": "arm_6_link",
+      "child": "arm_7_link",
+      "limits": {
+        "effort": "6.6",
+        "lower": "-2.0943951023931953",
+        "upper": "2.0943951023931953",
+        "velocity": "1.76"
+      }
+    },
+    {
+      "name": "gripper_right_finger_joint",
+      "type": "prismatic",
+      "parent": "gripper_link",
+      "child": "gripper_right_finger_link",
+      "limits": {
+        "effort": "16",
+        "lower": "0.0",
+        "upper": "0.045",
+        "velocity": "0.05"
+      }
+    },
+    {
+      "name": "gripper_left_finger_joint",
+      "type": "prismatic",
+      "parent": "gripper_link",
+      "child": "gripper_left_finger_link",
+      "limits": {
+        "effort": "16",
+        "lower": "0.0",
+        "upper": "0.045",
+        "velocity": "0.05"
+      }
+    },
+    {
+      "name": "head_1_joint",
+      "type": "revolute",
+      "parent": "torso_lift_link",
+      "child": "head_1_link",
+      "limits": {
+        "effort": "5.197",
+        "lower": "-1.3089969389957472",
+        "upper": "1.3089969389957472",
+        "velocity": "3.0"
+      }
+    },
+    {
+      "name": "head_2_joint",
+      "type": "revolute",
+      "parent": "head_1_link",
+      "child": "head_2_link",
+      "limits": {
+        "effort": "2.77",
+        "lower": "-1.0471975511965976",
+        "upper": "0.7853981633974483",
+        "velocity": "3.0"
+      }
+    }
+  ],
+  "meshes": [
+    {
+      "path": "assets/meshes/pal_gripper_description/meshes/gripper_finger_link.stl",
+      "sha256": "49c43b68c72d3d510e231ec5b42ffe99de6b164874e5f79a7ab66d634373bb58",
+      "bytes": 71634,
+      "source": "assets/sources/pal_gripper/pal_gripper_description/meshes/gripper_finger_link.stl"
+    },
+    {
+      "path": "assets/meshes/pal_gripper_description/meshes/gripper_link.stl",
+      "sha256": "d51a0e30c6c04b74eeb8bbea0b46fb825ef46b9d1aeebebfac4dc865159e8809",
+      "bytes": 349634,
+      "source": "assets/sources/pal_gripper/pal_gripper_description/meshes/gripper_link.stl"
+    },
+    {
+      "path": "assets/meshes/pal_gripper_description/meshes/gripper_link_collision.stl",
+      "sha256": "9612a2949a34b1ffdfabf268e9cecbf2978e15e966961dce5b3208869eb3a143",
+      "bytes": 31884,
+      "source": "assets/sources/pal_gripper/pal_gripper_description/meshes/gripper_link_collision.stl"
+    },
+    {
+      "path": "assets/meshes/pal_urdf_utils/meshes/laser/srf05.stl",
+      "sha256": "eeb656cca87825bf212355c73e8f68a2d9de42b429f00348709e9cbdfd528c9d",
+      "bytes": 2534,
+      "source": "assets/sources/pal_urdf_utils/meshes/laser/srf05.stl"
+    },
+    {
+      "path": "assets/meshes/pmb2_description/meshes/base/base.stl",
+      "sha256": "fbb54a6d1c1afca726a7f6b825cee5a0167fb0d1e223746ae06c1d80190b2f71",
+      "bytes": 1072284,
+      "source": "assets/sources/pmb2_robot/pmb2_description/meshes/base/base.stl"
+    },
+    {
+      "path": "assets/meshes/pmb2_description/meshes/base/base_dock_link.stl",
+      "sha256": "d13ab33c5a39f9daa7f34a1b728c6b8afa2b105671846af29eb9f2d8c617cd0c",
+      "bytes": 73084,
+      "source": "assets/sources/pmb2_robot/pmb2_description/meshes/base/base_dock_link.stl"
+    },
+    {
+      "path": "assets/meshes/pmb2_description/meshes/base/base_ring.stl",
+      "sha256": "42227bf5392cd4e9a88b971512d8dc92608116b8e2dc186c7b73f1a185eecd36",
+      "bytes": 86484,
+      "source": "assets/sources/pmb2_robot/pmb2_description/meshes/base/base_ring.stl"
+    },
+    {
+      "path": "assets/meshes/pmb2_description/meshes/base/high_resolution/base_collision.stl",
+      "sha256": "d545eff1af2bac20324ee3606b80dad4700f440d8067111a2dd5d6365fbbaa1f",
+      "bytes": 28884,
+      "source": "assets/sources/pmb2_robot/pmb2_description/meshes/base/high_resolution/base_collision.stl"
+    },
+    {
+      "path": "assets/meshes/pmb2_description/meshes/objects/antenna.stl",
+      "sha256": "5dcf4914afdaec9c4682a0ad2f9b2b0b25d120cdbed470026267d843bf7d5119",
+      "bytes": 197484,
+      "source": "assets/sources/pmb2_robot/pmb2_description/meshes/objects/antenna.stl"
+    },
+    {
+      "path": "assets/meshes/pmb2_description/meshes/wheels/caster_1.stl",
+      "sha256": "e9bf8ae425cbcafe59b48a5cc955726633f0508f19acd9a06568c1bcff304606",
+      "bytes": 40034,
+      "source": "assets/sources/pmb2_robot/pmb2_description/meshes/wheels/caster_1.stl"
+    },
+    {
+      "path": "assets/meshes/pmb2_description/meshes/wheels/caster_2.stl",
+      "sha256": "27345e857ee7ecdfd21357dc8bd5eeced8d22fceab176dc5b434c2c3ce246ecd",
+      "bytes": 25084,
+      "source": "assets/sources/pmb2_robot/pmb2_description/meshes/wheels/caster_2.stl"
+    },
+    {
+      "path": "assets/meshes/pmb2_description/meshes/wheels/wheel.stl",
+      "sha256": "dd1604ddc6bc017837b40aca2e3677375f0e7e2535fd63bb45f86d5f395338a2",
+      "bytes": 300034,
+      "source": "assets/sources/pmb2_robot/pmb2_description/meshes/wheels/wheel.stl"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/arm/arm_1.stl",
+      "sha256": "a98a1becdaa0f17182ae242cbf829c327a108f11bb7dbdf1554ec76d7364c599",
+      "bytes": 240384,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/arm/arm_1.stl"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/arm/arm_1_collision.stl",
+      "sha256": "cd9e8ee419045bae78e07a2423f53fdd162f60f14e99bdc343d3645fb40e9acf",
+      "bytes": 4684,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/arm/arm_1_collision.stl"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/arm/arm_2.stl",
+      "sha256": "1dc20b672b900684e18054a9ca1de0b97ea18eef3dd49ab729374069ce6b423f",
+      "bytes": 988384,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/arm/arm_2.stl"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/arm/arm_2_collision.stl",
+      "sha256": "51764ae510f8a42fe78b092b8d01761ebef3acaf55092435582486b83acfa5b5",
+      "bytes": 6584,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/arm/arm_2_collision.stl"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/arm/arm_3.stl",
+      "sha256": "7894bc60a7c2b68cdeaa991e9ad03f48abcb5e72f8ffb5a50b1f4edadfb417e9",
+      "bytes": 491084,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/arm/arm_3.stl"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/arm/arm_3_collision.stl",
+      "sha256": "caa161d4dfcf4cb0d79cc48ba7baa7563fcf1eec9104601aa6a28346465d2c3e",
+      "bytes": 4584,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/arm/arm_3_collision.stl"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/arm/arm_4.stl",
+      "sha256": "12db11cef0bb9b743ce350946b08124e98890f30592516307a17c5b7c3582ea5",
+      "bytes": 407534,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/arm/arm_4.stl"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/arm/arm_4_collision.stl",
+      "sha256": "f701a62e24aec7164803648848ddb84d23f8141322cf461c931958dd28dd50ec",
+      "bytes": 5484,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/arm/arm_4_collision.stl"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/arm/arm_5_collision_wrist_2017.stl",
+      "sha256": "77fffe1281eb37de77829f3874c8bd921dbd4988327d3f6891a3e4335a702efc",
+      "bytes": 5684,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/arm/arm_5_collision-wrist-2017.stl"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/arm/arm_5_wrist_2017.stl",
+      "sha256": "ad75b9064ed916360342c78cad139beed42e9f1429986efcad6ea1ad71578c28",
+      "bytes": 187984,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/arm/arm_5-wrist-2017.stl"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/arm/arm_6_collision_wrist_2017.stl",
+      "sha256": "4ffdd2c5d5f47f587f2bd336e4ced385c48bc3f70acf7f4fb1b6e88e09f521d5",
+      "bytes": 4684,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/arm/arm_6_collision-wrist-2017.stl"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/arm/arm_6_wrist_2017.stl",
+      "sha256": "b3599f60d6c1c6df30266e2eee48b3bf1d1d59ded41a7acb134ee2917176be3e",
+      "bytes": 140184,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/arm/arm_6-wrist-2017.stl"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/head/head_1.stl",
+      "sha256": "da15ef00f276d4692df912889dc49561fc6b7958bf925aada017f52a15036721",
+      "bytes": 80884,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/head/head_1.stl"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/head/head_1_collision.dae",
+      "sha256": "045ee699c6d9c8af5ca214d5040d82c4f1c269a3489a0305c31aea5197f4b5f4",
+      "bytes": 106681,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/head/head_1_collision.dae"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/head/head_1_collision.stl",
+      "sha256": "a1cfcb8f792e78b26650b8596b4113a9cf6b8da94d5022b626c826841131bfca",
+      "bytes": 347722,
+      "derived_from": "assets/meshes/tiago_description/meshes/head/head_1_collision.dae",
+      "triangles": 1616,
+      "conversion": "indexed triangles, unchanged raw ROS coordinates; no scene transforms"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/head/head_2.stl",
+      "sha256": "8cc0b5fc791d313670f5d857cc83df415de6435a7c83d407b112dc6334a33158",
+      "bytes": 144884,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/head/head_2.stl"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/head/head_2_collision.dae",
+      "sha256": "0636f903165d6117a2af0990203c11a97250b477ba413dfedfcb5b6835ead42c",
+      "bytes": 21931,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/head/head_2_collision.dae"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/head/head_2_collision.stl",
+      "sha256": "1a4bd63137a727ad0e03e34f1c60f3737b8492169d78970159124a90fb8f5f40",
+      "bytes": 66228,
+      "derived_from": "assets/meshes/tiago_description/meshes/head/head_2_collision.dae",
+      "triangles": 304,
+      "conversion": "indexed triangles, unchanged raw ROS coordinates; no scene transforms"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/torso/torso_fix.stl",
+      "sha256": "66fff54e21d0bf8174acd445215c86d27720e6953d8f815a62bb9da82ef82a5d",
+      "bytes": 299684,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/torso/torso_fix.stl"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/torso/torso_lift_collision_core.dae",
+      "sha256": "932e983e0766eba25aef847498280e394c46cb896c73b9af45cb2a7a0600dc3c",
+      "bytes": 10537,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/torso/torso_lift_collision_core.dae"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/torso/torso_lift_collision_core.stl",
+      "sha256": "43da19da3ee85ba72c09c8b2fe43590e8940a8d056142ca39b89bc289fe11a8c",
+      "bytes": 19217,
+      "derived_from": "assets/meshes/tiago_description/meshes/torso/torso_lift_collision_core.dae",
+      "triangles": 100,
+      "conversion": "indexed triangles, unchanged raw ROS coordinates; no scene transforms"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/torso/torso_lift_collision_neck.dae",
+      "sha256": "4cda49ba69500fd4fdf20dfc4d1e46684f047c6915ad6840a8a0fb87d58fc925",
+      "bytes": 7903,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/torso/torso_lift_collision_neck.dae"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/torso/torso_lift_collision_neck.stl",
+      "sha256": "aec1f300659bf4b26630f386ca004560dda3471b92c9756be59e609f037ace77",
+      "bytes": 4607,
+      "derived_from": "assets/meshes/tiago_description/meshes/torso/torso_lift_collision_neck.dae",
+      "triangles": 24,
+      "conversion": "indexed triangles, unchanged raw ROS coordinates; no scene transforms"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/torso/torso_lift_collision_shoulder.dae",
+      "sha256": "430bda60fdd7eed7652bad8e66598e6145bc574ed14843a6815a5db9ba366376",
+      "bytes": 14255,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/torso/torso_lift_collision_shoulder.dae"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/torso/torso_lift_collision_shoulder.stl",
+      "sha256": "3ed19f373da434398684c05075989cc6403e8605bd0c44183adcd9f2353552c9",
+      "bytes": 32500,
+      "derived_from": "assets/meshes/tiago_description/meshes/torso/torso_lift_collision_shoulder.dae",
+      "triangles": 144,
+      "conversion": "indexed triangles, unchanged raw ROS coordinates; no scene transforms"
+    },
+    {
+      "path": "assets/meshes/tiago_description/meshes/torso/torso_lift_with_arm.stl",
+      "sha256": "3626f883472f52f195393100ec9fe2ef35e29b417c7191cb7c18afd3ea1cad1a",
+      "bytes": 126784,
+      "source": "assets/sources/tiago_robot/tiago_description/meshes/torso/torso_lift_with_arm.stl"
+    }
+  ],
+  "downloaded_closure_complete": true,
+  "removed_nonmechanical_tags": {
+    "gazebo": 41,
+    "transmission": 0,
+    "ros2_control": 1
+  },
+  "source_license_files": [
+    {
+      "path": "LICENSES/pal_gripper_LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "path": "LICENSES/pal_hey5_LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "path": "LICENSES/pal_urdf_utils_LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "path": "LICENSES/pmb2_robot_LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "path": "LICENSES/tiago_robot_LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "path": "LICENSES/tiago_moveit_config_LICENSE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    }
+  ],
+  "license_note": "Original PAL source repository LICENSE files are retained under assets/sources; inspect individual file headers."
+}

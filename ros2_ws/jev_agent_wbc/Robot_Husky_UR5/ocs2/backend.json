@@ -1,0 +1,52 @@
+{
+  "schema": "ocs2_wheeled_backend/v1",
+  "robot": "husky",
+  "base_model": "nonholonomic",
+  "usd": "assets/husky_ur5_v2.usda",
+  "base_link": "husky_base_link",
+  "ee_link": "ur5_wrist_3_link",
+  "arm_joints": [
+    "ur5_shoulder_pan_joint",
+    "ur5_shoulder_lift_joint",
+    "ur5_elbow_joint",
+    "ur5_wrist_1_joint",
+    "ur5_wrist_2_joint",
+    "ur5_wrist_3_joint"
+  ],
+  "sensor_config": "sensors.json",
+  "robot_key": "husky",
+  "state_order": [
+    "x_world",
+    "y_world",
+    "yaw_world",
+    "ur5_shoulder_pan_joint",
+    "ur5_shoulder_lift_joint",
+    "ur5_elbow_joint",
+    "ur5_wrist_1_joint",
+    "ur5_wrist_2_joint",
+    "ur5_wrist_3_joint"
+  ],
+  "input_order": [
+    "v_body",
+    "yaw_rate",
+    "dq_1",
+    "dq_2",
+    "dq_3",
+    "dq_4",
+    "dq_5",
+    "dq_6"
+  ],
+  "state_dim": 9,
+  "input_dim": 8,
+  "upstream_revision": "88ce706c17fcc4591b6c24c87a4a85ff6ed9e92d",
+  "policy_execution_mapping": "four rolling wheel velocity drives, physical skid steering",
+  "collision_constraints_implemented": false,
+  "initial_arm": [
+    0,
+    -1.2,
+    1.8,
+    -0.6,
+    1.5707963267948966,
+    0
+  ]
+}

@@ -1,0 +1,104 @@
+{
+  "scope": "Observed unsafe camera postures without original robot self-overlap; no continuous safe-workspace certificate",
+  "postures": [
+    {
+      "index": 11,
+      "label": "arm_5_joint_low",
+      "measured_joints": [
+        -1.1034991670433314e-10,
+        -1.1041761949215356e-10,
+        0.18000000715255737,
+        0.3499999940395355,
+        -9.44655464962807e-11,
+        -0.6000000238418579,
+        3.033513162886692e-10,
+        -0.5,
+        1.600000023841858,
+        -2.094395160675049,
+        0.5,
+        -6.088546333771205e-11,
+        0.02500000037252903,
+        0.02500000037252903
+      ],
+      "camera_self_occlusion_fraction": 0.9925260416666667,
+      "camera_centre_self_occluded": true,
+      "camera_housing_other_body_overlaps": [
+        "/World/Robot/base_link/collisions/base_collision/node_STL_BINARY_",
+        "/World/Robot/torso_fixed_link/collisions/mesh_0/box"
+      ],
+      "rgb": "rgb/011_arm_5_joint_low.png"
+    },
+    {
+      "index": 24,
+      "label": "sobol_007",
+      "measured_joints": [
+        2.2252258629479327e-12,
+        2.2250354770464442e-12,
+        0.3250950574874878,
+        0.6660216450691223,
+        1.3166994404512078e-11,
+        1.061470627784729,
+        5.183532856417594e-12,
+        0.7412950992584229,
+        1.177783489227295,
+        2.057039976119995,
+        -1.3762264251708984,
+        0.14455807209014893,
+        0.02500000037252903,
+        0.02500000037252903
+      ],
+      "camera_self_occlusion_fraction": 0.00018880208333333333,
+      "camera_centre_self_occluded": false,
+      "camera_housing_other_body_overlaps": [],
+      "rgb": "rgb/024_sobol_007.png"
+    },
+    {
+      "index": 47,
+      "label": "sobol_030",
+      "measured_joints": [
+        -1.1941670742532384e-11,
+        -1.1951640198348823e-11,
+        0.15310503542423248,
+        1.6227556467056274,
+        -1.9460986988573126e-10,
+        0.933155357837677,
+        2.1704525329790947e-11,
+        -0.0069718146696686745,
+        2.3059349060058594,
+        1.1533468961715698,
+        -0.6524937152862549,
+        -1.0242477655410767,
+        0.02500000037252903,
+        0.02500000037252903
+      ],
+      "camera_self_occlusion_fraction": 0.67828125,
+      "camera_centre_self_occluded": true,
+      "camera_housing_other_body_overlaps": [],
+      "rgb": "rgb/047_sobol_030.png"
+    },
+    {
+      "index": 65,
+      "label": "sobol_048",
+      "measured_joints": [
+        -8.877109117233495e-12,
+        -8.90106304635152e-12,
+        0.2748962640762329,
+        1.8061028718948364,
+        -1.610215849545682e-10,
+        -0.3406866490840912,
+        6.745364683480304e-11,
+        0.6358099579811096,
+        2.0127875804901123,
+        1.021324634552002,
+        0.5144992470741272,
+        -1.1035491228103638,
+        0.02500000037252903,
+        0.02500000037252903
+      ],
+      "camera_self_occlusion_fraction": 0.2564420572916667,
+      "camera_centre_self_occluded": false,
+      "camera_housing_other_body_overlaps": [],
+      "rgb": "rgb/065_sobol_048.png"
+    }
+  ]
+}

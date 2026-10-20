@@ -1,0 +1,57 @@
+{
+  "robot": "Clearpath Husky A200 + UR5 + Robotiq 2F-140",
+  "repository": "https://github.com/ppppplus/husky_ur5_isaacsim",
+  "revision": "55ba4ef84935981cb5367e233ab72ab2b34f1579",
+  "source_entry": "assets/source/husky_ur5.usd",
+  "entry": "assets/husky_ur5_v2.usda",
+  "files": [
+    {
+      "path": "assets/source/husky_ur5.usd",
+      "source_path": "usd/husky_ur5.usd",
+      "bytes": 13581059,
+      "sha256": "0563837478bd3522506d1f7f3ed8d1baba088b8c42092c3bee140992f3e6817e",
+      "url": "https://raw.githubusercontent.com/ppppplus/husky_ur5_isaacsim/55ba4ef84935981cb5367e233ab72ab2b34f1579/usd/husky_ur5.usd"
+    },
+    {
+      "path": "assets/source/husky_ur5.urdf",
+      "source_path": "husky_isaac_sim/urdf/husky_ur5.urdf",
+      "bytes": 40437,
+      "sha256": "2b292ea399394ca26b5bffb99fdf8c0067a5bb6024291c78e0b8a76f683bb6fd",
+      "url": "https://raw.githubusercontent.com/ppppplus/husky_ur5_isaacsim/55ba4ef84935981cb5367e233ab72ab2b34f1579/husky_isaac_sim/urdf/husky_ur5.urdf"
+    },
+    {
+      "path": "assets/source/README.md",
+      "source_path": "README.md",
+      "bytes": 255,
+      "sha256": "d4f42bbd57d0f88582a181a1771aee33a87775b42afe9132fc3ab815f741da2d",
+      "url": "https://raw.githubusercontent.com/ppppplus/husky_ur5_isaacsim/55ba4ef84935981cb5367e233ab72ab2b34f1579/README.md"
+    },
+    {
+      "path": "assets/source/husky_description/package.xml",
+      "source_path": "husky_description/package.xml",
+      "bytes": 1126,
+      "sha256": "298f82034ed4459539039dfa1dfad430e449b1adb193b79e00b09aecc70fdfa5",
+      "url": "https://raw.githubusercontent.com/ppppplus/husky_ur5_isaacsim/55ba4ef84935981cb5367e233ab72ab2b34f1579/husky_description/package.xml"
+    },
+    {
+      "path": "assets/source/ur5_isaac_simulation/LICENSE",
+      "source_path": "ur5_isaac_simulation/LICENSE",
+      "bytes": 1511,
+      "sha256": "ae42f8149e6911748be854d45baf96740dee6d721f20eba8c93a449e3b1b3dd9",
+      "url": "https://raw.githubusercontent.com/ppppplus/husky_ur5_isaacsim/55ba4ef84935981cb5367e233ab72ab2b34f1579/ur5_isaac_simulation/LICENSE"
+    },
+    {
+      "path": "assets/source/ur5_isaac_simulation/package.xml",
+      "source_path": "ur5_isaac_simulation/package.xml",
+      "bytes": 731,
+      "sha256": "115ec27d2a971357ffce6ecdd44286ef87d4990a7e4f576ab121c4f0f543f0cd",
+      "url": "https://raw.githubusercontent.com/ppppplus/husky_ur5_isaacsim/55ba4ef84935981cb5367e233ab72ab2b34f1579/ur5_isaac_simulation/package.xml"
+    }
+  ],
+  "source_license": "Repository has no top-level license; Husky package declares BSD, UR5 package BSD-2.0; preserve source notices and review mesh redistribution terms.",
+  "external_usd_dependencies": [],
+  "downloaded_closure_complete": true,
+  "runtime_builtins": [
+    "OmniPBR.mdl"
+  ]
+}

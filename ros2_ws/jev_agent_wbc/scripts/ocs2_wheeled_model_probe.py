@@ -34,12 +34,14 @@ def main():
     try:
         for i in range(210):
             t=i*.1;base[:3,:3]=Rotation.from_euler('z',x[2]).as_matrix();base[:2,3]=x[:2]
-            request=dict(request_id=i,state_stamp_s=t,horizon_s=min(1.,21.-t),state=x.tolist(),T_world_base=base.tolist(),frame='world_optical',absolute_times_s=times.tolist(),camera_poses=[T.tolist() for T in poses])
-            process.stdin.write(json.dumps(request)+'\n');process.stdin.flush();result=json.loads(process.stdout.readline())
-            if result.get('ok') is not True:failures.append(dict(t=t,result=result));break
-            solvers.append(result['solver_wall_s']);pt=np.array(result['times_s']);px=np.array(result['states']);u=np.array([np.interp(t+.1,pt,px[:,9+k]) for k in range(nu)])
+            request=dict(request_id=i,state_stamp_s=t,horizon_s=min(1.,21.-t),state=np.r_[x[:9],guard.previous].tolist(),rate_state_semantics='last_applied_velocity_command',measured_velocity=x[9:].tolist(),T_world_base=base.tolist(),frame='world_optical',absolute_times_s=times.tolist(),camera_poses=[T.tolist() for T in poses])
+            if request['horizon_s']>=.2-1e-8:
+                process.stdin.write(json.dumps(request)+'\n');process.stdin.flush();result=json.loads(process.stdout.readline())
+                if result.get('ok') is not True:failures.append(dict(t=t,result=result));break
+                solvers.append(result['solver_wall_s'])
+            pt=np.array(result['times_s']);px=np.array(result['states']);u=np.array([np.interp(t+.1,pt,px[:,9+k]) for k in range(nu)])
             for _ in range(10):
-                command=guard.command(u,x[3:9]);x[:9]+=.01*adapter.flow_map(x[:9],command);x[9:]=command
+                command=guard.command(u,x[3:9],x[-6:]);x[:9]+=.01*adapter.flow_map(x[:9],command);x[9:]=command
             actual=adapter.camera_pose(x[:9]);target=poses[(i+1)*2];position.append(float(np.linalg.norm(actual[:3,3]-target[:3,3])));orientation.append(float(Rotation.from_matrix(actual[:3,:3]@target[:3,:3].T).magnitude()));states.append(x.tolist());journal.write(json.dumps(dict(t_s=t+.1,internal_state=x.tolist(),position_error_m=position[-1],orientation_error_rad=orientation[-1],solver_wall_s=solvers[-1]))+'\n')
     finally:process.terminate();process.wait(timeout=2.);journal.close()
     files=[Path(__file__),folder/'adapter.py',folder/'backend.json',folder/'evidence/live_model_static.json',folder/'.cache/backend/camera_mpc_worker']

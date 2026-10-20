@@ -1,7 +1,11 @@
-# 三种机器人本地部署
+# 五款机器人本地部署与验证记录
 
 2026-10-20 五款机器人的新 WBC 选型检查、适配进展和避障 Agent 接入门槛见
 [WBC_INTEGRATION.md](WBC_INTEGRATION.md)。下文的历史运动通过不代表新框架或避障已验收。
+
+本轮已按用户最终范围完成并结束优化：Husky、Ridgeback 使用 `run_ocs2.sh`，TIAGo 使用 `run_giskard.sh`，三款保留新控制器的运动、相机及严格停车通过结果。G1、Go2 使用各自的 `run_basic_wbc.sh`，以冻结配置完成九项任务和独立基础层验证，保留精密速度/停车未全部通过的事实。
+
+当前分层状态与证据见 `ROBOT_DEPLOYMENT.json` 的 `wbc_integration`、各 `WBC_READINESS.json` 及 [WBC_INTEGRATION.md](WBC_INTEGRATION.md)。`--require-basic-control-ready` 检查本轮目标；原精密控制门禁和避障门禁不因基础层通过而升级。当前未接入避障 Agent，环境/传感器覆盖仍未认证。
 
 2026-10-20 另增 [Husky＋UR5 与单臂 TIAGo](MOBILE_MANIPULATORS.md)，分别位于
 `Robot_Husky_UR5`、`Robot_TIAGo`。两款采用真实轮驱动、独立机械臂与 Camera WBC，

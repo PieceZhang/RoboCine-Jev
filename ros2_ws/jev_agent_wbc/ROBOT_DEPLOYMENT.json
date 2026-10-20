@@ -93,17 +93,97 @@
     "Added platforms use actual wheel drives and one end-effector camera plus two identically configured body scanners each.",
     "TIAGo still has four sampled robot-collision-free camera failures; both new platforms retain LiDAR blind zones. Full continuous-pose sensing and reliable avoidance are not verified."
   ],
-  "updated_utc": "2026-10-20T04:17:24.887148+00:00",
+  "updated_utc": "2026-10-20T15:14:48.153981+00:00",
   "added_mobile_manipulators_sensor_goal_complete": false,
   "added_mobile_manipulators_report": "MOBILE_MANIPULATORS.md",
   "wbc_integration": {
     "report": "WBC_INTEGRATION.md",
-    "readiness_audit": "validation/wbc_readiness_20261020.json",
+    "readiness_audit": "validation/wbc_readiness_scope_closure02_20261020.json",
     "preflight": "scripts/check_wbc_readiness.py",
     "protocol": "jev_agent_wbc/wbc_protocol.py",
     "gateway_probe": "scripts/wbc_task_gateway.py",
     "all_recommended_backends_ready": false,
     "all_avoidance_agent_gates_passed": false,
-    "historical_motion_passes_apply_only_to_their_frozen_controllers": true
+    "historical_motion_passes_apply_only_to_their_frozen_controllers": true,
+    "all_control_validation_gates_passed": false,
+    "current_control_validation": [
+      {
+        "robot": "Husky + UR5",
+        "directory": "Robot_Husky_UR5",
+        "entrypoint": "Robot_Husky_UR5/run_ocs2.sh",
+        "control_validation_passed": true,
+        "validation": "Robot_Husky_UR5/results/ocs2_acceptance_03/acceptance.json",
+        "validation_sha256": "532225a7f25be81a7a004e86e5e3971692909e590bba1a8c3bcba7426c615508",
+        "independent_audits": [
+          "validation/wbc_husky_full03_physical02_independent_20261020.json",
+          "validation/wbc_husky_full03_suite02_independent_20261020.json",
+          "validation/wbc_husky_full03_feedback02_independent_20261020.json"
+        ],
+        "readiness_manifest": "Robot_Husky_UR5/WBC_READINESS.json",
+        "scope": "Recorded original timed camera Tasks, directions and strict all-joint stops only; environment and sensing unverified"
+      },
+      {
+        "robot": "Ridgeback + UR5",
+        "directory": "Robot_Ridgeback_UR5",
+        "entrypoint": "Robot_Ridgeback_UR5/run_ocs2.sh",
+        "control_validation_passed": true,
+        "validation": "Robot_Ridgeback_UR5/results/ocs2_acceptance_02/acceptance.json",
+        "validation_sha256": "111d5f587b9353c2a03001d269247af75c22149c57ab90dea40d16783ad128a0",
+        "independent_audits": [
+          "validation/wbc_ridgeback_full02_physical02_independent_20261020.json",
+          "validation/wbc_ridgeback_full02_suite02_independent_20261020.json",
+          "validation/wbc_ridgeback_full02_feedback02_independent_20261020.json"
+        ],
+        "readiness_manifest": "Robot_Ridgeback_UR5/WBC_READINESS.json",
+        "scope": "Recorded original timed camera Tasks, directions and strict all-joint stops only; environment and sensing unverified"
+      },
+      {
+        "robot": "TIAGo",
+        "directory": "Robot_TIAGo",
+        "entrypoint": "Robot_TIAGo/run_giskard.sh",
+        "control_validation_passed": true,
+        "validation": "Robot_TIAGo/results/giskard_executor_full04/acceptance.json",
+        "validation_sha256": "cb8b8ad1cb28813753680a88bb8ae9c64b1667c1b86df83d7a3cd681103496d7",
+        "independent_audits": [
+          "validation/wbc_tiago_full04_physical02_independent_20261020.json",
+          "validation/wbc_tiago_full04_suite02_independent_20261020.json",
+          "validation/wbc_tiago_full04_feedback02_independent_20261020.json"
+        ],
+        "readiness_manifest": "Robot_TIAGo/WBC_READINESS.json",
+        "scope": "Recorded original timed camera Tasks, directions and strict all-joint stops only; environment and sensing unverified"
+      },
+      {
+        "robot": "G1",
+        "directory": "Robot_G1",
+        "entrypoint": "Robot_G1/run_basic_wbc.sh",
+        "control_validation_passed": false,
+        "readiness_manifest": "Robot_G1/WBC_READINESS.json",
+        "scope": "Completed basic directional stability, original camera RMS/final tolerance, measured limits/fresh FCL and coarse parking. Precision qualification, environmental constraints and sensing/avoidance remain unverified.",
+        "basic_control_validation_passed": true,
+        "validation": "Robot_G1/results/basic_full_validation_01/summary.json",
+        "validation_sha256": "edd87c632ea5f95901b452b7b9a946fd8fe750dfb574db105112e6bf109a1f05",
+        "independent_basic_audit": "validation/wbc_g1_basic_full01_independent_20261020.json",
+        "independent_basic_audit_sha256": "1b36bb9e3b45bf6bcabb62cec64bb005574c352fd3c64658dbaf265e6a37da71",
+        "optimization_status": "closed_no_further_tuning"
+      },
+      {
+        "robot": "Go2 + Piper",
+        "directory": "Robot_Go2",
+        "entrypoint": "Robot_Go2/run_basic_wbc.sh",
+        "control_validation_passed": false,
+        "readiness_manifest": "Robot_Go2/WBC_READINESS.json",
+        "scope": "Completed basic directional stability, original camera RMS/final tolerance, measured limits/fresh FCL and coarse parking. Precision qualification, environmental constraints and sensing/avoidance remain unverified.",
+        "basic_control_validation_passed": true,
+        "validation": "Robot_Go2/results/adaptive_suite_planar_brake_01/summary.json",
+        "validation_sha256": "2c1483bc4c24079c66b0b2e6c610c6b4d85de711dcc29acb6b48c1f869d2e6a0",
+        "independent_basic_audit": "validation/wbc_go2_planar_basic01_independent_20261020.json",
+        "independent_basic_audit_sha256": "eb7508e138a547e2affa393817fc349a343f24a5f703e4c6ab1cdf5515f6527c",
+        "optimization_status": "closed_no_further_tuning"
+      }
+    ],
+    "validation_scope": "Three wheel robots keep their original control acceptance. G1 and Go2 completed only the explicitly reduced basic scope. Historical primary records and strict precision failures remain unchanged. No avoidance Agent is enabled.",
+    "completion_status": "completed_at_user_reduced_scope",
+    "user_scope_adjustment": "G1 and Go2: basic stable control and interface adaptation; precision parking deferred, optimization closed.",
+    "all_basic_control_validation_gates_passed": true
   }
 }

@@ -1,0 +1,8 @@
+__pycache__/
+assets/sources/
+assets/usd/
+results/
+
+assets/releases/
+assets/usd_failed*/
+*.log

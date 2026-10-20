@@ -1,0 +1,10 @@
+{
+  "schema": "tiago_kinematic_preservation/v1",
+  "configurations": 273,
+  "common_links": 37,
+  "maximum_transform_entry_error": 4.440892098500626e-16,
+  "passed": true,
+  "original_urdf_sha256": "85b9c3f1862cd33e4e47dba33b84816de4435345d8e575ba3602392254629a53",
+  "physics_urdf_sha256": "e7cd8a278157087dd8c162844c2e6123ca8260a4e1beb26a5dbc931178d3e756",
+  "scope": "CPU geometric preservation of massive chassis root and removal of empty fixed leaf frames; no physical-motion or sensor guarantee"
+}

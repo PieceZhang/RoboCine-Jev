@@ -1,0 +1,41 @@
+{
+  "schema": "tiago_usd_closure/v1",
+  "entry": "assets/usd/tiago.usd",
+  "closure_sha256": "13036cd729133453c6bfaa057a556a77342f641c0584791ce436584f03fd9a3c",
+  "frozen_asset_directory": "assets/releases/13036cd729133453c6bfaa057a556a77342f641c0584791ce436584f03fd9a3c",
+  "source_lock_sha256": "91954a4e63603f14731b7a9ea9a00e3f68843ef2d2f03a0e9fe15824777c64d7",
+  "preparation_script_sha256": "99051223a8758b981b57569725b83bb97ad6f8ca10825f2d4c2795cea2e042e5",
+  "physics_executed": false,
+  "files": [
+    {
+      "path": "assets/usd/configuration/tiago_base.usd",
+      "sha256": "36f03bba6e8c92fb102dc2a7cc6ebde3de710298aba0342b7a9acde4a70fc3a8",
+      "bytes": 7923716,
+      "layer_text_sha256": "83ef269bee09989cbfd1cd5d5b158d11fc9bf010a1d1e38b0766d1068f8ffa85"
+    },
+    {
+      "path": "assets/usd/configuration/tiago_physics.usd",
+      "sha256": "bc5fe15b2787b4690a7b789b8396dd3e3e8f1123439882149b1a460d552c68a1",
+      "bytes": 11495,
+      "layer_text_sha256": "3bd3686282650bf0ca9f255a1a663d0bef4987fce55f1a75ec7a0c5650ce2ffc"
+    },
+    {
+      "path": "assets/usd/configuration/tiago_robot.usd",
+      "sha256": "8b074079567d9dd279d788e7698bcc0055515799c3af65a44d3d97f6b4ee84d6",
+      "bytes": 2998,
+      "layer_text_sha256": "d82d97bc748eadda880ea916a8cd36d0284dc4aaee048388f74e7688321376e0"
+    },
+    {
+      "path": "assets/usd/configuration/tiago_sensor.usd",
+      "sha256": "fc3f1da1204fb21f817fe8e44e2f348f06cb37182ca07fd4a8ad133d8de9d23e",
+      "bytes": 645,
+      "layer_text_sha256": "f29efca408dfe2ea7c737cf87e895f5d2ab5731a807760a71fc3fe5f0c5f5485"
+    },
+    {
+      "path": "assets/usd/tiago.usd",
+      "sha256": "8cd75c78bb2c16eb8d0e41b317ef6352d174c0ae6e115df733e7211bfdad9ed9",
+      "bytes": 14960,
+      "layer_text_sha256": "09ff55668069abd2a6cf6e0e82edfeebe15decfd53733ba8095a43bc3d600784"
+    }
+  ]
+}

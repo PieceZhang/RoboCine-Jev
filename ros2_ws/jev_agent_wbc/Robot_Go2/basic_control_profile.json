@@ -1,0 +1,233 @@
+{
+  "schema": "go2_basic_control_profile/v1",
+  "updated": "2026-10-20",
+  "scope": "Basic motion, bounded camera-task/Representation interface; strict precision parking remains unqualified.",
+  "entrypoint": "run_basic_wbc.sh",
+  "command": [
+    "Robot_Go2/run_adaptive_wbc.sh",
+    "--cases",
+    "forward,backward,left,right,diagonal_left,diagonal_right,yaw_left,yaw_right,camera_shot",
+    "--move-seconds",
+    "5",
+    "--stop-seconds",
+    "5",
+    "--fine-collision",
+    "--go2-response-profile",
+    "measured_backward_v1",
+    "--go2-native-posture",
+    "x58_all_v1",
+    "--go2-prediction-profile",
+    "bounded_ramp_history_v2",
+    "--go2-world-z-feedback",
+    "bounded_integral_v1",
+    "--go2-world-z-seed",
+    "fresh_actual_output_continuity_v2",
+    "--go2-terminal-profile",
+    "endpoint_xy58_15_yaw0_v1",
+    "--go2-active-stand-brake",
+    "vxy_p05_v1",
+    "--camera-excursion",
+    "diagnostic",
+    "--ground-material",
+    "source_multiply",
+    "--parking-anchor-reset",
+    "--park-damping-scale",
+    "3",
+    "--rgb",
+    "--output",
+    "Robot_Go2/results/adaptive_suite_planar_brake_01"
+  ],
+  "physics_hz": 200,
+  "control_hz": 50,
+  "physics_substeps_per_action": 4,
+  "pace": 1,
+  "move_seconds": 5,
+  "stop_seconds": 5,
+  "total_sim_seconds": 92,
+  "profile": "D3/vxy_p05_v1/fresh_actual_output_continuity_v2",
+  "formal_precision_qualified": false,
+  "original_runner_exit_code": 2,
+  "original_strict_summary_unchanged": true,
+  "reference_run": "results/adaptive_suite_planar_brake_01",
+  "runtime_sources_sha256": {
+    "adaptive_runner.py": "ffd01f6ac146bf6a7a422205d5f61c09df73f1fb3863ed9d87a663cc61316a74",
+    "wbc_backend.py": "f1eba7c87d2dad8ad244cfe4d57d7daf7cecff718837bbd15e1f051c4ca4053b",
+    "camera_coordinator.py": "2d9045a7eaad5dc81b7a3af9614258a537ac6c2e01df741241ce930f9405e74c",
+    "bounded_body_prediction.py": "b0cfa3b064139274d156da0d820463377aecaf6ad366aef2ea1e730167d9c7f5",
+    "lateral_stand_brake.py": "212c1f636f0179a7f714d60fb0e7a9a4fc33b9a890e7d2d14d86c08bfc37a823",
+    "world_z_feedback.py": "3d495f4cfbd81ed45ba744ead7d831c53253d4e597163e0319a44871b9d37a6a",
+    "world_z_bumpless.py": "33c15cbed55d15fb856ee52d954a74cd7cc9e3e0d8359f19ba8f7cdcf01657a7",
+    "terminal_allocator.py": "04a9299b711f8d80d1d6b7ce75c6edb3861c912eec57aa36e90ccceccab30cc7",
+    "terminal_yaw_allocator.py": "4aa7ee3ae71a7af72695c4b341bfa9a82cf6299d235d92549009547525c23e7c",
+    "optical_sampler.py": "a7ede41f1c86eb98b3537df6db023ea2565f165185794c19271429a2351d5459",
+    "actuator_limits.py": "437a34d5dc85ded34167bd79f506b2bff5b05500cb8c20833251a794b1ce5c64",
+    "../Robot_G1/velocity_servo.py": "c47d11557408c44b35b5bd305900e9cc19cafeb89f02873be998679cf1457fd0",
+    "../Robot_G1/legged_collision.py": "1989bf9c6db5cd4821dd3a9fa048b4fb5ddc6d2b1529b077524cbaa7dad643fd",
+    "../Robot_G1/contact_materials.py": "ce765ae1c27112a844def5e639009d61bedfee0117e137e01edc6514e32499c9",
+    "../config/robot_sensor_mounts.json": "053c532bfcbfab8b5ac6f0b309383fd48e85502c822e045ea326ce0ac0f961dc",
+    "vendor/LeggedManip_Lab/mujoco/deploy/policy/go2_piper/wbc/policy.pt": "c5f57c79bc01d8b8f2c0846163b149e3f53de39291770a1ccb230ef3be6b800e",
+    "vendor/LeggedManip_Lab/mujoco/robots/go2_piper/go2piper.xml": "e36f01b3dafa1d7d2820b200993f5e0a3a1c4bef948a5eb77141cb5686808c40",
+    "../jev_agent_wbc/representation.py": "e9dc2c19c58c104032d60ebaeaa69878830bfc686b966a6806d4c6a4833d8e3a",
+    "../jev_agent_wbc/wbc_protocol.py": "e30cb08de260c920e96f00e0a5de76dc5dcde5c26bbf2c654f0bbf6056f4ab41",
+    "../jev_agent_wbc/wbc_physical.py": "f0ea62a5e2a09701fe707044ca8c1b1f34297845be689a6a1899d905878caaff",
+    "../jev_agent_wbc/robot_sensor_rig.py": "cd4a54be61841758dd1d597c2a5c764387dff7d2d778a754625cd3a9088f2588",
+    "vendor/LeggedManip_Lab/source/LeggedManip_Lab/LeggedManip_Lab/tasks/manager_based/leggedmanip_lab/config/go2_piper/wbc_env_cfg.py": "5399b7432bb3ec1679a1329bccb11c9b4007989a0ab5072a3cf7ed525717dce2",
+    "vendor/LeggedManip_Lab/source/LeggedManip_Lab/LeggedManip_Lab/tasks/manager_based/leggedmanip_lab/mdp/pose_command_wbc.py": "9266a53093084c437edcc88a3ab166be69fbc9535a5678cb2a4182d028d20249",
+    "run_adaptive_wbc.sh": "24b96cf7fe91c479c4a4259945bbfe1598fd90a15e532a69a6cda691b76cee1d",
+    "vendor/LeggedManip_Lab/source/LeggedManip_Lab/LeggedManip_Lab/assets/go2_piper/go2_piper_articulation_cfg.py": "b4528af223a7ad9081a1dca7e3a47ca8f2a875672702613d9c73c146cc3549c5",
+    "vendor/IsaacLab/source/isaaclab/isaaclab/actuators/actuator_pd.py": "105f0341f972102f6bd5b0c544bc7c0510662241389a9decd24406bb2371d27e",
+    "vendor/LeggedManip_Lab/source/LeggedManip_Lab/LeggedManip_Lab/assets/go2_piper/go2_piper.usd": "7096d6fe13922bb16678a7963eb5eef9a4e5fafc8de0cfc8b512f002f83dfc16",
+    "run_basic_wbc.sh": "40c38a9a58905daa710f567b7df8998660ad218a7d56b2817986badffe588564",
+    "scripts/preflight_basic_wbc.py": "6d0b9e7cb9e7a7684270d86a531260bcd0626f3e419e45bf35ed7a3067725ec2"
+  },
+  "source_equivalence": {
+    "control_files_byte_identical_to_measured_run": true,
+    "files": [
+      {
+        "live": "adaptive_runner.py",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/adaptive_runner.py",
+        "sha256": "ffd01f6ac146bf6a7a422205d5f61c09df73f1fb3863ed9d87a663cc61316a74",
+        "byte_identical": true
+      },
+      {
+        "live": "wbc_backend.py",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/go2_backend.py",
+        "sha256": "f1eba7c87d2dad8ad244cfe4d57d7daf7cecff718837bbd15e1f051c4ca4053b",
+        "byte_identical": true
+      },
+      {
+        "live": "camera_coordinator.py",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/camera_coordinator.py",
+        "sha256": "2d9045a7eaad5dc81b7a3af9614258a537ac6c2e01df741241ce930f9405e74c",
+        "byte_identical": true
+      },
+      {
+        "live": "bounded_body_prediction.py",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/bounded_body_prediction.py",
+        "sha256": "b0cfa3b064139274d156da0d820463377aecaf6ad366aef2ea1e730167d9c7f5",
+        "byte_identical": true
+      },
+      {
+        "live": "lateral_stand_brake.py",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/lateral_stand_brake.py",
+        "sha256": "212c1f636f0179a7f714d60fb0e7a9a4fc33b9a890e7d2d14d86c08bfc37a823",
+        "byte_identical": true
+      },
+      {
+        "live": "world_z_feedback.py",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/world_z_feedback.py",
+        "sha256": "3d495f4cfbd81ed45ba744ead7d831c53253d4e597163e0319a44871b9d37a6a",
+        "byte_identical": true
+      },
+      {
+        "live": "world_z_bumpless.py",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/world_z_bumpless.py",
+        "sha256": "33c15cbed55d15fb856ee52d954a74cd7cc9e3e0d8359f19ba8f7cdcf01657a7",
+        "byte_identical": true
+      },
+      {
+        "live": "terminal_allocator.py",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/terminal_allocator.py",
+        "sha256": "04a9299b711f8d80d1d6b7ce75c6edb3861c912eec57aa36e90ccceccab30cc7",
+        "byte_identical": true
+      },
+      {
+        "live": "terminal_yaw_allocator.py",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/terminal_yaw_allocator.py",
+        "sha256": "4aa7ee3ae71a7af72695c4b341bfa9a82cf6299d235d92549009547525c23e7c",
+        "byte_identical": true
+      },
+      {
+        "live": "optical_sampler.py",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/optical_sampler.py",
+        "sha256": "a7ede41f1c86eb98b3537df6db023ea2565f165185794c19271429a2351d5459",
+        "byte_identical": true
+      },
+      {
+        "live": "actuator_limits.py",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/go2_actuator_limits.py",
+        "sha256": "437a34d5dc85ded34167bd79f506b2bff5b05500cb8c20833251a794b1ce5c64",
+        "byte_identical": true
+      },
+      {
+        "live": "../Robot_G1/velocity_servo.py",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/velocity_servo.py",
+        "sha256": "c47d11557408c44b35b5bd305900e9cc19cafeb89f02873be998679cf1457fd0",
+        "byte_identical": true
+      },
+      {
+        "live": "../Robot_G1/legged_collision.py",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/legged_collision.py",
+        "sha256": "1989bf9c6db5cd4821dd3a9fa048b4fb5ddc6d2b1529b077524cbaa7dad643fd",
+        "byte_identical": true
+      },
+      {
+        "live": "../Robot_G1/contact_materials.py",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/contact_materials.py",
+        "sha256": "ce765ae1c27112a844def5e639009d61bedfee0117e137e01edc6514e32499c9",
+        "byte_identical": true
+      },
+      {
+        "live": "../config/robot_sensor_mounts.json",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/robot_sensor_mounts.json",
+        "sha256": "053c532bfcbfab8b5ac6f0b309383fd48e85502c822e045ea326ce0ac0f961dc",
+        "byte_identical": true
+      },
+      {
+        "live": "vendor/LeggedManip_Lab/mujoco/deploy/policy/go2_piper/wbc/policy.pt",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/policy.pt",
+        "sha256": "c5f57c79bc01d8b8f2c0846163b149e3f53de39291770a1ccb230ef3be6b800e",
+        "byte_identical": true
+      },
+      {
+        "live": "vendor/LeggedManip_Lab/mujoco/robots/go2_piper/go2piper.xml",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/go2piper.xml",
+        "sha256": "e36f01b3dafa1d7d2820b200993f5e0a3a1c4bef948a5eb77141cb5686808c40",
+        "byte_identical": true
+      },
+      {
+        "live": "../jev_agent_wbc/representation.py",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/jev_agent_wbc/representation.py",
+        "sha256": "e9dc2c19c58c104032d60ebaeaa69878830bfc686b966a6806d4c6a4833d8e3a",
+        "byte_identical": true
+      },
+      {
+        "live": "../jev_agent_wbc/wbc_protocol.py",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/jev_agent_wbc/wbc_protocol.py",
+        "sha256": "e30cb08de260c920e96f00e0a5de76dc5dcde5c26bbf2c654f0bbf6056f4ab41",
+        "byte_identical": true
+      },
+      {
+        "live": "../jev_agent_wbc/wbc_physical.py",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/jev_agent_wbc/wbc_physical.py",
+        "sha256": "f0ea62a5e2a09701fe707044ca8c1b1f34297845be689a6a1899d905878caaff",
+        "byte_identical": true
+      },
+      {
+        "live": "../jev_agent_wbc/robot_sensor_rig.py",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/jev_agent_wbc/robot_sensor_rig.py",
+        "sha256": "cd4a54be61841758dd1d597c2a5c764387dff7d2d778a754625cd3a9088f2588",
+        "byte_identical": true
+      },
+      {
+        "live": "vendor/LeggedManip_Lab/source/LeggedManip_Lab/LeggedManip_Lab/tasks/manager_based/leggedmanip_lab/config/go2_piper/wbc_env_cfg.py",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/go2_upstream/config/go2_piper/wbc_env_cfg.py",
+        "sha256": "5399b7432bb3ec1679a1329bccb11c9b4007989a0ab5072a3cf7ed525717dce2",
+        "byte_identical": true
+      },
+      {
+        "live": "vendor/LeggedManip_Lab/source/LeggedManip_Lab/LeggedManip_Lab/tasks/manager_based/leggedmanip_lab/mdp/pose_command_wbc.py",
+        "frozen": "results/adaptive_suite_planar_brake_01/sources/go2_upstream/mdp/pose_command_wbc.py",
+        "sha256": "9266a53093084c437edcc88a3ab166be69fbc9535a5678cb2a4182d028d20249",
+        "byte_identical": true
+      }
+    ],
+    "extra_entrypoint": "Thin wrapper passes original fixed measured flags. It preserves original strict summary and exit2.",
+    "unexecuted_archives": [
+      "g1_backend.py",
+      "pink_collision.py",
+      "upper_reference.py"
+    ],
+    "native_asset_config": "Same pinned official asset configuration and actual readback USD; no physics/control edits during release."
+  }
+}

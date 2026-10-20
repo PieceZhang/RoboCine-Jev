@@ -1,0 +1,141 @@
+{
+  "schema": "mobile_manipulator/v1",
+  "name": "TIAGo steel (PMB2 + 7-DoF arm + torso)",
+  "robot_key": "tiago",
+  "usd": "assets/usd/tiago.usd",
+  "articulation_root": "base_link",
+  "base_link": "base_link",
+  "ee_link": "gripper_link",
+  "wheel_radius_m": 0.0985,
+  "wheel_separation_m": 0.4044,
+  "left_wheels": [
+    "wheel_left_joint"
+  ],
+  "right_wheels": [
+    "wheel_right_joint"
+  ],
+  "wheel_signs": {
+    "wheel_left_joint": 1,
+    "wheel_right_joint": 1
+  },
+  "joints": [
+    {
+      "name": "torso_lift_joint",
+      "home": 0.18,
+      "effort": 2000.0,
+      "lower": 0.0,
+      "upper": 0.35,
+      "velocity": 0.07,
+      "kp": 100000.0,
+      "kd": 3000.0
+    },
+    {
+      "name": "arm_1_joint",
+      "home": 0.35,
+      "effort": 43.0,
+      "lower": 0.0,
+      "upper": 2.748893571891069,
+      "velocity": 1.95,
+      "kp": 1500.0,
+      "kd": 70.0
+    },
+    {
+      "name": "arm_2_joint",
+      "home": -0.6,
+      "effort": 43.0,
+      "lower": -1.5707963267948966,
+      "upper": 1.090830782496456,
+      "velocity": 1.95,
+      "kp": 1500.0,
+      "kd": 70.0
+    },
+    {
+      "name": "arm_3_joint",
+      "home": -0.5,
+      "effort": 26.0,
+      "lower": -3.5342917352885173,
+      "upper": 1.5707963267948966,
+      "velocity": 2.35,
+      "kp": 1500.0,
+      "kd": 70.0
+    },
+    {
+      "name": "arm_4_joint",
+      "home": 1.6,
+      "effort": 26.0,
+      "lower": -0.39269908169872414,
+      "upper": 2.356194490192345,
+      "velocity": 2.35,
+      "kp": 1500.0,
+      "kd": 70.0
+    },
+    {
+      "name": "arm_5_joint",
+      "home": 0.0,
+      "effort": 3.0,
+      "lower": -2.0943951023931953,
+      "upper": 2.0943951023931953,
+      "velocity": 1.95,
+      "kp": 1500.0,
+      "kd": 70.0
+    },
+    {
+      "name": "arm_6_joint",
+      "home": 0.5,
+      "effort": 6.6,
+      "lower": -1.413716694115407,
+      "upper": 1.413716694115407,
+      "velocity": 1.76,
+      "kp": 1500.0,
+      "kd": 70.0
+    },
+    {
+      "name": "arm_7_joint",
+      "home": 0.0,
+      "effort": 6.6,
+      "lower": -2.0943951023931953,
+      "upper": 2.0943951023931953,
+      "velocity": 1.76,
+      "kp": 1500.0,
+      "kd": 70.0
+    }
+  ],
+  "sensors": "sensors.json",
+  "initial_height_m": 0.005,
+  "passive_joint_positions": {
+    "head_1_joint": 0.0,
+    "head_2_joint": 0.0,
+    "gripper_left_finger_joint": 0.025,
+    "gripper_right_finger_joint": 0.025
+  },
+  "support_collision_friction": 0.001,
+  "notes": [
+    "Original single-arm differential TIAGo; lateral displacement requires heading change.",
+    "Auxiliary rear scanner plus front scanner share every scan parameter.",
+    "Official caster joints are fixed; approximate passive support friction must be audited in PhysX."
+  ],
+  "wheel_kd": 30.0,
+  "wheel_effort": 6.0,
+  "passive_joint_gains": {
+    "head_1_joint": {
+      "kp": 100.0,
+      "kd": 15.0,
+      "effort": 5.197
+    },
+    "head_2_joint": {
+      "kp": 100.0,
+      "kd": 15.0,
+      "effort": 2.77
+    },
+    "gripper_left_finger_joint": {
+      "kp": 2000.0,
+      "kd": 40.0,
+      "effort": 16.0
+    },
+    "gripper_right_finger_joint": {
+      "kp": 2000.0,
+      "kd": 40.0,
+      "effort": 16.0
+    }
+  }
+}

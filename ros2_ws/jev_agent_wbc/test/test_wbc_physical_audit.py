@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import shutil
 
 import numpy as np
 import pytest
@@ -176,4 +177,77 @@ def test_settle_prefix_cannot_be_removed(tmp_path):
     save(tmp_path, rows[1:])
     result = AUDIT.audit(tmp_path)
     assert 'physical_log_start_incomplete' in result['audit_errors']
+    assert not result['physical_acceptance_pass']
+
+
+def test_correctly_reported_constraint_failure_still_fails_acceptance(tmp_path):
+    rows = fixture(tmp_path)
+    rows[5]['task_feedback']['constraints']['configuration'] = dict(status='fail', stamp_s=.6, scope='measured_native_limits')
+    save(tmp_path, rows)
+    result = AUDIT.audit(tmp_path)
+    assert result['audit_passed'] and result['all_tasks_pass']
+    assert result['constraint_failure_samples'] == {'configuration': 1}
+    assert not result['physical_acceptance_pass']
+
+
+@pytest.mark.parametrize('constraint', [dict(status='maybe', scope='measured_native_limits', stamp_s=.6),
+    dict(status='pass', scope='measured_native_limits', stamp_s=.6, reserve_fraction=2.),
+    dict(status='pass', scope='measured_collision_model', stamp_s=.6, clearance_m=-.1),
+    dict(status='not_applicable', scope='not_applicable', stamp_s=.6)])
+def test_malformed_constraint_feedback_cannot_pass(tmp_path, constraint):
+    rows = fixture(tmp_path)
+    rows[5]['task_feedback']['constraints']['actuation'] = constraint
+    save(tmp_path, rows)
+    result = AUDIT.audit(tmp_path)
+    assert not result['audit_passed'] and not result['physical_acceptance_pass']
+
+
+def test_go2_rechecks_actual_command_instead_of_rejected_candidate(tmp_path):
+    package = Path(__file__).resolve().parents[1]
+    source = package/'Robot_Go2'
+    pairs = [(source/'wbc_backend.py', tmp_path/'sources/go2_backend.py')]
+    prefix = source/'vendor/LeggedManip_Lab/source/LeggedManip_Lab/LeggedManip_Lab/tasks/manager_based/leggedmanip_lab'
+    pairs += [(prefix/relative, tmp_path/'sources/go2_upstream'/relative) for relative in
+        ('config/go2_piper/wbc_env_cfg.py', 'mdp/pose_command_wbc.py')]
+    for original, copied in pairs:
+        copied.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(original, copied)
+    row = dict(stamp=1., feedback={}, raw=dict(actual_native_command=[.5, 0., .5, 1., 0., 0., 0.],
+        rejected_feedback_correction=dict(status='out_of_policy_domain')))
+    assert AUDIT.go2_native_domain(tmp_path, [row])['passed']
+    row['raw']['actual_native_command'][0] = -.5
+    row['raw']['actual_native_domain'] = dict(status='inside_outer_domain_unverified')
+    assert not AUDIT.go2_native_domain(tmp_path, [row])['passed']
+
+
+def test_native_guard_failure_cannot_be_overridden_by_small_tracking_error(tmp_path):
+    fixture(tmp_path)
+    (tmp_path/'summary.json').write_text(json.dumps(dict(run_complete=True, sim_seconds=2., wall_seconds=2.,
+        measured_safety_pass=False, measured_safety_violations=1)))
+    result = AUDIT.audit(tmp_path)
+    assert result['audit_passed'] and result['all_tasks_pass']
+    assert result['native_reported_safety_failure']
+    assert not result['physical_acceptance_pass']
+
+
+def test_guard_abort_is_reported_when_stop_window_is_incomplete(tmp_path):
+    rows = fixture(tmp_path)
+    save(tmp_path, rows[:12])
+    (tmp_path/'summary.json').write_text(json.dumps(dict(run_complete=False,
+        sim_seconds=1.2, wall_seconds=1.2, failures=['self_collision'])))
+    result = AUDIT.audit(tmp_path)
+    assert not result['physical_acceptance_pass']
+    assert result['run_complete'] is False
+    assert result['native_reported_safety_failure'] is True
+    assert 'physical_run_incomplete' in result['audit_errors']
+    assert 'incomplete stop window' in result['audit_errors']
+
+
+def test_native_infeasibility_is_not_hidden_by_small_measured_error(tmp_path):
+    rows = fixture(tmp_path)
+    rows[5]['task_feedback'].update(feasible=False, reason='solver_infeasible')
+    save(tmp_path, rows)
+    result = AUDIT.audit(tmp_path)
+    assert result['audit_passed'] and result['all_tasks_pass']
+    assert result['reported_infeasible_feedback_samples'] == 1
     assert not result['physical_acceptance_pass']

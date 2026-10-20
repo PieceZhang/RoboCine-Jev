@@ -46,7 +46,7 @@ cd /home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback
 
 `controllers/whole_body.py` 实现加权阻尼最小二乘全身速度控制：从 PhysX 读取末端六维 Jacobian 和当前末端位姿，在同一次求解中分配底盘三轴与 UR5 六轴速度，并通过零空间关节姿态项、速度上限和位置积分限制保持连续。底盘与手臂共同跟踪世界坐标下末端位置和姿态，输出再由带实际力矩上限的关节 PD 驱动执行。参考坐标约定：米、弧度、右手系；记录四元数为 `w,x,y,z`。当前末端定义为 `ur_arm_wrist_3_link` 原点。
 
-## 验收与实测文件
+## 历史DLS控制器验收与实测文件
 
 最终验收目录为 `results/acceptance_03/`。测试包含前／后／左／右、东北／西南斜行、顺／逆时针转向和停车，各 5 秒；平移速度 0.15 m/s，斜行每轴 0.10 m/s，转向 0.20 rad/s，每段首尾有 0.5 秒加减速。全身测试持续 20 秒，末端同时改变三维位置及三维姿态，底盘和机械臂均需产生非零运动才可通过。
 
@@ -78,3 +78,9 @@ cd /home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback
 停车判定分别使用底盘 m/s、yaw rad/s 和最后一秒实际关节／末端位姿变化，避免混合不同单位。TGS 在静止承重关节可能报告小的非零 `qd`，因此保留报告速度和实际位姿变化两组原始证据。
 
 `results/inspect_01/` 是早期 API／静止检查；`results/acceptance_01/` 是地面较低时的首次调试结果；`results/acceptance_02/` 保留地面为 `z=0` 且使用默认接触参数时的失败：固定基座的轮形碰撞壳与地面穿透约 25.9mm，冗余接触使底盘静摩擦锁死。`results/collision_geometry_audit.json` 保存排查碰撞壳的几何证据，早期推导遗漏了固定基座实际高度，已用真实测量纠正。最终结论以按碰撞壳与接触 offset 计算地面的 `acceptance_03` 为准。
+
+## OCS2 原生物理闭环状态
+
+`run_ocs2.sh` 已真正接入原生 OCS2 SLQ 与 Isaac Sim 实测闭环，当前单一地面场景的完整 `results/ocs2_acceptance_02/` 已通过八方向、机械臂独立控制、21s原相机6D Task、每段全9DOF严格停车、最终原Task容差、pace1及真实RGB／光轴检查：12200个100Hz连续实测样本，122.00s物理／122.053s墙钟，0实测安全违例。相机位置RMSE3.351mm／最大15.049mm、姿态RMSE.005573rad；全部2100个轨迹采样点在原35mm／.10rad内，最终误差3.336mm／.009581rad。八方向／独立臂／原Task与反馈／原关节限位／渲染另经四份根级独立审计通过，当前执行、相机及公共接口三项gate为true。
+
+原 `run.sh`、上文71s数据与 `results/ocs2_acceptance_01/` 的旧场景结果及等价审计保持为历史证据；当前FULL02为新world完整物理重跑，不靠源码分支等价代替场景复测。只保留原analytic Plane并绑定原.5/.5地面材质，visual mesh不碰撞，reset前后都核对唯一floor；所有robot shape／pair／offset／drive／cap保留。**官方固定根x/y/yaw平面关节限制保持，不冒充mecanum滚子动力学。** 环境约束、连续全姿态传感器覆盖和实时LiDAR避障仍未验证。范围、复现和限制见 [WBC.md](WBC.md)，机器可读状态见 [WBC_READINESS.json](WBC_READINESS.json)。

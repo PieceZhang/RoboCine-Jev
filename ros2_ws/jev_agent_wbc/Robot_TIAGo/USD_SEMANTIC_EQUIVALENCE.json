@@ -1,0 +1,8 @@
+{
+  "scope": "USD crate files can append identical authored values and change binary hash; compare exact full exported layer text",
+  "current": "assets/usd/tiago.usd",
+  "tested": "results/coverage_best/asset_entry_source.usd",
+  "identical_layer_text": true,
+  "current_layer_text_sha256": "09ff55668069abd2a6cf6e0e82edfeebe15decfd53733ba8095a43bc3d600784",
+  "tested_layer_text_sha256": "09ff55668069abd2a6cf6e0e82edfeebe15decfd53733ba8095a43bc3d600784"
+}

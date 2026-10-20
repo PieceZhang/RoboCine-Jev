@@ -96,3 +96,7 @@ vlog_agent_out/
 
 typesafe_Jev_api_key
 /patches
+/results
+
+# Local validation evidence: measurements, reports, logs and frozen snapshots
+**/evidence/

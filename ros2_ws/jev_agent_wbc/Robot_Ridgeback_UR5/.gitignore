@@ -4,3 +4,7 @@ __pycache__/
 *.pyc
 results/*.log
 results/asset_inspection.usda
+
+/ocs2/.cache/
+
+/results/ocs2_*/

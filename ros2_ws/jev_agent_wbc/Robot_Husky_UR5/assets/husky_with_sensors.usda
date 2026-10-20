@@ -1,0 +1,62 @@
+#usda 1.0
+(
+    defaultPrim = "husky_ur5"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "husky_ur5" (
+    prepend references = @./husky_ur5_v2.usda@
+)
+{
+    custom bool cine:inspectionAssembly = 1
+    custom string cine:modelSha256 = "2c8819f77d938e1aa2f1926b5763d4a7ea3f585c2dc376ce87df5b3956c115ce"
+    custom string cine:sensorConfigSha256 = "163e86b5342360816abb3ab2f5e88571938b14b251f7b34f66d9d0f695291f79"
+
+    over "ur5_wrist_3_link"
+    {
+        def Xform "CineCameraOptical"
+        {
+            matrix4d xformOp:transform = ( (1, 0, -0, 0), (-0, 1, -0, 0), (0, 0, 1, 0), (-0.04, 0, 0.34, 1) )
+            uniform token[] xformOpOrder = ["xformOp:transform"]
+
+            def Camera "Camera"
+            {
+                float2 clippingRange = (0.01, 100)
+                float focalLength = 23.458057
+                float horizontalAperture = 36
+                float verticalAperture = 27
+                matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, -1, 0, 0), (0, 0, -1, 0), (0, 0, 0, 1) )
+                uniform token[] xformOpOrder = ["xformOp:transform"]
+            }
+        }
+    }
+
+    over "husky_base_link"
+    {
+        def Xform "CineLidar_main"
+        {
+            custom double[] cine:elevationDegrees = [-80, -78, -76, -74, -72, -70, -68, -66, -64, -62, -60, -58, -56, -54, -52, -50, -48, -46, -44, -42, -40, -38, -36, -34, -32, -30, -28, -26, -24, -22, -20, -18, -16, -14, -12, -10, -8, -6, -4, -2, 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, 74, 76, 78, 80]
+            custom int cine:horizontalSamples = 360
+            custom double cine:maxRangeMeters = 10
+            custom double cine:minRangeMeters = 0.05
+            custom bool cine:requiresRunnerForAcquisition = 1
+            custom string cine:sensorType = "physx_closest_hit_lidar"
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0.53, 0.4, 0.42, 1) )
+            uniform token[] xformOpOrder = ["xformOp:transform"]
+        }
+
+        def Xform "CineLidar_aux"
+        {
+            custom double[] cine:elevationDegrees = [-80, -78, -76, -74, -72, -70, -68, -66, -64, -62, -60, -58, -56, -54, -52, -50, -48, -46, -44, -42, -40, -38, -36, -34, -32, -30, -28, -26, -24, -22, -20, -18, -16, -14, -12, -10, -8, -6, -4, -2, 0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, 74, 76, 78, 80]
+            custom int cine:horizontalSamples = 360
+            custom double cine:maxRangeMeters = 10
+            custom double cine:minRangeMeters = 0.05
+            custom bool cine:requiresRunnerForAcquisition = 1
+            custom string cine:sensorType = "physx_closest_hit_lidar"
+            matrix4d xformOp:transform = ( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (-0.53, -0.4, 0.42, 1) )
+            uniform token[] xformOpOrder = ["xformOp:transform"]
+        }
+    }
+}
+

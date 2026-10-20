@@ -1,0 +1,6 @@
+# Tested installed runtime; do not install from system Python.
+isaacsim==5.1.0.0
+numpy==1.26.0
+scipy==1.15.3
+torch==2.7.0
+Pillow==11.3.0

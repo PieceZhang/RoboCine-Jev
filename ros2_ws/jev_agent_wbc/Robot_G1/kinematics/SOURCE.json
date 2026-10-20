@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/unitreerobotics/unitree_ros",
+  "commit": "5994d4faef0a9cadd3287f8de0199a67eeb2a259",
+  "url": "https://raw.githubusercontent.com/unitreerobotics/unitree_ros/5994d4faef0a9cadd3287f8de0199a67eeb2a259/robots/g1_description/g1_29dof.urdf",
+  "sha256": "e1dc89366bf96aa33ba4ef211884f6d81320ddd2ac6f8b1ad82986e64008be31",
+  "scope": "Official fixed-base kinematic URDF only; physical Isaac USD remains original; equivalence requires joint-frame audit.",
+  "license_url": "https://raw.githubusercontent.com/unitreerobotics/unitree_ros/5994d4faef0a9cadd3287f8de0199a67eeb2a259/LICENSE",
+  "license_sha256": "84aac59fd3246e3ddc49d1387644e8fcf43b0def4f0b9fe687f372e90446df2d"
+}

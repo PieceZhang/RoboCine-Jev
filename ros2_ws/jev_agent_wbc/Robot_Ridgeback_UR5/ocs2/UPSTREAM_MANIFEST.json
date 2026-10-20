@@ -1,0 +1,44 @@
+{
+  "repository": "https://github.com/leggedrobotics/ocs2",
+  "branch": "ros2",
+  "revision": "88ce706c17fcc4591b6c24c87a4a85ff6ed9e92d",
+  "files": [
+    {
+      "path": "ocs2_robotic_examples/ocs2_mobile_manipulator/src/dynamics/WheelBasedMobileManipulatorDynamics.cpp",
+      "sha256": "ef0fac4273192a5eb051fd595f1d17f402f53c9b1f65f7c080c20dad52c2d43e",
+      "url": "https://github.com/leggedrobotics/ocs2/blob/88ce706c17fcc4591b6c24c87a4a85ff6ed9e92d/ocs2_robotic_examples/ocs2_mobile_manipulator/src/dynamics/WheelBasedMobileManipulatorDynamics.cpp"
+    },
+    {
+      "path": "ocs2_robotic_examples/ocs2_mobile_manipulator/include/ocs2_mobile_manipulator/ManipulatorModelInfo.h",
+      "sha256": "296fbb7a444fc9794156d70e9f61e2f078571a5843483489cbc07c3509d83969",
+      "url": "https://github.com/leggedrobotics/ocs2/blob/88ce706c17fcc4591b6c24c87a4a85ff6ed9e92d/ocs2_robotic_examples/ocs2_mobile_manipulator/include/ocs2_mobile_manipulator/ManipulatorModelInfo.h"
+    },
+    {
+      "path": "ocs2_robotic_examples/ocs2_mobile_manipulator/config/ridgeback_ur5/task.info",
+      "sha256": "294036d4718f976c5eadaafcd2baf06baab1056566644b3719cd618844793401",
+      "url": "https://github.com/leggedrobotics/ocs2/blob/88ce706c17fcc4591b6c24c87a4a85ff6ed9e92d/ocs2_robotic_examples/ocs2_mobile_manipulator/config/ridgeback_ur5/task.info"
+    },
+    {
+      "path": "ocs2_core/include/ocs2_core/dynamics/SystemDynamicsBase.h",
+      "sha256": "51b6c4339be85c8556239ca81623b194208c6006e3a30c269bdff688bc8c5f05",
+      "url": "https://github.com/leggedrobotics/ocs2/blob/88ce706c17fcc4591b6c24c87a4a85ff6ed9e92d/ocs2_core/include/ocs2_core/dynamics/SystemDynamicsBase.h"
+    },
+    {
+      "path": "ocs2_core/src/dynamics/SystemDynamicsBase.cpp",
+      "sha256": "0f8203c9749e11ae20d5104a5398bf4a611f7e1032533b76facffa118bec3e9d",
+      "url": "https://github.com/leggedrobotics/ocs2/blob/88ce706c17fcc4591b6c24c87a4a85ff6ed9e92d/ocs2_core/src/dynamics/SystemDynamicsBase.cpp"
+    },
+    {
+      "path": "installation.md",
+      "sha256": "1e8c39ebcae8604ffdf5fc816149dc71960f41848cad375d631cae028eaf8b32",
+      "url": "https://github.com/leggedrobotics/ocs2/blob/88ce706c17fcc4591b6c24c87a4a85ff6ed9e92d/installation.md"
+    },
+    {
+      "path": "LICENCE.txt",
+      "sha256": "1b1f6f7a259c88252b87aa03cf8115c35767ffc40043569e7cefe657d02054d3",
+      "url": "https://github.com/leggedrobotics/ocs2/blob/88ce706c17fcc4591b6c24c87a4a85ff6ed9e92d/LICENCE.txt"
+    }
+  ],
+  "official_documentation": "https://leggedrobotics.github.io/ocs2/robotic_examples.html",
+  "native_omni_extension_required": true
+}

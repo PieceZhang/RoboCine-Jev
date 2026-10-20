@@ -104,7 +104,11 @@ def policy_velocity(policy, stamp, nu, *, ttl_s=.2):
 
 
 class HardCommandGuard:
-    """Physical velocity/acceleration and anticipatory arm-joint braking caps."""
+    """Command slew caps plus a separate measured arm-speed/braking audit.
+
+    The acceleration bound applies to the applied velocity setpoint. It is not
+    a claim about contact dynamics or the measured acceleration of a PD drive.
+    """
     def __init__(self, omni, lower, upper, dt=.01):
         self.nu = 9 if omni else 8
         self.dt = dt
@@ -112,25 +116,142 @@ class HardCommandGuard:
         self.acceleration = np.r_[([.45,.45,.65] if omni else [.45,.65]), np.ones(6)]
         self.lower, self.upper = np.array(lower),np.array(upper)
         self.previous = np.zeros(self.nu)
+        self.last_audit = None
 
-    def command(self, desired, q, *, brake=False):
-        desired, q = np.asarray(desired,float),np.asarray(q,float)
-        if desired.shape!=(self.nu,) or q.shape!=(6,) or not np.isfinite(desired).all() or not np.isfinite(q).all():
+    def command(self, desired, q, qd, *, brake=False):
+        desired, q, qd = np.asarray(desired,float),np.asarray(q,float),np.asarray(qd,float)
+        if desired.shape!=(self.nu,) or q.shape!=(6,) or qd.shape!=(6,) or not np.isfinite(desired).all() or not np.isfinite(q).all() or not np.isfinite(qd).all():
             raise ValueError('invalid physical guard state/command')
+        a=self.acceleration[-6:]
+        # These use real measured qd, independently of the command-rate state.
+        outward_upper=np.maximum(qd,0.);outward_lower=np.maximum(-qd,0.)
+        upper_margin=self.upper-q-outward_upper*self.dt-outward_upper**2/(2*a)
+        lower_margin=q-self.lower-outward_lower*self.dt-outward_lower**2/(2*a)
+        configuration_ok=bool(np.all(q>=self.lower) and np.all(q<=self.upper))
+        velocity_ratio=float(np.max(np.abs(qd)/self.speed[-6:]))
+        braking_ok=bool(np.all(upper_margin>=-1e-10) and np.all(lower_margin>=-1e-10))
+        self.last_audit=dict(configuration_ok=configuration_ok,actual_velocity_ok=velocity_ratio<=1.00001,
+                             actual_braking_ok=braking_ok,maximum_actual_velocity_ratio=velocity_ratio,
+                             minimum_actual_braking_margin_rad=float(min(upper_margin.min(),lower_margin.min())))
+        measured_ok=all(self.last_audit[k] for k in ['configuration_ok','actual_velocity_ok','actual_braking_ok'])
         if np.any(q<self.lower-.015) or np.any(q>self.upper+.015):
             raise RuntimeError('measured physical joint outside its original bound')
         lo=np.maximum(-self.speed,self.previous-self.acceleration*self.dt)
         hi=np.minimum(self.speed,self.previous+self.acceleration*self.dt)
-        a=self.acceleration[-6:]
-        # One physics/control interval is reserved before full deceleration.
+        # Reserve actual outward travel during the next measurement interval.
+        # A lagging real drive cannot acquire permission from a small command.
         safe=lambda distance: np.maximum(0.,np.sqrt((a*self.dt)**2+2*a*np.maximum(distance-.005,0.))-a*self.dt)
-        lo[-6:]=np.maximum(lo[-6:],-safe(q-self.lower))
-        hi[-6:]=np.minimum(hi[-6:],safe(self.upper-q))
+        lo[-6:]=np.maximum(lo[-6:],-safe(q-self.lower-outward_lower*self.dt))
+        hi[-6:]=np.minimum(hi[-6:],safe(self.upper-q-outward_upper*self.dt))
         if np.any(lo>hi+1e-10):
             raise RuntimeError('joint braking envelope conflicts with bounded acceleration')
-        result=np.clip(np.zeros(self.nu) if brake else desired,lo,hi)
+        result=np.clip(np.zeros(self.nu) if brake or not measured_ok else desired,lo,hi)
         self.previous=result.copy()
         return result
+
+
+class SkidSteerVelocityServo:
+    """Measured body-yaw PI mapped to rate-limited physical rolling wheels.
+
+    The OCS2 reference remains a body velocity. This actuator mapping compensates
+    wheel/ground slip; its virtual yaw is not a new body reference or measurement.
+    """
+    def __init__(self, radius, track, dt=.01):
+        self.radius,self.track,self.dt=float(radius),float(track),float(dt)
+        self.wheel_speed=8.
+        self.wheel_slew=(.45+.65*self.track/2)/self.radius
+        self.integral=0.
+        self.previous=np.zeros(2)
+        self.turn_braking=False
+        self.last_audit=None
+
+    def command(self, velocity, measured_yaw_rate, *, brake=False, turn_in_place=False):
+        v,w=map(float,velocity);measured=float(measured_yaw_rate)
+        if not np.isfinite([v,w,measured]).all():raise ValueError('nonfinite skid servo state')
+        previous_integral=self.integral
+        if turn_in_place:
+            if abs(measured)>=.22:self.turn_braking=True
+            elif abs(measured)<=.12:self.turn_braking=False
+        else:self.turn_braking=False
+        effective_brake=bool(brake or self.turn_braking)
+        operating_wheel_cap=1. if turn_in_place else self.wheel_speed
+        if effective_brake:
+            self.integral=0.;virtual=0.;desired=np.zeros(2)
+        else:
+            error=w-measured
+            # The integral is limited before wheel-speed saturation; conditional
+            # integration prevents continued wind-up at the virtual actuator cap.
+            candidate=float(np.clip(self.integral+error*self.dt,-.65,.65))
+            raw=w+3.*error+6.*candidate
+            actuator_cap=min(4.,max(0.,(operating_wheel_cap*self.radius-abs(v))*2/self.track))
+            virtual=float(np.clip(raw,-actuator_cap,actuator_cap))
+            if abs(raw)<=actuator_cap or error*raw<0:self.integral=candidate
+            desired=np.array([v-virtual*self.track/2,v+virtual*self.track/2])/self.radius
+        desired=np.clip(desired,-operating_wheel_cap,operating_wheel_cap)
+        result=np.clip(desired,self.previous-self.wheel_slew*self.dt,self.previous+self.wheel_slew*self.dt)
+        if not effective_brake and (w-measured)*((desired[1]-desired[0])-(result[1]-result[0]))>1e-12:
+            self.integral=previous_integral
+        self.last_audit=dict(target_body_velocity=[v,w],measured_yaw_rate=measured,
+                             virtual_actuator_yaw_rate=virtual,integral=self.integral,
+                             wheel_velocity_targets=result.tolist(),wheel_velocity_cap=self.wheel_speed,
+                             wheel_velocity_slew_cap=self.wheel_slew,brake=effective_brake,
+                             turn_in_place=bool(turn_in_place),turn_braking=self.turn_braking,
+                             operating_wheel_cap=operating_wheel_cap)
+        self.previous=result.copy()
+        return result
+
+
+def reference_window(absolute_times, serialized_poses, stamp, horizon):
+    """An exact contiguous subset of original knots, including interpolation ends."""
+    times=np.asarray(absolute_times,float)
+    if len(times)!=len(serialized_poses) or len(times)<2 or np.any(np.diff(times)<=0):
+        raise ValueError('invalid immutable reference knots')
+    first=max(0,int(np.searchsorted(times,stamp,side='right'))-1)
+    last=min(len(times),int(np.searchsorted(times,stamp+horizon,side='left'))+1)
+    if times[first]>stamp or times[last-1]<stamp+horizon-1e-9:
+        raise ValueError('original reference does not cover requested horizon')
+    return times[first:last].tolist(),serialized_poses[first:last],(first,last)
+
+
+def terminal_reference_window(absolute_times, serialized_poses, stamp, horizon):
+    """Original knots plus an explicit constant continuation of the same endpoint.
+
+    This never changes the public trajectory, its timestamps or tolerances.
+    It only specifies the prediction reference after the public task has ended.
+    """
+    times=np.asarray(absolute_times,float)
+    if (len(times)!=len(serialized_poses) or len(times)<2 or not np.isfinite(times).all()
+            or np.any(np.diff(times)<=0) or not np.isfinite([stamp,horizon]).all()
+            or horizon<=0 or stamp<times[0]):
+        raise ValueError('invalid original reference or terminal prediction window')
+    first=max(0,min(len(times)-1,int(np.searchsorted(times,stamp,side='right'))-1))
+    last=min(len(times),int(np.searchsorted(times,stamp+horizon,side='left'))+1)
+    selected_times=times[first:last].tolist()
+    selected_poses=list(serialized_poses[first:last])
+    if stamp+horizon>times[-1]+1e-9:
+        selected_times.append(float(stamp+horizon))
+        selected_poses.append(serialized_poses[-1])
+    metadata=dict(mode='constant_original_endpoint_after_end',original_end_s=float(times[-1]),
+                  T_world_original_endpoint=serialized_poses[-1])
+    return selected_times,selected_poses,(first,last),metadata
+
+
+def camera_task_metrics(position, orientation, final_position, final_orientation,
+                        position_tolerance, orientation_tolerance):
+    """Keep RMS, pointwise errors and the final task gate explicitly distinct."""
+    p,o=np.asarray(position,float),np.asarray(orientation,float)
+    values=np.r_[p,o,[final_position,final_orientation,position_tolerance,orientation_tolerance]]
+    if (p.ndim!=1 or o.shape!=p.shape or not p.size or not np.isfinite(values).all()
+            or np.any(p<0) or np.any(o<0) or final_position<0 or final_orientation<0
+            or position_tolerance<=0 or orientation_tolerance<=0):
+        raise ValueError('invalid measured camera-task errors or tolerance')
+    return dict(position_rmse_m=float(np.sqrt(np.mean(p**2))),position_max_m=float(p.max()),
+                orientation_rmse_rad=float(np.sqrt(np.mean(o**2))),orientation_max_rad=float(o.max()),
+                position_exceeding_samples=int(np.count_nonzero(p>position_tolerance)),
+                orientation_exceeding_samples=int(np.count_nonzero(o>orientation_tolerance)),
+                position_sample_count=int(p.size),final_position_error_m=float(final_position),
+                final_orientation_error_rad=float(final_orientation),
+                final_task_tolerance_pass=bool(final_position<position_tolerance and final_orientation<orientation_tolerance))
 
 
 def obb_separation(center_a, axes_a, extents_a, center_b, axes_b, extents_b):

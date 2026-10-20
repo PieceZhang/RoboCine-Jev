@@ -1,0 +1,6 @@
+#include "AccelerationDynamics.h"
+#include <iostream>
+#include <random>
+int main(){std::mt19937 random(21);std::uniform_real_distribution<double> unit(-1.,1.);double worst=0.;int samples=0;ocs2::PreComputation pre;
+ for(bool omni:{false,true}){jev::AccelerationDynamics model(omni);int nu=omni?9:8,nx=9+nu;for(int sample=0;sample<64;++sample){ocs2::vector_t x(nx),u(nu);for(int i=0;i<nx;++i)x(i)=unit(random);for(int i=0;i<nu;++i)u(i)=unit(random);auto a=model.linearApproximation(0.,x,u,pre);for(int i=0;i<nx;++i){auto p=x,m=x;p(i)+=1e-6;m(i)-=1e-6;ocs2::vector_t numeric=(model.computeFlowMap(0.,p,u,pre)-model.computeFlowMap(0.,m,u,pre))/(2e-6);worst=std::max(worst,(numeric-a.dfdx.col(i)).cwiseAbs().maxCoeff());}for(int i=0;i<nu;++i){auto p=u,m=u;p(i)+=1e-6;m(i)-=1e-6;ocs2::vector_t numeric=(model.computeFlowMap(0.,x,p,pre)-model.computeFlowMap(0.,x,m,pre))/(2e-6);worst=std::max(worst,(numeric-a.dfdu.col(i)).cwiseAbs().maxCoeff());}++samples;}}
+ bool passed=worst<1e-7;std::cout<<"{\"framework\":\"actual OCS2 SystemDynamicsBase\",\"state_dims\":[17,18],\"input_dims\":[8,9],\"samples\":"<<samples<<",\"maximum_derivative_error\":"<<worst<<",\"passed\":"<<(passed?"true":"false")<<"}\n";return passed?0:2;}

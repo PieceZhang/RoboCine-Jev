@@ -1,0 +1,948 @@
+#usda 1.0
+(
+    defaultPrim = "husky_ur5"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "husky_ur5" (
+    prepend references = @./source/husky_ur5.usd@
+)
+{
+    over "HuskyControl" (
+        active = false
+    )
+    {
+    }
+
+    over "JointState" (
+        active = false
+    )
+    {
+    }
+
+    over "JointCommand" (
+        active = false
+    )
+    {
+    }
+
+    over "husky_base_link" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        rel physics:filteredPairs = [
+            </husky_ur5/husky_front_bumper_link>,
+            </husky_ur5/husky_inertial_link>,
+            </husky_ur5/husky_rear_bumper_link>,
+            </husky_ur5/husky_top_chassis_link>,
+            </husky_ur5/husky_top_plate_link>,
+            </husky_ur5/husky_sensor_arch_mount_link>,
+            </husky_ur5/husky_top_plate_front_link>,
+            </husky_ur5/husky_top_plate_rear_link>,
+            </husky_ur5/ur5_base_link>,
+            </husky_ur5/ur5_base>,
+            </husky_ur5/ur5_base_link_inertia>,
+            </husky_ur5/husky_user_rail_link>,
+        ]
+        quatf physics:principalAxes = (1, 0, 0, 0)
+        bool physxArticulation:enabledSelfCollisions = 1
+
+        over "collisions" (
+            active = false
+        )
+        {
+        }
+
+        def Cube "VerifiedChassisCollision0" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            float3[] extent = [(-0.5, -0.5, -0.5), (0.5, 0.5, 0.5)]
+            bool physics:collisionEnabled = 1
+            uniform token purpose = "guide"
+            double size = 1
+            quatf xformOp:orient = (1, 0, 0, 0)
+            float3 xformOp:scale = (0.9874, 0.5709, 0.12375)
+            double3 xformOp:translate = (0, 0, 0.061875)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+        }
+
+        def Cube "VerifiedChassisCollision1" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
+        {
+            float3[] extent = [(-0.5, -0.5, -0.5), (0.5, 0.5, 0.5)]
+            bool physics:collisionEnabled = 1
+            uniform token purpose = "guide"
+            double size = 1
+            quatf xformOp:orient = (1, 0, 0, 0)
+            float3 xformOp:scale = (0.78992, 0.5709, 0.10375)
+            double3 xformOp:translate = (0, 0, 0.17562499999999998)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+        }
+
+        over "husky_front_bumper"
+        {
+            uniform bool physics:excludeFromArticulation = 0
+        }
+
+        over "husky_inertial_joint"
+        {
+            uniform bool physics:excludeFromArticulation = 0
+        }
+
+        over "husky_rear_bumper"
+        {
+            uniform bool physics:excludeFromArticulation = 0
+        }
+
+        over "husky_top_chassis_joint"
+        {
+            uniform bool physics:excludeFromArticulation = 0
+        }
+
+        over "husky_user_rail"
+        {
+            uniform bool physics:excludeFromArticulation = 0
+        }
+    }
+
+    over "husky_front_bumper_link" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (1.6666667e-7, 1.6666667e-7, 1.6666667e-7)
+        rel physics:filteredPairs = [
+            </husky_ur5/husky_base_link>,
+            </husky_ur5/husky_inertial_link>,
+            </husky_ur5/husky_rear_bumper_link>,
+            </husky_ur5/husky_top_chassis_link>,
+            </husky_ur5/husky_top_plate_link>,
+            </husky_ur5/husky_sensor_arch_mount_link>,
+            </husky_ur5/husky_top_plate_front_link>,
+            </husky_ur5/husky_top_plate_rear_link>,
+            </husky_ur5/ur5_base_link>,
+            </husky_ur5/ur5_base>,
+            </husky_ur5/ur5_base_link_inertia>,
+            </husky_ur5/husky_user_rail_link>,
+        ]
+        float physics:mass = 0.01
+        quatf physics:principalAxes = (1, 0, 0, 0)
+    }
+
+    over "husky_front_left_wheel" (
+        prepend apiSchemas = ["PhysicsMassAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (0.02467, 0.02467, 0.04411)
+        float physics:mass = 2.637
+        quatf physics:principalAxes = (0, 0, 0.70710677, 0.70710677)
+
+        over "collisions"
+        {
+            float3[] extent = [(-0.1651, -0.1651, -0.05715), (0.1651, 0.1651, 0.05715)]
+        }
+    }
+
+    over "husky_front_right_wheel" (
+        prepend apiSchemas = ["PhysicsMassAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (0.02467, 0.02467, 0.04411)
+        float physics:mass = 2.637
+        quatf physics:principalAxes = (0, 0, 0.70710677, 0.70710677)
+
+        over "collisions"
+        {
+            float3[] extent = [(-0.1651, -0.1651, -0.05715), (0.1651, 0.1651, 0.05715)]
+        }
+    }
+
+    over "husky_inertial_link" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (-0.00065, -0.085, 0.062)
+        float3 physics:diagonalInertia = (0.5917425, 1.7390887, 2.039569)
+        rel physics:filteredPairs = [
+            </husky_ur5/husky_base_link>,
+            </husky_ur5/husky_front_bumper_link>,
+            </husky_ur5/husky_rear_bumper_link>,
+            </husky_ur5/husky_top_chassis_link>,
+            </husky_ur5/husky_top_plate_link>,
+            </husky_ur5/husky_sensor_arch_mount_link>,
+            </husky_ur5/husky_top_plate_front_link>,
+            </husky_ur5/husky_top_plate_rear_link>,
+            </husky_ur5/ur5_base_link>,
+            </husky_ur5/ur5_base>,
+            </husky_ur5/ur5_base_link_inertia>,
+            </husky_ur5/husky_user_rail_link>,
+        ]
+        float physics:mass = 46.034
+        quatf physics:principalAxes = (0.9990835, -0.0011322651, -0.04153282, 0.010286936)
+    }
+
+    over "husky_rear_bumper_link" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (1.6666667e-7, 1.6666667e-7, 1.6666667e-7)
+        rel physics:filteredPairs = [
+            </husky_ur5/husky_base_link>,
+            </husky_ur5/husky_front_bumper_link>,
+            </husky_ur5/husky_inertial_link>,
+            </husky_ur5/husky_top_chassis_link>,
+            </husky_ur5/husky_top_plate_link>,
+            </husky_ur5/husky_sensor_arch_mount_link>,
+            </husky_ur5/husky_top_plate_front_link>,
+            </husky_ur5/husky_top_plate_rear_link>,
+            </husky_ur5/ur5_base_link>,
+            </husky_ur5/ur5_base>,
+            </husky_ur5/ur5_base_link_inertia>,
+            </husky_ur5/husky_user_rail_link>,
+        ]
+        float physics:mass = 0.01
+        quatf physics:principalAxes = (1, 0, 0, 0)
+    }
+
+    over "husky_rear_left_wheel" (
+        prepend apiSchemas = ["PhysicsMassAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (0.02467, 0.02467, 0.04411)
+        float physics:mass = 2.637
+        quatf physics:principalAxes = (0, 0, 0.70710677, 0.70710677)
+
+        over "collisions"
+        {
+            float3[] extent = [(-0.1651, -0.1651, -0.05715), (0.1651, 0.1651, 0.05715)]
+        }
+    }
+
+    over "husky_rear_right_wheel" (
+        prepend apiSchemas = ["PhysicsMassAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (0.02467, 0.02467, 0.04411)
+        float physics:mass = 2.637
+        quatf physics:principalAxes = (0, 0, 0.70710677, 0.70710677)
+
+        over "collisions"
+        {
+            float3[] extent = [(-0.1651, -0.1651, -0.05715), (0.1651, 0.1651, 0.05715)]
+        }
+    }
+
+    over "husky_top_chassis_link" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (1.6666667e-7, 1.6666667e-7, 1.6666667e-7)
+        rel physics:filteredPairs = [
+            </husky_ur5/husky_base_link>,
+            </husky_ur5/husky_front_bumper_link>,
+            </husky_ur5/husky_inertial_link>,
+            </husky_ur5/husky_rear_bumper_link>,
+            </husky_ur5/husky_top_plate_link>,
+            </husky_ur5/husky_sensor_arch_mount_link>,
+            </husky_ur5/husky_top_plate_front_link>,
+            </husky_ur5/husky_top_plate_rear_link>,
+            </husky_ur5/ur5_base_link>,
+            </husky_ur5/ur5_base>,
+            </husky_ur5/ur5_base_link_inertia>,
+            </husky_ur5/husky_user_rail_link>,
+        ]
+        float physics:mass = 0.01
+        quatf physics:principalAxes = (1, 0, 0, 0)
+    }
+
+    over "husky_top_plate_link" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        rel physics:filteredPairs = [
+            </husky_ur5/husky_base_link>,
+            </husky_ur5/husky_front_bumper_link>,
+            </husky_ur5/husky_inertial_link>,
+            </husky_ur5/husky_rear_bumper_link>,
+            </husky_ur5/husky_top_chassis_link>,
+            </husky_ur5/husky_sensor_arch_mount_link>,
+            </husky_ur5/husky_top_plate_front_link>,
+            </husky_ur5/husky_top_plate_rear_link>,
+            </husky_ur5/ur5_base_link>,
+            </husky_ur5/ur5_base>,
+            </husky_ur5/ur5_base_link_inertia>,
+            </husky_ur5/husky_user_rail_link>,
+        ]
+        quatf physics:principalAxes = (1, 0, 0, 0)
+    }
+
+    over "husky_sensor_arch_mount_link" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        rel physics:filteredPairs = [
+            </husky_ur5/husky_base_link>,
+            </husky_ur5/husky_front_bumper_link>,
+            </husky_ur5/husky_inertial_link>,
+            </husky_ur5/husky_rear_bumper_link>,
+            </husky_ur5/husky_top_chassis_link>,
+            </husky_ur5/husky_top_plate_link>,
+            </husky_ur5/husky_top_plate_front_link>,
+            </husky_ur5/husky_top_plate_rear_link>,
+            </husky_ur5/ur5_base_link>,
+            </husky_ur5/ur5_base>,
+            </husky_ur5/ur5_base_link_inertia>,
+            </husky_ur5/husky_user_rail_link>,
+        ]
+        quatf physics:principalAxes = (1, 0, 0, 0)
+    }
+
+    over "husky_top_plate_front_link" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (1.6666667e-7, 1.6666667e-7, 1.6666667e-7)
+        rel physics:filteredPairs = [
+            </husky_ur5/husky_base_link>,
+            </husky_ur5/husky_front_bumper_link>,
+            </husky_ur5/husky_inertial_link>,
+            </husky_ur5/husky_rear_bumper_link>,
+            </husky_ur5/husky_top_chassis_link>,
+            </husky_ur5/husky_top_plate_link>,
+            </husky_ur5/husky_sensor_arch_mount_link>,
+            </husky_ur5/husky_top_plate_rear_link>,
+            </husky_ur5/ur5_base_link>,
+            </husky_ur5/ur5_base>,
+            </husky_ur5/ur5_base_link_inertia>,
+            </husky_ur5/husky_user_rail_link>,
+        ]
+        float physics:mass = 0.01
+        quatf physics:principalAxes = (1, 0, 0, 0)
+    }
+
+    over "husky_top_plate_rear_link" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (1.6666667e-7, 1.6666667e-7, 1.6666667e-7)
+        rel physics:filteredPairs = [
+            </husky_ur5/husky_base_link>,
+            </husky_ur5/husky_front_bumper_link>,
+            </husky_ur5/husky_inertial_link>,
+            </husky_ur5/husky_rear_bumper_link>,
+            </husky_ur5/husky_top_chassis_link>,
+            </husky_ur5/husky_top_plate_link>,
+            </husky_ur5/husky_sensor_arch_mount_link>,
+            </husky_ur5/husky_top_plate_front_link>,
+            </husky_ur5/ur5_base_link>,
+            </husky_ur5/ur5_base>,
+            </husky_ur5/ur5_base_link_inertia>,
+            </husky_ur5/husky_user_rail_link>,
+        ]
+        float physics:mass = 0.01
+        quatf physics:principalAxes = (1, 0, 0, 0)
+    }
+
+    over "ur5_base_link" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        rel physics:filteredPairs = [
+            </husky_ur5/husky_base_link>,
+            </husky_ur5/husky_front_bumper_link>,
+            </husky_ur5/husky_inertial_link>,
+            </husky_ur5/husky_rear_bumper_link>,
+            </husky_ur5/husky_top_chassis_link>,
+            </husky_ur5/husky_top_plate_link>,
+            </husky_ur5/husky_sensor_arch_mount_link>,
+            </husky_ur5/husky_top_plate_front_link>,
+            </husky_ur5/husky_top_plate_rear_link>,
+            </husky_ur5/ur5_base>,
+            </husky_ur5/ur5_base_link_inertia>,
+            </husky_ur5/husky_user_rail_link>,
+        ]
+        quatf physics:principalAxes = (1, 0, 0, 0)
+    }
+
+    over "ur5_base" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        rel physics:filteredPairs = [
+            </husky_ur5/husky_base_link>,
+            </husky_ur5/husky_front_bumper_link>,
+            </husky_ur5/husky_inertial_link>,
+            </husky_ur5/husky_rear_bumper_link>,
+            </husky_ur5/husky_top_chassis_link>,
+            </husky_ur5/husky_top_plate_link>,
+            </husky_ur5/husky_sensor_arch_mount_link>,
+            </husky_ur5/husky_top_plate_front_link>,
+            </husky_ur5/husky_top_plate_rear_link>,
+            </husky_ur5/ur5_base_link>,
+            </husky_ur5/ur5_base_link_inertia>,
+            </husky_ur5/husky_user_rail_link>,
+        ]
+        quatf physics:principalAxes = (1, 0, 0, 0)
+    }
+
+    over "ur5_base_link_inertia" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (0.0044333315, 0.0044333315, 0.0072)
+        rel physics:filteredPairs = [
+            </husky_ur5/husky_base_link>,
+            </husky_ur5/husky_front_bumper_link>,
+            </husky_ur5/husky_inertial_link>,
+            </husky_ur5/husky_rear_bumper_link>,
+            </husky_ur5/husky_top_chassis_link>,
+            </husky_ur5/husky_top_plate_link>,
+            </husky_ur5/husky_sensor_arch_mount_link>,
+            </husky_ur5/husky_top_plate_front_link>,
+            </husky_ur5/husky_top_plate_rear_link>,
+            </husky_ur5/ur5_base_link>,
+            </husky_ur5/ur5_base>,
+            </husky_ur5/husky_user_rail_link>,
+        ]
+        float physics:mass = 4
+        quatf physics:principalAxes = (1, 0, 0, 0)
+    }
+
+    over "ur5_shoulder_link" (
+        prepend apiSchemas = ["PhysicsMassAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (0.01040625, 0.014972352, 0.014972352)
+        float physics:mass = 3.7
+        quatf physics:principalAxes = (0.70710677, 0, 0.70710677, 0)
+    }
+
+    over "ur5_upper_arm_link" (
+        prepend apiSchemas = ["PhysicsMassAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (-0.2125, 0, 0.136)
+        float3 physics:diagonalInertia = (0.0151074, 0.13388579, 0.13388579)
+        float physics:mass = 8.393
+        quatf physics:principalAxes = (1.110223e-16, 0, 1, 0)
+    }
+
+    over "ur5_forearm_link" (
+        prepend apiSchemas = ["PhysicsMassAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (-0.196125, 0, 0.0165)
+        float3 physics:diagonalInertia = (0.004095, 0.03121679, 0.03121679)
+        float physics:mass = 2.275
+        quatf physics:principalAxes = (1.110223e-16, 0, 1, 0)
+    }
+
+    over "ur5_wrist_1_link" (
+        prepend apiSchemas = ["PhysicsMassAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (0.0020138887, 0.0020138887, 0.0021942)
+        float physics:mass = 1.219
+        quatf physics:principalAxes = (1, 0, 0, 0)
+    }
+
+    over "ur5_wrist_2_link" (
+        prepend apiSchemas = ["PhysicsMassAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (0.0018310389, 0.0018310389, 0.0021942)
+        float physics:mass = 1.219
+        quatf physics:principalAxes = (1, 0, 0, 0)
+    }
+
+    over "ur5_wrist_3_link" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, -0.01525)
+        float3 physics:diagonalInertia = (0.000080624726, 0.000080624726, 0.00013211719)
+        rel physics:filteredPairs = [
+            </husky_ur5/ur5_flange>,
+            </husky_ur5/ur5_tool0>,
+            </husky_ur5/robotiq_arg2f_base_link>,
+            </husky_ur5/left_outer_knuckle>,
+            </husky_ur5/left_outer_finger>,
+            </husky_ur5/left_inner_finger>,
+            </husky_ur5/left_inner_finger_pad>,
+            </husky_ur5/left_inner_knuckle>,
+            </husky_ur5/right_inner_knuckle>,
+            </husky_ur5/right_outer_knuckle>,
+            </husky_ur5/right_outer_finger>,
+            </husky_ur5/right_inner_finger>,
+            </husky_ur5/right_inner_finger_pad>,
+            </husky_ur5/ur5_ft_frame>,
+        ]
+        float physics:mass = 0.1879
+        quatf physics:principalAxes = (1, 0, 0, 0)
+    }
+
+    over "ur5_flange" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        rel physics:filteredPairs = [
+            </husky_ur5/ur5_wrist_3_link>,
+            </husky_ur5/ur5_tool0>,
+            </husky_ur5/robotiq_arg2f_base_link>,
+            </husky_ur5/left_outer_knuckle>,
+            </husky_ur5/left_outer_finger>,
+            </husky_ur5/left_inner_finger>,
+            </husky_ur5/left_inner_finger_pad>,
+            </husky_ur5/left_inner_knuckle>,
+            </husky_ur5/right_inner_knuckle>,
+            </husky_ur5/right_outer_knuckle>,
+            </husky_ur5/right_outer_finger>,
+            </husky_ur5/right_inner_finger>,
+            </husky_ur5/right_inner_finger_pad>,
+            </husky_ur5/ur5_ft_frame>,
+        ]
+        quatf physics:principalAxes = (1, 0, 0, 0)
+    }
+
+    over "ur5_tool0" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        rel physics:filteredPairs = [
+            </husky_ur5/ur5_wrist_3_link>,
+            </husky_ur5/ur5_flange>,
+            </husky_ur5/robotiq_arg2f_base_link>,
+            </husky_ur5/left_outer_knuckle>,
+            </husky_ur5/left_outer_finger>,
+            </husky_ur5/left_inner_finger>,
+            </husky_ur5/left_inner_finger_pad>,
+            </husky_ur5/left_inner_knuckle>,
+            </husky_ur5/right_inner_knuckle>,
+            </husky_ur5/right_outer_knuckle>,
+            </husky_ur5/right_outer_finger>,
+            </husky_ur5/right_inner_finger>,
+            </husky_ur5/right_inner_finger_pad>,
+            </husky_ur5/ur5_ft_frame>,
+        ]
+        quatf physics:principalAxes = (1, 0, 0, 0)
+    }
+
+    over "robotiq_arg2f_base_link" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (8.625e-8, -0.0000046583, 0.03145)
+        float3 physics:diagonalInertia = (0.00013477997, 0.00017832003, 0.00020005)
+        rel physics:filteredPairs = [
+            </husky_ur5/ur5_wrist_3_link>,
+            </husky_ur5/ur5_flange>,
+            </husky_ur5/ur5_tool0>,
+            </husky_ur5/left_outer_knuckle>,
+            </husky_ur5/left_outer_finger>,
+            </husky_ur5/left_inner_finger>,
+            </husky_ur5/left_inner_finger_pad>,
+            </husky_ur5/left_inner_knuckle>,
+            </husky_ur5/right_inner_knuckle>,
+            </husky_ur5/right_outer_knuckle>,
+            </husky_ur5/right_outer_finger>,
+            </husky_ur5/right_inner_finger>,
+            </husky_ur5/right_inner_finger_pad>,
+            </husky_ur5/ur5_ft_frame>,
+        ]
+        float physics:mass = 0.22652
+        quatf physics:principalAxes = (0.7071083, -0.00028625314, -0.70710516, 0.0002724485)
+
+        over PhysicsFixedJoint "finger_joint"
+        {
+            uniform bool physics:excludeFromArticulation = 0
+            point3f physics:localPos0 = (2.5794733e-9, -0.030601025, 0.054904982)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (0.41040498, 0.9119034, 9.068292e-16, 1.1036332e-14)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+        }
+
+        over PhysicsFixedJoint "left_inner_knuckle_joint"
+        {
+            uniform bool physics:excludeFromArticulation = 0
+            point3f physics:localPos0 = (1.0705312e-9, -0.012700021, 0.06141998)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (0.41040498, 0.9119034, 9.068292e-16, 1.1036332e-14)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+        }
+
+        over PhysicsFixedJoint "right_inner_knuckle_joint"
+        {
+            uniform bool physics:excludeFromArticulation = 0
+            point3f physics:localPos0 = (-1.0705274e-9, 0.012699962, 0.06141998)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (1.7939476e-8, 3.9860705e-8, 0.9119037, 0.4104043)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+        }
+
+        over PhysicsFixedJoint "right_outer_knuckle_joint"
+        {
+            uniform bool physics:excludeFromArticulation = 0
+            point3f physics:localPos0 = (-2.5794695e-9, 0.030600965, 0.054904953)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (-1.7939337e-8, -3.9860577e-8, 0.9119037, 0.4104043)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+        }
+    }
+
+    over "left_outer_knuckle" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (-0.0002, 0.019943587, 0.029224526)
+        float3 physics:diagonalInertia = (2.821831e-7, 0.0000028040668, 0.0000028932811)
+        rel physics:filteredPairs = [
+            </husky_ur5/ur5_wrist_3_link>,
+            </husky_ur5/ur5_flange>,
+            </husky_ur5/ur5_tool0>,
+            </husky_ur5/robotiq_arg2f_base_link>,
+            </husky_ur5/left_outer_finger>,
+            </husky_ur5/left_inner_finger>,
+            </husky_ur5/left_inner_finger_pad>,
+            </husky_ur5/left_inner_knuckle>,
+            </husky_ur5/right_inner_knuckle>,
+            </husky_ur5/right_outer_knuckle>,
+            </husky_ur5/right_outer_finger>,
+            </husky_ur5/right_inner_finger>,
+            </husky_ur5/right_inner_finger_pad>,
+            </husky_ur5/ur5_ft_frame>,
+        ]
+        float physics:mass = 0.008531983
+        quatf physics:principalAxes = (-0.22760572, -0.6694741, 0.22760572, 0.6694741)
+    }
+
+    over "left_outer_finger" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0.00030115855, 0.037390795, -0.020802742)
+        float3 physics:diagonalInertia = (0.000001595984, 0.000015251831, 0.00001623045)
+        rel physics:filteredPairs = [
+            </husky_ur5/ur5_wrist_3_link>,
+            </husky_ur5/ur5_flange>,
+            </husky_ur5/ur5_tool0>,
+            </husky_ur5/robotiq_arg2f_base_link>,
+            </husky_ur5/left_outer_knuckle>,
+            </husky_ur5/left_inner_finger>,
+            </husky_ur5/left_inner_finger_pad>,
+            </husky_ur5/left_inner_knuckle>,
+            </husky_ur5/right_inner_knuckle>,
+            </husky_ur5/right_outer_knuckle>,
+            </husky_ur5/right_outer_finger>,
+            </husky_ur5/right_inner_finger>,
+            </husky_ur5/right_inner_finger_pad>,
+            </husky_ur5/ur5_ft_frame>,
+        ]
+        float physics:mass = 0.02261424
+        quatf physics:principalAxes = (0.20681636, 0.67615545, 0.6761904, -0.2068993)
+
+        over PhysicsFixedJoint "left_inner_finger_joint"
+        {
+            uniform bool physics:excludeFromArticulation = 0
+            point3f physics:localPos0 = (2.7894447e-9, 0.08175532, -0.028220322)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (0.9350132, -0.3546129, -3.28753e-15, -1.5734628e-15)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+        }
+    }
+
+    over "left_inner_finger" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0.0003, 0.016007824, -0.013694567)
+        float3 physics:diagonalInertia = (5.145736e-7, 0.0000025576785, 0.0000027190945)
+        rel physics:filteredPairs = [
+            </husky_ur5/ur5_wrist_3_link>,
+            </husky_ur5/ur5_flange>,
+            </husky_ur5/ur5_tool0>,
+            </husky_ur5/robotiq_arg2f_base_link>,
+            </husky_ur5/left_outer_knuckle>,
+            </husky_ur5/left_outer_finger>,
+            </husky_ur5/left_inner_finger_pad>,
+            </husky_ur5/left_inner_knuckle>,
+            </husky_ur5/right_inner_knuckle>,
+            </husky_ur5/right_outer_knuckle>,
+            </husky_ur5/right_outer_finger>,
+            </husky_ur5/right_inner_finger>,
+            </husky_ur5/right_inner_finger_pad>,
+            </husky_ur5/ur5_ft_frame>,
+        ]
+        float physics:mass = 0.010400313
+        quatf physics:principalAxes = (0.5815833, 0.40219504, -0.5815833, -0.40219504)
+    }
+
+    over "left_inner_finger_pad" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        rel physics:filteredPairs = [
+            </husky_ur5/ur5_wrist_3_link>,
+            </husky_ur5/ur5_flange>,
+            </husky_ur5/ur5_tool0>,
+            </husky_ur5/robotiq_arg2f_base_link>,
+            </husky_ur5/left_outer_knuckle>,
+            </husky_ur5/left_outer_finger>,
+            </husky_ur5/left_inner_finger>,
+            </husky_ur5/left_inner_knuckle>,
+            </husky_ur5/right_inner_knuckle>,
+            </husky_ur5/right_outer_knuckle>,
+            </husky_ur5/right_outer_finger>,
+            </husky_ur5/right_inner_finger>,
+            </husky_ur5/right_inner_finger_pad>,
+            </husky_ur5/ur5_ft_frame>,
+        ]
+        quatf physics:principalAxes = (1, 0, 0, 0)
+    }
+
+    over "left_inner_knuckle" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0.00012301184, 0.050785083, 0.0010396864)
+        float3 physics:diagonalInertia = (0.0000028131908, 0.000026193578, 0.00002838088)
+        rel physics:filteredPairs = [
+            </husky_ur5/ur5_wrist_3_link>,
+            </husky_ur5/ur5_flange>,
+            </husky_ur5/ur5_tool0>,
+            </husky_ur5/robotiq_arg2f_base_link>,
+            </husky_ur5/left_outer_knuckle>,
+            </husky_ur5/left_outer_finger>,
+            </husky_ur5/left_inner_finger>,
+            </husky_ur5/left_inner_finger_pad>,
+            </husky_ur5/right_inner_knuckle>,
+            </husky_ur5/right_outer_knuckle>,
+            </husky_ur5/right_outer_finger>,
+            </husky_ur5/right_inner_finger>,
+            </husky_ur5/right_inner_finger_pad>,
+            </husky_ur5/ur5_ft_frame>,
+        ]
+        float physics:mass = 0.027117735
+        quatf physics:principalAxes = (-0.7033708, -0.007594596, -0.0072659934, 0.71074545)
+
+        over "RevoluteJoint" (
+            active = false
+        )
+        {
+        }
+    }
+
+    over "right_inner_knuckle" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0.00012301184, 0.050785083, 0.0010396864)
+        float3 physics:diagonalInertia = (0.0000028131908, 0.000026193578, 0.00002838088)
+        rel physics:filteredPairs = [
+            </husky_ur5/ur5_wrist_3_link>,
+            </husky_ur5/ur5_flange>,
+            </husky_ur5/ur5_tool0>,
+            </husky_ur5/robotiq_arg2f_base_link>,
+            </husky_ur5/left_outer_knuckle>,
+            </husky_ur5/left_outer_finger>,
+            </husky_ur5/left_inner_finger>,
+            </husky_ur5/left_inner_finger_pad>,
+            </husky_ur5/left_inner_knuckle>,
+            </husky_ur5/right_outer_knuckle>,
+            </husky_ur5/right_outer_finger>,
+            </husky_ur5/right_inner_finger>,
+            </husky_ur5/right_inner_finger_pad>,
+            </husky_ur5/ur5_ft_frame>,
+        ]
+        float physics:mass = 0.027117735
+        quatf physics:principalAxes = (-0.7033708, -0.007594596, -0.0072659934, 0.71074545)
+
+        over "RevoluteJoint" (
+            active = false
+        )
+        {
+        }
+    }
+
+    over "right_outer_knuckle" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (-0.0002, 0.019943587, 0.029224526)
+        float3 physics:diagonalInertia = (2.821831e-7, 0.0000028040668, 0.0000028932811)
+        rel physics:filteredPairs = [
+            </husky_ur5/ur5_wrist_3_link>,
+            </husky_ur5/ur5_flange>,
+            </husky_ur5/ur5_tool0>,
+            </husky_ur5/robotiq_arg2f_base_link>,
+            </husky_ur5/left_outer_knuckle>,
+            </husky_ur5/left_outer_finger>,
+            </husky_ur5/left_inner_finger>,
+            </husky_ur5/left_inner_finger_pad>,
+            </husky_ur5/left_inner_knuckle>,
+            </husky_ur5/right_inner_knuckle>,
+            </husky_ur5/right_outer_finger>,
+            </husky_ur5/right_inner_finger>,
+            </husky_ur5/right_inner_finger_pad>,
+            </husky_ur5/ur5_ft_frame>,
+        ]
+        float physics:mass = 0.008531983
+        quatf physics:principalAxes = (-0.22760572, -0.6694741, 0.22760572, 0.6694741)
+    }
+
+    over "right_outer_finger" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0.00030115855, 0.037390795, -0.020802742)
+        float3 physics:diagonalInertia = (0.000001595984, 0.000015251831, 0.00001623045)
+        rel physics:filteredPairs = [
+            </husky_ur5/ur5_wrist_3_link>,
+            </husky_ur5/ur5_flange>,
+            </husky_ur5/ur5_tool0>,
+            </husky_ur5/robotiq_arg2f_base_link>,
+            </husky_ur5/left_outer_knuckle>,
+            </husky_ur5/left_outer_finger>,
+            </husky_ur5/left_inner_finger>,
+            </husky_ur5/left_inner_finger_pad>,
+            </husky_ur5/left_inner_knuckle>,
+            </husky_ur5/right_inner_knuckle>,
+            </husky_ur5/right_outer_knuckle>,
+            </husky_ur5/right_inner_finger>,
+            </husky_ur5/right_inner_finger_pad>,
+            </husky_ur5/ur5_ft_frame>,
+        ]
+        float physics:mass = 0.02261424
+        quatf physics:principalAxes = (0.20681636, 0.67615545, 0.6761904, -0.2068993)
+
+        over PhysicsFixedJoint "right_inner_finger_joint"
+        {
+            uniform bool physics:excludeFromArticulation = 0
+            point3f physics:localPos0 = (-1.0354673e-10, 0.081755295, -0.028220419)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (0.93525726, -0.35396874, 0.000033846954, -0.000012836828)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+        }
+    }
+
+    over "right_inner_finger" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0.0003, 0.016007824, -0.013694567)
+        float3 physics:diagonalInertia = (5.145736e-7, 0.0000025576785, 0.0000027190945)
+        rel physics:filteredPairs = [
+            </husky_ur5/ur5_wrist_3_link>,
+            </husky_ur5/ur5_flange>,
+            </husky_ur5/ur5_tool0>,
+            </husky_ur5/robotiq_arg2f_base_link>,
+            </husky_ur5/left_outer_knuckle>,
+            </husky_ur5/left_outer_finger>,
+            </husky_ur5/left_inner_finger>,
+            </husky_ur5/left_inner_finger_pad>,
+            </husky_ur5/left_inner_knuckle>,
+            </husky_ur5/right_inner_knuckle>,
+            </husky_ur5/right_outer_knuckle>,
+            </husky_ur5/right_outer_finger>,
+            </husky_ur5/right_inner_finger_pad>,
+            </husky_ur5/ur5_ft_frame>,
+        ]
+        float physics:mass = 0.010400313
+        quatf physics:principalAxes = (0.5815833, 0.40219504, -0.5815833, -0.40219504)
+    }
+
+    over "right_inner_finger_pad" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        rel physics:filteredPairs = [
+            </husky_ur5/ur5_wrist_3_link>,
+            </husky_ur5/ur5_flange>,
+            </husky_ur5/ur5_tool0>,
+            </husky_ur5/robotiq_arg2f_base_link>,
+            </husky_ur5/left_outer_knuckle>,
+            </husky_ur5/left_outer_finger>,
+            </husky_ur5/left_inner_finger>,
+            </husky_ur5/left_inner_finger_pad>,
+            </husky_ur5/left_inner_knuckle>,
+            </husky_ur5/right_inner_knuckle>,
+            </husky_ur5/right_outer_knuckle>,
+            </husky_ur5/right_outer_finger>,
+            </husky_ur5/right_inner_finger>,
+            </husky_ur5/ur5_ft_frame>,
+        ]
+        quatf physics:principalAxes = (1, 0, 0, 0)
+    }
+
+    over "ur5_ft_frame" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        rel physics:filteredPairs = [
+            </husky_ur5/ur5_wrist_3_link>,
+            </husky_ur5/ur5_flange>,
+            </husky_ur5/ur5_tool0>,
+            </husky_ur5/robotiq_arg2f_base_link>,
+            </husky_ur5/left_outer_knuckle>,
+            </husky_ur5/left_outer_finger>,
+            </husky_ur5/left_inner_finger>,
+            </husky_ur5/left_inner_finger_pad>,
+            </husky_ur5/left_inner_knuckle>,
+            </husky_ur5/right_inner_knuckle>,
+            </husky_ur5/right_outer_knuckle>,
+            </husky_ur5/right_outer_finger>,
+            </husky_ur5/right_inner_finger>,
+            </husky_ur5/right_inner_finger_pad>,
+        ]
+        quatf physics:principalAxes = (1, 0, 0, 0)
+    }
+
+    over "husky_user_rail_link" (
+        prepend apiSchemas = ["PhysicsMassAPI", "PhysicsFilteredPairsAPI"]
+    )
+    {
+        point3f physics:centerOfMass = (0, 0, 0)
+        float3 physics:diagonalInertia = (1.6666667e-7, 1.6666667e-7, 1.6666667e-7)
+        rel physics:filteredPairs = [
+            </husky_ur5/husky_base_link>,
+            </husky_ur5/husky_front_bumper_link>,
+            </husky_ur5/husky_inertial_link>,
+            </husky_ur5/husky_rear_bumper_link>,
+            </husky_ur5/husky_top_chassis_link>,
+            </husky_ur5/husky_top_plate_link>,
+            </husky_ur5/husky_sensor_arch_mount_link>,
+            </husky_ur5/husky_top_plate_front_link>,
+            </husky_ur5/husky_top_plate_rear_link>,
+            </husky_ur5/ur5_base_link>,
+            </husky_ur5/ur5_base>,
+            </husky_ur5/ur5_base_link_inertia>,
+        ]
+        float physics:mass = 0.01
+        quatf physics:principalAxes = (1, 0, 0, 0)
+    }
+}
+

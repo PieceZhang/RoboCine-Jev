@@ -1,0 +1,98 @@
+{
+  "schema": "husky_sensor_assembly/v1",
+  "passed": true,
+  "scope": "CPU USD hierarchy/extrinsics only; physical acquisition and rendering use run.sh",
+  "assembly": "assets/husky_with_sensors.usda",
+  "assembly_sha256": "ec2c30199a484d29fa18717e2c9feee876405db711b56a854f4cc71126197503",
+  "model": "assets/husky_ur5_v2.usda",
+  "model_sha256": "2c8819f77d938e1aa2f1926b5763d4a7ea3f585c2dc376ce87df5b3956c115ce",
+  "config": "sensors.json",
+  "config_sha256": "163e86b5342360816abb3ab2f5e88571938b14b251f7b34f66d9d0f695291f79",
+  "camera": "/husky_ur5/ur5_wrist_3_link/CineCameraOptical/Camera",
+  "camera_parent": "ur5_wrist_3_link",
+  "T_parent_optical": [
+    [
+      1.0,
+      -0.0,
+      0.0,
+      -0.04
+    ],
+    [
+      0.0,
+      1.0,
+      0.0,
+      0.0
+    ],
+    [
+      -0.0,
+      -0.0,
+      1.0,
+      0.34
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "lidar_paths": [
+    "/husky_ur5/husky_base_link/CineLidar_main",
+    "/husky_ur5/husky_base_link/CineLidar_aux"
+  ],
+  "lidar_local_transforms": [
+    [
+      [
+        1.0,
+        0.0,
+        0.0,
+        0.53
+      ],
+      [
+        0.0,
+        1.0,
+        0.0,
+        0.4
+      ],
+      [
+        0.0,
+        0.0,
+        1.0,
+        0.42
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    [
+      [
+        1.0,
+        0.0,
+        0.0,
+        -0.53
+      ],
+      [
+        0.0,
+        1.0,
+        0.0,
+        -0.4
+      ],
+      [
+        0.0,
+        0.0,
+        1.0,
+        0.42
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ]
+  ],
+  "runtime_model_and_config_unchanged": true
+}

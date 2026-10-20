@@ -1,0 +1,654 @@
+{
+  "source_unchanged": true,
+  "repairs": [
+    {
+      "path": "/husky_ur5/husky_front_bumper_link",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/husky_front_left_wheel",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/husky_front_right_wheel",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/husky_inertial_link",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/husky_rear_bumper_link",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/husky_rear_left_wheel",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/husky_rear_right_wheel",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/husky_top_chassis_link",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/husky_top_plate_front_link",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/husky_top_plate_rear_link",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/ur5_base_link_inertia",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/ur5_shoulder_link",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/ur5_upper_arm_link",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/ur5_forearm_link",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/ur5_wrist_1_link",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/ur5_wrist_2_link",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/ur5_wrist_3_link",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/robotiq_arg2f_base_link",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/left_outer_knuckle",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/left_outer_finger",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/left_inner_finger",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/left_inner_knuckle",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/right_inner_knuckle",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/right_outer_knuckle",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/right_outer_finger",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/right_inner_finger",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/husky_user_rail_link",
+      "action": "restore_full_mass_and_inertia_from_pinned_urdf"
+    },
+    {
+      "path": "/husky_ur5/robotiq_arg2f_base_link/finger_joint",
+      "action": "lock_unused_gripper_in_authored_pose"
+    },
+    {
+      "path": "/husky_ur5/robotiq_arg2f_base_link/left_inner_knuckle_joint",
+      "action": "lock_unused_gripper_in_authored_pose"
+    },
+    {
+      "path": "/husky_ur5/robotiq_arg2f_base_link/right_inner_knuckle_joint",
+      "action": "lock_unused_gripper_in_authored_pose"
+    },
+    {
+      "path": "/husky_ur5/robotiq_arg2f_base_link/right_outer_knuckle_joint",
+      "action": "lock_unused_gripper_in_authored_pose"
+    },
+    {
+      "path": "/husky_ur5/left_outer_finger/left_inner_finger_joint",
+      "action": "lock_unused_gripper_in_authored_pose"
+    },
+    {
+      "path": "/husky_ur5/left_inner_knuckle/RevoluteJoint",
+      "action": "deactivate_redundant_gripper_loop"
+    },
+    {
+      "path": "/husky_ur5/right_inner_knuckle/RevoluteJoint",
+      "action": "deactivate_redundant_gripper_loop"
+    },
+    {
+      "path": "/husky_ur5/right_outer_finger/right_inner_finger_joint",
+      "action": "lock_unused_gripper_in_authored_pose"
+    }
+  ],
+  "physical_self_contacts_enabled": true,
+  "fixed_assembly_pair_filters": [
+    {
+      "body": "/husky_ur5/husky_base_link",
+      "fixed_assembly_only": [
+        "/husky_ur5/husky_front_bumper_link",
+        "/husky_ur5/husky_inertial_link",
+        "/husky_ur5/husky_rear_bumper_link",
+        "/husky_ur5/husky_top_chassis_link",
+        "/husky_ur5/husky_top_plate_link",
+        "/husky_ur5/husky_sensor_arch_mount_link",
+        "/husky_ur5/husky_top_plate_front_link",
+        "/husky_ur5/husky_top_plate_rear_link",
+        "/husky_ur5/ur5_base_link",
+        "/husky_ur5/ur5_base",
+        "/husky_ur5/ur5_base_link_inertia",
+        "/husky_ur5/husky_user_rail_link"
+      ]
+    },
+    {
+      "body": "/husky_ur5/husky_front_bumper_link",
+      "fixed_assembly_only": [
+        "/husky_ur5/husky_base_link",
+        "/husky_ur5/husky_inertial_link",
+        "/husky_ur5/husky_rear_bumper_link",
+        "/husky_ur5/husky_top_chassis_link",
+        "/husky_ur5/husky_top_plate_link",
+        "/husky_ur5/husky_sensor_arch_mount_link",
+        "/husky_ur5/husky_top_plate_front_link",
+        "/husky_ur5/husky_top_plate_rear_link",
+        "/husky_ur5/ur5_base_link",
+        "/husky_ur5/ur5_base",
+        "/husky_ur5/ur5_base_link_inertia",
+        "/husky_ur5/husky_user_rail_link"
+      ]
+    },
+    {
+      "body": "/husky_ur5/husky_inertial_link",
+      "fixed_assembly_only": [
+        "/husky_ur5/husky_base_link",
+        "/husky_ur5/husky_front_bumper_link",
+        "/husky_ur5/husky_rear_bumper_link",
+        "/husky_ur5/husky_top_chassis_link",
+        "/husky_ur5/husky_top_plate_link",
+        "/husky_ur5/husky_sensor_arch_mount_link",
+        "/husky_ur5/husky_top_plate_front_link",
+        "/husky_ur5/husky_top_plate_rear_link",
+        "/husky_ur5/ur5_base_link",
+        "/husky_ur5/ur5_base",
+        "/husky_ur5/ur5_base_link_inertia",
+        "/husky_ur5/husky_user_rail_link"
+      ]
+    },
+    {
+      "body": "/husky_ur5/husky_rear_bumper_link",
+      "fixed_assembly_only": [
+        "/husky_ur5/husky_base_link",
+        "/husky_ur5/husky_front_bumper_link",
+        "/husky_ur5/husky_inertial_link",
+        "/husky_ur5/husky_top_chassis_link",
+        "/husky_ur5/husky_top_plate_link",
+        "/husky_ur5/husky_sensor_arch_mount_link",
+        "/husky_ur5/husky_top_plate_front_link",
+        "/husky_ur5/husky_top_plate_rear_link",
+        "/husky_ur5/ur5_base_link",
+        "/husky_ur5/ur5_base",
+        "/husky_ur5/ur5_base_link_inertia",
+        "/husky_ur5/husky_user_rail_link"
+      ]
+    },
+    {
+      "body": "/husky_ur5/husky_top_chassis_link",
+      "fixed_assembly_only": [
+        "/husky_ur5/husky_base_link",
+        "/husky_ur5/husky_front_bumper_link",
+        "/husky_ur5/husky_inertial_link",
+        "/husky_ur5/husky_rear_bumper_link",
+        "/husky_ur5/husky_top_plate_link",
+        "/husky_ur5/husky_sensor_arch_mount_link",
+        "/husky_ur5/husky_top_plate_front_link",
+        "/husky_ur5/husky_top_plate_rear_link",
+        "/husky_ur5/ur5_base_link",
+        "/husky_ur5/ur5_base",
+        "/husky_ur5/ur5_base_link_inertia",
+        "/husky_ur5/husky_user_rail_link"
+      ]
+    },
+    {
+      "body": "/husky_ur5/husky_top_plate_link",
+      "fixed_assembly_only": [
+        "/husky_ur5/husky_base_link",
+        "/husky_ur5/husky_front_bumper_link",
+        "/husky_ur5/husky_inertial_link",
+        "/husky_ur5/husky_rear_bumper_link",
+        "/husky_ur5/husky_top_chassis_link",
+        "/husky_ur5/husky_sensor_arch_mount_link",
+        "/husky_ur5/husky_top_plate_front_link",
+        "/husky_ur5/husky_top_plate_rear_link",
+        "/husky_ur5/ur5_base_link",
+        "/husky_ur5/ur5_base",
+        "/husky_ur5/ur5_base_link_inertia",
+        "/husky_ur5/husky_user_rail_link"
+      ]
+    },
+    {
+      "body": "/husky_ur5/husky_sensor_arch_mount_link",
+      "fixed_assembly_only": [
+        "/husky_ur5/husky_base_link",
+        "/husky_ur5/husky_front_bumper_link",
+        "/husky_ur5/husky_inertial_link",
+        "/husky_ur5/husky_rear_bumper_link",
+        "/husky_ur5/husky_top_chassis_link",
+        "/husky_ur5/husky_top_plate_link",
+        "/husky_ur5/husky_top_plate_front_link",
+        "/husky_ur5/husky_top_plate_rear_link",
+        "/husky_ur5/ur5_base_link",
+        "/husky_ur5/ur5_base",
+        "/husky_ur5/ur5_base_link_inertia",
+        "/husky_ur5/husky_user_rail_link"
+      ]
+    },
+    {
+      "body": "/husky_ur5/husky_top_plate_front_link",
+      "fixed_assembly_only": [
+        "/husky_ur5/husky_base_link",
+        "/husky_ur5/husky_front_bumper_link",
+        "/husky_ur5/husky_inertial_link",
+        "/husky_ur5/husky_rear_bumper_link",
+        "/husky_ur5/husky_top_chassis_link",
+        "/husky_ur5/husky_top_plate_link",
+        "/husky_ur5/husky_sensor_arch_mount_link",
+        "/husky_ur5/husky_top_plate_rear_link",
+        "/husky_ur5/ur5_base_link",
+        "/husky_ur5/ur5_base",
+        "/husky_ur5/ur5_base_link_inertia",
+        "/husky_ur5/husky_user_rail_link"
+      ]
+    },
+    {
+      "body": "/husky_ur5/husky_top_plate_rear_link",
+      "fixed_assembly_only": [
+        "/husky_ur5/husky_base_link",
+        "/husky_ur5/husky_front_bumper_link",
+        "/husky_ur5/husky_inertial_link",
+        "/husky_ur5/husky_rear_bumper_link",
+        "/husky_ur5/husky_top_chassis_link",
+        "/husky_ur5/husky_top_plate_link",
+        "/husky_ur5/husky_sensor_arch_mount_link",
+        "/husky_ur5/husky_top_plate_front_link",
+        "/husky_ur5/ur5_base_link",
+        "/husky_ur5/ur5_base",
+        "/husky_ur5/ur5_base_link_inertia",
+        "/husky_ur5/husky_user_rail_link"
+      ]
+    },
+    {
+      "body": "/husky_ur5/ur5_base_link",
+      "fixed_assembly_only": [
+        "/husky_ur5/husky_base_link",
+        "/husky_ur5/husky_front_bumper_link",
+        "/husky_ur5/husky_inertial_link",
+        "/husky_ur5/husky_rear_bumper_link",
+        "/husky_ur5/husky_top_chassis_link",
+        "/husky_ur5/husky_top_plate_link",
+        "/husky_ur5/husky_sensor_arch_mount_link",
+        "/husky_ur5/husky_top_plate_front_link",
+        "/husky_ur5/husky_top_plate_rear_link",
+        "/husky_ur5/ur5_base",
+        "/husky_ur5/ur5_base_link_inertia",
+        "/husky_ur5/husky_user_rail_link"
+      ]
+    },
+    {
+      "body": "/husky_ur5/ur5_base",
+      "fixed_assembly_only": [
+        "/husky_ur5/husky_base_link",
+        "/husky_ur5/husky_front_bumper_link",
+        "/husky_ur5/husky_inertial_link",
+        "/husky_ur5/husky_rear_bumper_link",
+        "/husky_ur5/husky_top_chassis_link",
+        "/husky_ur5/husky_top_plate_link",
+        "/husky_ur5/husky_sensor_arch_mount_link",
+        "/husky_ur5/husky_top_plate_front_link",
+        "/husky_ur5/husky_top_plate_rear_link",
+        "/husky_ur5/ur5_base_link",
+        "/husky_ur5/ur5_base_link_inertia",
+        "/husky_ur5/husky_user_rail_link"
+      ]
+    },
+    {
+      "body": "/husky_ur5/ur5_base_link_inertia",
+      "fixed_assembly_only": [
+        "/husky_ur5/husky_base_link",
+        "/husky_ur5/husky_front_bumper_link",
+        "/husky_ur5/husky_inertial_link",
+        "/husky_ur5/husky_rear_bumper_link",
+        "/husky_ur5/husky_top_chassis_link",
+        "/husky_ur5/husky_top_plate_link",
+        "/husky_ur5/husky_sensor_arch_mount_link",
+        "/husky_ur5/husky_top_plate_front_link",
+        "/husky_ur5/husky_top_plate_rear_link",
+        "/husky_ur5/ur5_base_link",
+        "/husky_ur5/ur5_base",
+        "/husky_ur5/husky_user_rail_link"
+      ]
+    },
+    {
+      "body": "/husky_ur5/ur5_wrist_3_link",
+      "fixed_assembly_only": [
+        "/husky_ur5/ur5_flange",
+        "/husky_ur5/ur5_tool0",
+        "/husky_ur5/robotiq_arg2f_base_link",
+        "/husky_ur5/left_outer_knuckle",
+        "/husky_ur5/left_outer_finger",
+        "/husky_ur5/left_inner_finger",
+        "/husky_ur5/left_inner_finger_pad",
+        "/husky_ur5/left_inner_knuckle",
+        "/husky_ur5/right_inner_knuckle",
+        "/husky_ur5/right_outer_knuckle",
+        "/husky_ur5/right_outer_finger",
+        "/husky_ur5/right_inner_finger",
+        "/husky_ur5/right_inner_finger_pad",
+        "/husky_ur5/ur5_ft_frame"
+      ]
+    },
+    {
+      "body": "/husky_ur5/ur5_flange",
+      "fixed_assembly_only": [
+        "/husky_ur5/ur5_wrist_3_link",
+        "/husky_ur5/ur5_tool0",
+        "/husky_ur5/robotiq_arg2f_base_link",
+        "/husky_ur5/left_outer_knuckle",
+        "/husky_ur5/left_outer_finger",
+        "/husky_ur5/left_inner_finger",
+        "/husky_ur5/left_inner_finger_pad",
+        "/husky_ur5/left_inner_knuckle",
+        "/husky_ur5/right_inner_knuckle",
+        "/husky_ur5/right_outer_knuckle",
+        "/husky_ur5/right_outer_finger",
+        "/husky_ur5/right_inner_finger",
+        "/husky_ur5/right_inner_finger_pad",
+        "/husky_ur5/ur5_ft_frame"
+      ]
+    },
+    {
+      "body": "/husky_ur5/ur5_tool0",
+      "fixed_assembly_only": [
+        "/husky_ur5/ur5_wrist_3_link",
+        "/husky_ur5/ur5_flange",
+        "/husky_ur5/robotiq_arg2f_base_link",
+        "/husky_ur5/left_outer_knuckle",
+        "/husky_ur5/left_outer_finger",
+        "/husky_ur5/left_inner_finger",
+        "/husky_ur5/left_inner_finger_pad",
+        "/husky_ur5/left_inner_knuckle",
+        "/husky_ur5/right_inner_knuckle",
+        "/husky_ur5/right_outer_knuckle",
+        "/husky_ur5/right_outer_finger",
+        "/husky_ur5/right_inner_finger",
+        "/husky_ur5/right_inner_finger_pad",
+        "/husky_ur5/ur5_ft_frame"
+      ]
+    },
+    {
+      "body": "/husky_ur5/robotiq_arg2f_base_link",
+      "fixed_assembly_only": [
+        "/husky_ur5/ur5_wrist_3_link",
+        "/husky_ur5/ur5_flange",
+        "/husky_ur5/ur5_tool0",
+        "/husky_ur5/left_outer_knuckle",
+        "/husky_ur5/left_outer_finger",
+        "/husky_ur5/left_inner_finger",
+        "/husky_ur5/left_inner_finger_pad",
+        "/husky_ur5/left_inner_knuckle",
+        "/husky_ur5/right_inner_knuckle",
+        "/husky_ur5/right_outer_knuckle",
+        "/husky_ur5/right_outer_finger",
+        "/husky_ur5/right_inner_finger",
+        "/husky_ur5/right_inner_finger_pad",
+        "/husky_ur5/ur5_ft_frame"
+      ]
+    },
+    {
+      "body": "/husky_ur5/left_outer_knuckle",
+      "fixed_assembly_only": [
+        "/husky_ur5/ur5_wrist_3_link",
+        "/husky_ur5/ur5_flange",
+        "/husky_ur5/ur5_tool0",
+        "/husky_ur5/robotiq_arg2f_base_link",
+        "/husky_ur5/left_outer_finger",
+        "/husky_ur5/left_inner_finger",
+        "/husky_ur5/left_inner_finger_pad",
+        "/husky_ur5/left_inner_knuckle",
+        "/husky_ur5/right_inner_knuckle",
+        "/husky_ur5/right_outer_knuckle",
+        "/husky_ur5/right_outer_finger",
+        "/husky_ur5/right_inner_finger",
+        "/husky_ur5/right_inner_finger_pad",
+        "/husky_ur5/ur5_ft_frame"
+      ]
+    },
+    {
+      "body": "/husky_ur5/left_outer_finger",
+      "fixed_assembly_only": [
+        "/husky_ur5/ur5_wrist_3_link",
+        "/husky_ur5/ur5_flange",
+        "/husky_ur5/ur5_tool0",
+        "/husky_ur5/robotiq_arg2f_base_link",
+        "/husky_ur5/left_outer_knuckle",
+        "/husky_ur5/left_inner_finger",
+        "/husky_ur5/left_inner_finger_pad",
+        "/husky_ur5/left_inner_knuckle",
+        "/husky_ur5/right_inner_knuckle",
+        "/husky_ur5/right_outer_knuckle",
+        "/husky_ur5/right_outer_finger",
+        "/husky_ur5/right_inner_finger",
+        "/husky_ur5/right_inner_finger_pad",
+        "/husky_ur5/ur5_ft_frame"
+      ]
+    },
+    {
+      "body": "/husky_ur5/left_inner_finger",
+      "fixed_assembly_only": [
+        "/husky_ur5/ur5_wrist_3_link",
+        "/husky_ur5/ur5_flange",
+        "/husky_ur5/ur5_tool0",
+        "/husky_ur5/robotiq_arg2f_base_link",
+        "/husky_ur5/left_outer_knuckle",
+        "/husky_ur5/left_outer_finger",
+        "/husky_ur5/left_inner_finger_pad",
+        "/husky_ur5/left_inner_knuckle",
+        "/husky_ur5/right_inner_knuckle",
+        "/husky_ur5/right_outer_knuckle",
+        "/husky_ur5/right_outer_finger",
+        "/husky_ur5/right_inner_finger",
+        "/husky_ur5/right_inner_finger_pad",
+        "/husky_ur5/ur5_ft_frame"
+      ]
+    },
+    {
+      "body": "/husky_ur5/left_inner_finger_pad",
+      "fixed_assembly_only": [
+        "/husky_ur5/ur5_wrist_3_link",
+        "/husky_ur5/ur5_flange",
+        "/husky_ur5/ur5_tool0",
+        "/husky_ur5/robotiq_arg2f_base_link",
+        "/husky_ur5/left_outer_knuckle",
+        "/husky_ur5/left_outer_finger",
+        "/husky_ur5/left_inner_finger",
+        "/husky_ur5/left_inner_knuckle",
+        "/husky_ur5/right_inner_knuckle",
+        "/husky_ur5/right_outer_knuckle",
+        "/husky_ur5/right_outer_finger",
+        "/husky_ur5/right_inner_finger",
+        "/husky_ur5/right_inner_finger_pad",
+        "/husky_ur5/ur5_ft_frame"
+      ]
+    },
+    {
+      "body": "/husky_ur5/left_inner_knuckle",
+      "fixed_assembly_only": [
+        "/husky_ur5/ur5_wrist_3_link",
+        "/husky_ur5/ur5_flange",
+        "/husky_ur5/ur5_tool0",
+        "/husky_ur5/robotiq_arg2f_base_link",
+        "/husky_ur5/left_outer_knuckle",
+        "/husky_ur5/left_outer_finger",
+        "/husky_ur5/left_inner_finger",
+        "/husky_ur5/left_inner_finger_pad",
+        "/husky_ur5/right_inner_knuckle",
+        "/husky_ur5/right_outer_knuckle",
+        "/husky_ur5/right_outer_finger",
+        "/husky_ur5/right_inner_finger",
+        "/husky_ur5/right_inner_finger_pad",
+        "/husky_ur5/ur5_ft_frame"
+      ]
+    },
+    {
+      "body": "/husky_ur5/right_inner_knuckle",
+      "fixed_assembly_only": [
+        "/husky_ur5/ur5_wrist_3_link",
+        "/husky_ur5/ur5_flange",
+        "/husky_ur5/ur5_tool0",
+        "/husky_ur5/robotiq_arg2f_base_link",
+        "/husky_ur5/left_outer_knuckle",
+        "/husky_ur5/left_outer_finger",
+        "/husky_ur5/left_inner_finger",
+        "/husky_ur5/left_inner_finger_pad",
+        "/husky_ur5/left_inner_knuckle",
+        "/husky_ur5/right_outer_knuckle",
+        "/husky_ur5/right_outer_finger",
+        "/husky_ur5/right_inner_finger",
+        "/husky_ur5/right_inner_finger_pad",
+        "/husky_ur5/ur5_ft_frame"
+      ]
+    },
+    {
+      "body": "/husky_ur5/right_outer_knuckle",
+      "fixed_assembly_only": [
+        "/husky_ur5/ur5_wrist_3_link",
+        "/husky_ur5/ur5_flange",
+        "/husky_ur5/ur5_tool0",
+        "/husky_ur5/robotiq_arg2f_base_link",
+        "/husky_ur5/left_outer_knuckle",
+        "/husky_ur5/left_outer_finger",
+        "/husky_ur5/left_inner_finger",
+        "/husky_ur5/left_inner_finger_pad",
+        "/husky_ur5/left_inner_knuckle",
+        "/husky_ur5/right_inner_knuckle",
+        "/husky_ur5/right_outer_finger",
+        "/husky_ur5/right_inner_finger",
+        "/husky_ur5/right_inner_finger_pad",
+        "/husky_ur5/ur5_ft_frame"
+      ]
+    },
+    {
+      "body": "/husky_ur5/right_outer_finger",
+      "fixed_assembly_only": [
+        "/husky_ur5/ur5_wrist_3_link",
+        "/husky_ur5/ur5_flange",
+        "/husky_ur5/ur5_tool0",
+        "/husky_ur5/robotiq_arg2f_base_link",
+        "/husky_ur5/left_outer_knuckle",
+        "/husky_ur5/left_outer_finger",
+        "/husky_ur5/left_inner_finger",
+        "/husky_ur5/left_inner_finger_pad",
+        "/husky_ur5/left_inner_knuckle",
+        "/husky_ur5/right_inner_knuckle",
+        "/husky_ur5/right_outer_knuckle",
+        "/husky_ur5/right_inner_finger",
+        "/husky_ur5/right_inner_finger_pad",
+        "/husky_ur5/ur5_ft_frame"
+      ]
+    },
+    {
+      "body": "/husky_ur5/right_inner_finger",
+      "fixed_assembly_only": [
+        "/husky_ur5/ur5_wrist_3_link",
+        "/husky_ur5/ur5_flange",
+        "/husky_ur5/ur5_tool0",
+        "/husky_ur5/robotiq_arg2f_base_link",
+        "/husky_ur5/left_outer_knuckle",
+        "/husky_ur5/left_outer_finger",
+        "/husky_ur5/left_inner_finger",
+        "/husky_ur5/left_inner_finger_pad",
+        "/husky_ur5/left_inner_knuckle",
+        "/husky_ur5/right_inner_knuckle",
+        "/husky_ur5/right_outer_knuckle",
+        "/husky_ur5/right_outer_finger",
+        "/husky_ur5/right_inner_finger_pad",
+        "/husky_ur5/ur5_ft_frame"
+      ]
+    },
+    {
+      "body": "/husky_ur5/right_inner_finger_pad",
+      "fixed_assembly_only": [
+        "/husky_ur5/ur5_wrist_3_link",
+        "/husky_ur5/ur5_flange",
+        "/husky_ur5/ur5_tool0",
+        "/husky_ur5/robotiq_arg2f_base_link",
+        "/husky_ur5/left_outer_knuckle",
+        "/husky_ur5/left_outer_finger",
+        "/husky_ur5/left_inner_finger",
+        "/husky_ur5/left_inner_finger_pad",
+        "/husky_ur5/left_inner_knuckle",
+        "/husky_ur5/right_inner_knuckle",
+        "/husky_ur5/right_outer_knuckle",
+        "/husky_ur5/right_outer_finger",
+        "/husky_ur5/right_inner_finger",
+        "/husky_ur5/ur5_ft_frame"
+      ]
+    },
+    {
+      "body": "/husky_ur5/ur5_ft_frame",
+      "fixed_assembly_only": [
+        "/husky_ur5/ur5_wrist_3_link",
+        "/husky_ur5/ur5_flange",
+        "/husky_ur5/ur5_tool0",
+        "/husky_ur5/robotiq_arg2f_base_link",
+        "/husky_ur5/left_outer_knuckle",
+        "/husky_ur5/left_outer_finger",
+        "/husky_ur5/left_inner_finger",
+        "/husky_ur5/left_inner_finger_pad",
+        "/husky_ur5/left_inner_knuckle",
+        "/husky_ur5/right_inner_knuckle",
+        "/husky_ur5/right_outer_knuckle",
+        "/husky_ur5/right_outer_finger",
+        "/husky_ur5/right_inner_finger",
+        "/husky_ur5/right_inner_finger_pad"
+      ]
+    },
+    {
+      "body": "/husky_ur5/husky_user_rail_link",
+      "fixed_assembly_only": [
+        "/husky_ur5/husky_base_link",
+        "/husky_ur5/husky_front_bumper_link",
+        "/husky_ur5/husky_inertial_link",
+        "/husky_ur5/husky_rear_bumper_link",
+        "/husky_ur5/husky_top_chassis_link",
+        "/husky_ur5/husky_top_plate_link",
+        "/husky_ur5/husky_sensor_arch_mount_link",
+        "/husky_ur5/husky_top_plate_front_link",
+        "/husky_ur5/husky_top_plate_rear_link",
+        "/husky_ur5/ur5_base_link",
+        "/husky_ur5/ur5_base",
+        "/husky_ur5/ur5_base_link_inertia"
+      ]
+    }
+  ]
+}

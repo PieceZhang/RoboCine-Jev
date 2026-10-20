@@ -9,3 +9,8 @@ results/
 /scenarios/video/
 /scenarios/archive/
 /scenarios/video_combo/
+
+# Generated validation reports and frozen snapshots; keep authored audit tools.
+/validation/*
+!/validation/*.py
+/validation/*_source.py

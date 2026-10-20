@@ -34,6 +34,7 @@ parser.add_argument("--speed", type=float, default=0.2)
 parser.add_argument("--seed", type=int, default=0)
 parser.add_argument("--gui", action="store_true")
 parser.add_argument("--snapshot", action="store_true", help="Render one diagnostic PNG and save final USD.")
+parser.add_argument("--camera-probe", action="store_true", help="Diagnostic small WORLD optical-camera task through native mixed-frame WBC.")
 from isaaclab.app import AppLauncher
 AppLauncher.add_app_launcher_args(parser)
 parser.set_defaults(device="cpu")
@@ -48,6 +49,19 @@ OUTPUT_DIR = (args.output or ROOT / "results" / f"run_{time.time_ns()}").resolve
 OUTPUT_DIR.mkdir(parents=True, exist_ok=False)
 (OUTPUT_DIR / "validator_source.py").write_text(Path(__file__).read_text())
 (OUTPUT_DIR / "arguments.json").write_text(json.dumps(vars(args), indent=2, default=str) + "\n")
+import importlib.util
+from shutil import copy2
+copy2(ROOT/'wbc_backend.py', OUTPUT_DIR/'wbc_backend_source.py')
+backend_spec = importlib.util.spec_from_file_location('frozen_go2_camera_backend', OUTPUT_DIR/'wbc_backend_source.py')
+camera_backend = importlib.util.module_from_spec(backend_spec); backend_spec.loader.exec_module(camera_backend)
+source_sensor_config = args.sensor_config or ROOT.parent/'config/robot_sensor_mounts.json'
+copy2(source_sensor_config, OUTPUT_DIR/'sensor_config.json')
+args.sensor_config = OUTPUT_DIR/'sensor_config.json'
+copy2(ROOT.parent/'jev_agent_wbc/robot_sensor_rig.py', OUTPUT_DIR/'robot_sensor_rig_source.py')
+rig_spec = importlib.util.spec_from_file_location('frozen_go2_sensor_rig', OUTPUT_DIR/'robot_sensor_rig_source.py')
+frozen_rig = importlib.util.module_from_spec(rig_spec); rig_spec.loader.exec_module(frozen_rig)
+RobotSensorRig, SensorAudit, lab_body_poses = frozen_rig.RobotSensorRig, frozen_rig.SensorAudit, frozen_rig.lab_body_poses
+copy2(POLICY, OUTPUT_DIR/'policy.pt')
 launcher = AppLauncher(args)
 app = launcher.app
 
@@ -103,7 +117,7 @@ def main():
     import omni.usd
     sensor_rig = RobotSensorRig(omni.usd.get_context().get_stage(), '/World/envs/env_0/Robot', 'go2', args.sensor_config)
     sensor_audit = SensorAudit(sensor_rig, output, args.sensor_audit)
-    policy = torch.jit.load(str(POLICY), map_location=env.device).eval()
+    policy = torch.jit.load(str(output/'policy.pt'), map_location=env.device).eval()
     joint_expr = ["FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
                   "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
                   "RR_hip_joint", "RR_thigh_joint", "RR_calf_joint",
@@ -132,6 +146,7 @@ def main():
         previous_action = torch.zeros((1, 18), device=env.device)
         histories = [torch.zeros((1, 3 * n), device=env.device) for n in [3, 3, 18, 18, 18, 3, 7]]
         rows = []
+        camera_reference = None
         expected_steps = round(args.seconds / env.step_dt)
         for step in range(expected_steps):
             tick = time.monotonic()
@@ -152,6 +167,17 @@ def main():
             ee.pose_command[:, 3:] = quat_from_euler_xyz(
                 torch.zeros(1, device=env.device), torch.tensor([pitch], device=env.device),
                 torch.tensor([math.atan2(y, x)], device=env.device))
+            desired_camera = None
+            if args.camera_probe and t >= 2.0:
+                from scipy.spatial.transform import Rotation
+                body_poses = lab_body_poses(robot, sensor_rig.parent_names | {'link0'})
+                measured_camera = body_poses[sensor_rig.camera_spec['parent']]@sensor_rig.camera_local
+                if camera_reference is None:
+                    camera_reference = measured_camera.copy()
+                desired_camera = camera_reference.copy()
+                desired_camera[:3, 3] += [.01*math.sin(moving_t), .01*math.sin(.7*moving_t), .01*math.sin(.5*moving_t)]
+                desired_camera[:3, :3] = Rotation.from_rotvec([0., .02*math.sin(moving_t), .02*math.sin(.7*moving_t)]).as_matrix()@camera_reference[:3, :3]
+                camera_backend.set_camera_target(ee, desired_camera, body_poses['link0'], sensor_rig.camera_local)
             features = [robot.data.root_ang_vel_b * 0.2, robot.data.projected_gravity_b,
                         robot.data.joint_pos[:, joint_ids] - robot.data.default_joint_pos[:, joint_ids],
                         (robot.data.joint_vel[:, joint_ids] - robot.data.default_joint_vel[:, joint_ids]) * 0.05,
@@ -186,6 +212,15 @@ def main():
                 "joint_positions": robot.data.joint_pos[0, joint_ids].detach().cpu().tolist(),
                 "action": action[0].detach().cpu().tolist(),
             }
+            body_poses = lab_body_poses(robot, sensor_rig.parent_names | {'link0'})
+            physical_camera = body_poses[sensor_rig.camera_spec['parent']]@sensor_rig.camera_local
+            row['T_world_camera_optical_measured'] = physical_camera.tolist()
+            row['T_world_link0_measured'] = body_poses['link0'].tolist()
+            if desired_camera is not None:
+                row['T_world_camera_optical_reference'] = desired_camera.tolist()
+                row['camera_position_error_m'] = float(np.linalg.norm(physical_camera[:3, 3]-desired_camera[:3, 3]))
+                row['camera_orientation_error_rad'] = float(Rotation.from_matrix(
+                    desired_camera[:3, :3]@physical_camera[:3, :3].T).magnitude())
             rows.append(row)
             if args.sensor_audit:
                 sensor_audit.record((len(measurements)+len(rows))*env.step_dt,
@@ -235,6 +270,13 @@ def main():
                   "simultaneous_leg_arm_motion": coordinated,
                   "pass": bool(stable and tracking and direction and (case != "coordinated" or (coordinated and ee_pass)))}
         results.append(result)
+        if args.camera_probe:
+            camera_rows = [r for r in settled if 'camera_position_error_m' in r]
+            result['camera_position_rmse_m'] = float(np.sqrt(np.mean([r['camera_position_error_m']**2 for r in camera_rows]))) if camera_rows else None
+            result['camera_orientation_rmse_rad'] = float(np.sqrt(np.mean([r['camera_orientation_error_rad']**2 for r in camera_rows]))) if camera_rows else None
+            result['camera_probe_pass'] = bool(camera_rows and result['camera_position_rmse_m'] < .05
+                                              and result['camera_orientation_rmse_rad'] < .15)
+            result['pass'] = bool(result['pass'] and result['camera_probe_pass'])
         measurements.extend(rows)
         (output / "progress.json").write_text(json.dumps(results, indent=2) + "\n")
         print(json.dumps(result), flush=True)
@@ -259,7 +301,7 @@ def main():
         except Exception as exc:
             (output / "snapshot_error.txt").write_text(repr(exc))
     summary = {"robot": "Unitree Go2 + Agilex Piper", "task": "GO2-PIPER-WBC", "policy": str(POLICY),
-               "policy_sha256": hashlib.sha256(POLICY.read_bytes()).hexdigest(),
+               "policy_sha256": hashlib.sha256((output/'policy.pt').read_bytes()).hexdigest(),
                "joint_order": joint_names, "observation_dimension": 210, "action_dimension": 18,
                "physics_dt": cfg.sim.dt, "control_dt": env.step_dt, "device": env.device,
                "pace": 1, "simulated_seconds": len(measurements)*env.step_dt,
@@ -273,6 +315,12 @@ def main():
                "source_manifest": json.loads((ROOT / "SOURCES.json").read_text()),
                "packages": {name: importlib.metadata.version(name) for name in ["isaacsim", "torch", "numpy", "isaaclab", "rsl-rl-lib", "LeggedManip_Lab"]},
                "scope": "Nominal flat-ground deterministic simulation only. Mixed-frame EE command, no Agent adaptation."}
+    summary.update(camera_probe=args.camera_probe, camera_backend_sha256=hashlib.sha256((output/'wbc_backend_source.py').read_bytes()).hexdigest(),
+                   sensor_rig_import=str(output/'robot_sensor_rig_source.py'),
+                   sensor_rig_sha256=hashlib.sha256((output/'robot_sensor_rig_source.py').read_bytes()).hexdigest(),
+                   camera_feedback='measured physical optical pose, x_right_y_down_z_forward',
+                   continuous_camera_tracking_verified=False, environment_constraints_verified=False,
+                   representation_ingress_verified=False, sensors_avoidance_verified=False)
     with (output / "measurements.jsonl").open("w") as f:
         for row in measurements:
             f.write(json.dumps(row) + "\n")

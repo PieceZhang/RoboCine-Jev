@@ -1,0 +1,17 @@
+{
+  "schema": "tiago_preflight/v1",
+  "passed": true,
+  "failures": [],
+  "profile": "single-arm differential TIAGo with active lifting torso",
+  "physics_urdf": "urdf/tiago_physics.urdf",
+  "mesh_files_verified": 38,
+  "links": 37,
+  "movable_joints": 14,
+  "official_joint_limits_preserved": true,
+  "matching_lidar_parameters": true,
+  "physics_verified": false,
+  "rendered_camera_verified": false,
+  "obstacle_avoidance_verified": false,
+  "full_pose_sensor_coverage_verified": false,
+  "scope": "CPU structural preflight only; see separate measured Isaac Sim results"
+}

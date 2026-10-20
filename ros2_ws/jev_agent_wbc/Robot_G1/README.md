@@ -4,6 +4,25 @@
 
 已下载完整官方 G1 29自由度 USD 及其相对依赖（149MB），并取得所有 v1.2 G1 预训练策略实际文件（10.1MB，非 Git LFS 指针）。源码、电机控制器、训练/评估脚本保留在 upstream。来源和每个资产的 SHA256 分别位于 config/sources.json、config/assets.manifest.json。
 
+## 当前基础 WBC 入口
+
+本轮按基础控制范围收尾：采用官方 **velocity-height 12腿策略 + 真正Pink 15上身关节任务层**，目标是稳定运动和任务/实测反馈接口适配。推荐入口明确固定已实测的Ki1配置、当前状态重力支撑和原关节限值；未实测的Ki4实验不作为默认。
+
+```bash
+cd /home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1
+./run_basic_wbc.sh --output results/my_basic_run
+```
+
+默认九项包括前后、左右、双斜向、双转向和移动摄影，共92秒；每项5秒运动和5秒停车。输出保留原严格`summary.json`和逐步原始数据，基础控制的独立判定与精密速度/停车结果分开。原严格退出码可能为2，不应擅自改写为通过。验收证据、范围和剩余限制见[WBC.md](WBC.md)及[WBC_READINESS.json](WBC_READINESS.json)。
+
+最终[九项实测](results/basic_full_validation_01/summary.json)在92.000093秒墙钟完成，[独立基础审计](../validation/wbc_g1_basic_full01_independent_20261020.json)通过、0错误，4500个活跃采样的实际形状碰撞检查均新鲜通过。原精密速度8/9、严格停车4/9通过：左转实测.1520rad/s高于.12目标，倒退、双斜向、左转和移动摄影仍有严格关节停车偏差。4次真实短暂QP失败与原`all_pass=false`完整保留；本轮据此完成基础层收尾，不再继续调参。
+
+这里不承诺精密速度跟踪、任意末端六维轨迹或避障。公共接口接收绝对仿真时间的WORLD相机任务，返回实际相机和两部分碰撞几何观测；环境与无法认证的执行约束仍返回unknown。短暂缺帧时保持已提交的上身位置、速度目标0，每个物理子步重新计算静态重力，不复用过期运动包。
+
+## 保留的历史行走入口
+
+以下`run.sh`及65秒结果属于旧255输入/14输出velocity-history策略，作为历史证据保留，不能替代当前height+Pink的基础WBC验证。
+
 ```bash
 cd /home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1
 ./run.sh                                      # 默认65秒多方向物理验收
@@ -47,3 +66,7 @@ headless体验没有active viewport，因此没有生成诊断PNG，具体见sna
 `--sensor-audit` 采样本体遮挡和实测 TF；`--sensor-rgb` 在运行后检查实际相机图像与前方光轴。
 配置、输出及未验证范围见 [三平台传感器安装说明](../SENSOR_INSTALLATION.md)。
 新增传感器尚未接通避障 Agent；历史行走验收不等于全姿态传感器覆盖验收。
+
+## 新 WBC 适配核验（2026-10-20）
+
+`run_wbc.sh`和早期6秒试验保留用于历史复现；当前基础入口是上面的`run_basic_wbc.sh`。此前独立16秒明显六维相机轨迹曾通过，但属于另一个冻结控制版本，不能把结果转移到本轮基础默认配置。实现、失败历史、实测接口与能力边界见[WBC.md](WBC.md)和[WBC_READINESS.json](WBC_READINESS.json)；环境约束和避障门槛保持未通过。

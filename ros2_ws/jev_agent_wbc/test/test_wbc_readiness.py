@@ -184,3 +184,69 @@ def test_gateway_and_fleet_share_evidence_invalidation(tmp_path):
     result = GATEWAY.probe(task.to_dict(), observation.to_dict(), manifest, 10., robot_dir=folder)
     assert not result['supported']
     assert 'evidence_missing_or_changed:adapter.py' in result['readiness_errors']
+
+
+def test_control_readiness_does_not_certify_missing_sensing_or_environment(tmp_path):
+    package = create_package(tmp_path)
+    for folder in MODULE.ROBOTS:
+        path = package/folder/'WBC_READINESS.json'
+        data = json.loads(path.read_text())
+        data.update(environment_constraints_verified=False, sensors_avoidance_verified=False)
+        path.write_text(json.dumps(data))
+    report = MODULE.audit(package)
+    assert report['all_control_integration_gates_passed']
+    assert not report['all_avoidance_agent_gates_passed']
+
+
+def test_solver_and_camera_passes_cannot_replace_missing_actual_task_ingress(tmp_path):
+    package = create_package(tmp_path)
+    path = package/'Robot_G1/WBC_READINESS.json'
+    data = json.loads(path.read_text())
+    data['representation_ingress_verified'] = False
+    path.write_text(json.dumps(data))
+    report = MODULE.audit(package)
+    assert report['all_recommended_backends_ready']
+    assert not report['all_control_integration_gates_passed']
+
+
+def attach_basic(folder):
+    (folder/'run_basic.sh').write_text('# tested basic entry\n')
+    (folder/'basic_validation.json').write_text(json.dumps(dict(run_complete=True)))
+    (folder/'basic_audit.json').write_text(json.dumps(dict(
+        schema='independent_wbc_basic_control_audit/v1', basic_control_pass=True,
+        environment_constraints_verified=False, sensors_avoidance_verified=False,
+        precision_velocity_tracking_qualified=False)))
+    path = folder/'WBC_READINESS.json'; data = json.loads(path.read_text())
+    data.update(dict.fromkeys(MODULE.GATES, False))
+    data['basic_control'] = dict(qualified=True,
+        entrypoint='run_basic.sh', entrypoint_sha256=MODULE.sha256(folder/'run_basic.sh'),
+        audit_file='basic_audit.json', audit_sha256=MODULE.sha256(folder/'basic_audit.json'),
+        validation_file='basic_validation.json', validation_sha256=MODULE.sha256(folder/'basic_validation.json'))
+    path.write_text(json.dumps(data))
+
+
+def test_reduced_basic_qualification_never_upgrades_precision_or_avoidance(tmp_path):
+    package = create_package(tmp_path)
+    for name in ('Robot_G1', 'Robot_Go2'):
+        attach_basic(package/name)
+    report = MODULE.audit(package)
+    assert report['audit_complete'] and report['all_basic_control_gates_passed']
+    assert not report['all_control_integration_gates_passed']
+    assert not report['all_avoidance_agent_gates_passed']
+
+
+@pytest.mark.parametrize('bad', ['changed_entry','changed_audit','changed_validation','overclaim','truthy'])
+def test_basic_claim_needs_its_bound_completed_physical_report(tmp_path, bad):
+    package = create_package(tmp_path); folder = package/'Robot_G1'; attach_basic(folder)
+    path = folder/'WBC_READINESS.json'; data = json.loads(path.read_text())
+    if bad == 'changed_entry': (folder/'run_basic.sh').write_text('# changed\n')
+    elif bad == 'changed_audit': (folder/'basic_audit.json').write_text('{}')
+    elif bad == 'changed_validation': (folder/'basic_validation.json').write_text('{}')
+    elif bad == 'truthy': data['basic_control']['qualified'] = 'true'
+    else:
+        report = json.loads((folder/'basic_audit.json').read_text())
+        report['sensors_avoidance_verified'] = True
+        (folder/'basic_audit.json').write_text(json.dumps(report))
+        data['basic_control']['audit_sha256'] = MODULE.sha256(folder/'basic_audit.json')
+    path.write_text(json.dumps(data))
+    assert not MODULE.audit(package)['all_basic_control_gates_passed']

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import sys
@@ -119,10 +120,40 @@ def pick(row, *keys):
     raise ValueError('missing measured field '+keys[0])
 
 
+def go2_native_domain(folder, rows):
+    """Recheck actual policy inputs from this run's pinned source envelope.
+
+    This excludes outer-domain violations; it cannot certify checkpoint training
+    coverage. A rejected candidate is different from the command actually sent.
+    """
+    folder = Path(folder)
+    backend = folder/'sources/go2_backend.py'
+    config = folder/'sources/go2_upstream/config/go2_piper/wbc_env_cfg.py'
+    sampler = folder/'sources/go2_upstream/mdp/pose_command_wbc.py'
+    spec = importlib.util.spec_from_file_location('audited_frozen_go2_domain', backend)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    domain = module.PolicyDomain(config, sampler)
+    violations = []
+    count = 0
+    for row in rows:
+        if row['feedback'] is None:
+            continue
+        command = finite(pick(row['raw'], 'actual_native_command'), (7,))
+        check = domain.check(command)
+        count += 1
+        if check['status'] != 'inside_outer_domain_unverified':
+            violations.append(row['stamp'])
+    return dict(checked_samples=count, failed_samples=len(violations), first_failed_stamps_s=violations[:10],
+        passed=bool(count and not violations), scope='pinned policy configuration outer envelope; training coverage unknown',
+        sources_sha256={str(p.relative_to(folder)):digest(p) for p in (backend, config, sampler)})
+
+
 def audit(folder):
     folder = Path(folder).resolve()
     errors, cases = [], []
     files = {'auditor': digest(Path(__file__))}
+    completion = {}
     def read(name):
         path = folder/name
         files[name] = digest(path)
@@ -133,6 +164,12 @@ def audit(folder):
     try:
         summary_name = 'summary.json' if (folder/'summary.json').is_file() else 'acceptance.json'
         summary, provenance = read(summary_name), read('provenance.json')
+        run_complete = summary.get('run_complete', summary.get('complete')) is True
+        native_safety_failure = bool(summary.get('failures') or summary.get('measured_safety_pass') is False
+            or summary.get('measured_safety_violations', 0))
+        completion.update(run_complete=run_complete, native_reported_safety_failure=native_safety_failure)
+        if not run_complete:
+            reject('physical_run_incomplete')
         hashes = provenance.get('frozen_sha256', {})
         # Historical wheels encode both the snapshot location and its checksum.
         if not hashes:
@@ -236,6 +273,8 @@ def audit(folder):
             reject('physical_samples_missing_or_rate_changed')
         grouped = {key: [] for key in parsed}
         feedback_count = 0
+        constraint_failures = {}
+        infeasible_feedback_count = 0
         for row in rows:
             entry, feedback = row['raw'], row['feedback']
             # Acceptance occurs at an existing measured tick. Its first executed
@@ -252,6 +291,8 @@ def audit(folder):
             if row['stamp'] < start-1e-8:
                 reject('feedback_before_task_start'); continue
             feedback_count += 1
+            if feedback.get('feasible') is False:
+                infeasible_feedback_count += 1
             if abs(float(finite(feedback['stamp_s'], ()))-row['stamp']) > 1e-8:
                 reject('feedback_measurement_stamp_mismatch')
             if feedback.get('camera_path_id') != task.trajectory.id or feedback.get('camera_reference_changed') is not False:
@@ -293,7 +334,21 @@ def audit(folder):
             constraints = feedback.get('constraints', {})
             if set(constraints) != {'configuration', 'actuation', 'self_collision', 'environment', 'policy_domain'}:
                 reject('missing_constraint_feedback_families')
-            for value in constraints.values():
+            for family, value in constraints.items():
+                if (value.get('status') not in ('pass', 'fail', 'unknown', 'not_applicable')
+                        or value.get('scope') not in ('measured_native_limits', 'measured_collision_model',
+                            'policy_config_outer_domain', 'fresh_environment_map', 'not_available', 'not_applicable')):
+                    reject('invalid_public_constraint_status_or_scope')
+                if value.get('reserve_fraction') is not None and not 0 <= float(finite(value['reserve_fraction'], ())) <= 1:
+                    reject('invalid_public_constraint_reserve')
+                if value.get('clearance_m') is not None:
+                    clearance = float(finite(value['clearance_m'], ()))
+                    if value.get('status') == 'pass' and clearance < 0:
+                        reject('negative_clearance_cannot_pass')
+                if value.get('status') == 'not_applicable' and (value.get('scope') != 'not_applicable' or value.get('stamp_s') is not None):
+                    reject('invalid_not_applicable_constraint_provenance')
+                if value.get('status') == 'fail':
+                    constraint_failures[family] = constraint_failures.get(family, 0)+1
                 if value.get('status') in ('pass', 'fail') and (value.get('stamp_s') is None
                         or not 0 <= row['stamp']-float(finite(value['stamp_s'], ())) <= .1+1e-8):
                     reject('constraint_evidence_not_fresh')
@@ -310,11 +365,19 @@ def audit(folder):
                 reject('task_physical_interval_incomplete'); continue
             rms = np.sqrt(np.mean(np.array([r['errors'] for r in moving])**2, axis=0))
             final_error = segment[-1]['errors']
+            desired = np.array([parsed[key][1][0](r['stamp']) for r in moving])
+            actual = np.array([r['camera'] for r in moving])
+            fixed = desired[0]
+            hold_error = np.array([[np.linalg.norm(matrix[:3, 3]-fixed[:3, 3]), angle(matrix, fixed)] for matrix in desired])
+            hold_rms = np.sqrt(np.mean(hold_error**2, axis=0))
             camera_pass = bool(np.all(rms < [task.position_tolerance_m, task.orientation_tolerance_rad])
                 and np.all(np.asarray(final_error) < [task.position_tolerance_m, task.orientation_tolerance_rad]))
             stop = strict_stop(stopped, units) if units is not None else dict(passed=False)
             cases.append(dict(task_id=key, measured_samples=len(segment), moving_samples=len(moving),
                 position_rmse_m=float(rms[0]), orientation_rmse_rad=float(rms[1]), final_error=final_error,
+                reference_position_span_m=float(np.linalg.norm(np.ptp(desired[:, :3, 3], axis=0))),
+                measured_camera_position_span_m=float(np.linalg.norm(np.ptp(actual[:, :3, 3], axis=0))),
+                initial_pose_hold_baseline_rmse=hold_rms.tolist(),
                 task_tolerances=[task.position_tolerance_m, task.orientation_tolerance_rad],
                 camera_tracking_pass=camera_pass, strict_stop=stop, passed=bool(camera_pass and stop['passed'])))
         elapsed = float(finite(summary.get('wall_seconds', summary.get('wall_s')), ()))
@@ -322,20 +385,29 @@ def audit(folder):
         timing_pass = elapsed > 0 and sim_seconds > 0 and elapsed <= sim_seconds*1.05
         if abs(stamps[-1]-sim_seconds) > interval*1.5:
             reject('summary_simulation_time_differs_from_physical_log')
-        run_complete = summary.get('run_complete', summary.get('complete')) is True
-        if not run_complete:
-            reject('physical_run_incomplete')
+        native_domain = None
+        if summary.get('robot') == 'go2':
+            native_domain = go2_native_domain(folder, rows)
+            files.update(native_domain['sources_sha256'])
+            if not native_domain['passed']:
+                reject('actual_native_input_outside_policy_configuration_domain')
         return dict(schema='independent_wbc_physical_audit/v1', folder=str(folder), audit_errors=errors,
             audit_passed=not errors, run_complete=run_complete, measured_samples=len(rows),
             feedback_samples=feedback_count, measured_interval_s=interval, timing_pass=bool(timing_pass),
+            constraint_failure_samples=constraint_failures,
+            reported_infeasible_feedback_samples=infeasible_feedback_count,
+            native_reported_safety_failure=native_safety_failure,
+            native_domain=native_domain,
             tasks=cases, all_tasks_pass=bool(cases) and all(c['passed'] for c in cases),
-            physical_acceptance_pass=bool(not errors and timing_pass and cases and all(c['passed'] for c in cases)),
+            physical_acceptance_pass=bool(not errors and not native_safety_failure and not constraint_failures and not infeasible_feedback_count
+                and timing_pass and cases and all(c['passed'] for c in cases)),
             sources_sha256=files, scope='immutable timed camera tasks, measured SE3, all joint stopping, freshness and pace; '
                 'direction coverage, contacts, rendering, sensing and avoidance require separate evidence')
-    except (ValueError, KeyError, TypeError, IndexError, OSError) as exc:
+    except (ValueError, KeyError, TypeError, IndexError, OSError, AttributeError, ImportError, RuntimeError) as exc:
         reject(str(exc))
         return dict(schema='independent_wbc_physical_audit/v1', folder=str(folder), audit_passed=False,
-            physical_acceptance_pass=False, audit_errors=errors, tasks=cases, sources_sha256=files)
+            physical_acceptance_pass=False, audit_errors=errors, tasks=cases, sources_sha256=files,
+            **completion)
 
 
 def main():
