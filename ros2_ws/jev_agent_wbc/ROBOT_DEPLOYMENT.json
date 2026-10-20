@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "created_utc": "2026-10-19T10:00:09.096151+00:00",
-  "scope": "Local models, controllers and nominal unobstructed Isaac Sim validation. No avoidance Agent adaptation.",
+  "scope": "Local models/controllers and recorded nominal flat-ground PhysX motion tests; sensor coverage and avoidance gates are separate. See MOBILE_MANIPULATORS.md for the added platforms.",
   "simulator": {
     "isaacsim": "5.1.0.0",
     "python": "3.11",
@@ -45,6 +45,36 @@
       "physics_hz": 100,
       "policy_or_control_hz": 100,
       "simulated_seconds": 71.0
+    },
+    {
+      "robot": "Husky A200 + UR5",
+      "directory": "Robot_Husky_UR5",
+      "readme": "Robot_Husky_UR5/README.md",
+      "entrypoint": "Robot_Husky_UR5/run.sh",
+      "validation": "Robot_Husky_UR5/results/acceptance_05/acceptance.json",
+      "validation_sha256": "756aaf141e5aef2678db9a5ba5d78435c03dfbb05230b2bd208b800cacee4e97",
+      "passed": true,
+      "physics_hz": 100,
+      "policy_or_control_hz": 100,
+      "simulated_seconds": 119.92,
+      "timing_pass": false,
+      "sensor_full_range_passed": false,
+      "avoidance_verified": false
+    },
+    {
+      "robot": "TIAGo single-arm differential",
+      "directory": "Robot_TIAGo",
+      "readme": "Robot_TIAGo/README.md",
+      "entrypoint": "Robot_TIAGo/run.sh",
+      "validation": "Robot_TIAGo/results/acceptance_final/acceptance.json",
+      "validation_sha256": "af129187ce80f1a4315d4e6f363df20bb06981511a8b2421ad4238aabbab9eeb",
+      "passed": true,
+      "physics_hz": 100,
+      "policy_or_control_hz": 100,
+      "simulated_seconds": 91.31,
+      "timing_pass": true,
+      "sensor_full_range_passed": false,
+      "avoidance_verified": false
     }
   ],
   "g1_final_environment_check": "Robot_G1/results/final_env_smoke_01/summary.json",
@@ -59,6 +89,21 @@
     "G1 lateral velocity has a measured gain bias; stability acceptance is not precision speed servoing.",
     "Go2 acceptance uses Piper and mixed-frame end-effector commands; D1 and ARX5 are different configurations.",
     "Ridgeback uses native fixed-root planar x/y/yaw joints and a measured 3 mm ground gap; mecanum wheel friction and vertical base dynamics are not validated.",
-    "All tests cover the recorded flat-ground nominal scenarios, without an avoidance Agent."
-  ]
+    "All tests cover the recorded flat-ground nominal scenarios, without an avoidance Agent.",
+    "Added platforms use actual wheel drives and one end-effector camera plus two identically configured body scanners each.",
+    "TIAGo still has four sampled robot-collision-free camera failures; both new platforms retain LiDAR blind zones. Full continuous-pose sensing and reliable avoidance are not verified."
+  ],
+  "updated_utc": "2026-10-20T04:17:24.887148+00:00",
+  "added_mobile_manipulators_sensor_goal_complete": false,
+  "added_mobile_manipulators_report": "MOBILE_MANIPULATORS.md",
+  "wbc_integration": {
+    "report": "WBC_INTEGRATION.md",
+    "readiness_audit": "validation/wbc_readiness_20261020.json",
+    "preflight": "scripts/check_wbc_readiness.py",
+    "protocol": "jev_agent_wbc/wbc_protocol.py",
+    "gateway_probe": "scripts/wbc_task_gateway.py",
+    "all_recommended_backends_ready": false,
+    "all_avoidance_agent_gates_passed": false,
+    "historical_motion_passes_apply_only_to_their_frozen_controllers": true
+  }
 }

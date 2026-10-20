@@ -1,7 +1,8 @@
 """Bounded nonblocking controller transport; physics never awaits a trajectory.
 
-Only worker initialization happens before arming. No planning/semantic call is
-made before the first live observation. Queues hold at most one snapshot each.
+Bounded startup may include the task driver's unstarted-shot preparation.
+After arming, physics never waits for planning or semantic calls. Queues hold
+at most one snapshot each.
 """
 from dataclasses import asdict
 import json
@@ -86,17 +87,22 @@ def controller_process(inbox, outbox, stop, original, scene, output, options, ph
 
 
 class RealtimeEngine:
-    def __init__(self, original, scene, output, *, physical_limits, runtime_policy, **options):
+    def __init__(self, original, scene, output, *, physical_limits, runtime_policy,
+                 worker_target=None, worker_options=None, stream_on_fault=False, startup_wait_s=45., **options):
         self.original = self.active = original
         self.output = output
         self.policy = runtime_policy
+        self.stream_on_fault = bool(stream_on_fault)
         self.intrinsics = options.get('intrinsics')
         self.perception = SubjectEvidence(original.task['subject']['id'])
         self.wbc = SimpleNamespace(limits=options['limits'], previous=np.zeros(8))
+        from .whole_body_qp import WholeBodyQP
+        self.transport_bounds=WholeBodyQP(physical_limits)
         self.actual_feedback = {}
         self.installed_plans = 0
         self.jev = SimpleNamespace(decider=SimpleNamespace(client=SimpleNamespace(calls=0)))
         self.last_result = None
+        self.session_result = None
         self.camera = None
         self.sequence = 0
         self.watchdog = None
@@ -106,13 +112,14 @@ class RealtimeEngine:
         self.journal = AsyncJournal(output/'runtime_events.jsonl')
         ctx = mp.get_context('spawn')
         self.inbox, self.outbox, self.stop = ctx.Queue(1), ctx.Queue(1), ctx.Event()
-        self.process = ctx.Process(target=controller_process,
+        self.process = ctx.Process(target=worker_target or controller_process,
             args=(self.inbox, self.outbox, self.stop, original, scene, output,
-                  dict(options, runtime_policy=runtime_policy), physical_limits), name='jev-live-controller')
+                  dict(options, runtime_policy=runtime_policy, **(worker_options or {})), physical_limits), name='jev-live-controller')
         self.process.start()
-        # Startup is equipment initialization only, bounded independently of shot.
+        # Startup is bounded independently of the shot; session drivers may
+        # prepare their unstarted shots before arming the physical clock.
         try:
-            message = pickle.loads(self.outbox.get(timeout=45.))
+            message = pickle.loads(self.outbox.get(timeout=startup_wait_s))
             if not message.get('ready'):
                 raise RuntimeError(message.get('error', 'controller did not initialize'))
             self._summary = message['summary']
@@ -120,7 +127,9 @@ class RealtimeEngine:
         except BaseException:
             self.close()
             raise
-        self._write('controller_ready', 0., policy=asdict(runtime_policy), planning_before_arm=False)
+        self._write('controller_ready', 0., policy=asdict(runtime_policy),
+                    numeric_runtime=self._summary.get('controller_numeric_runtime'),
+                    planning_before_arm=bool(worker_options and worker_options.get('session_case')))
 
     def _write(self, event, t, **details):
         self.journal.write(json.dumps(native(dict(event=event, time_s=t, **details)), allow_nan=False)+'\n')
@@ -156,24 +165,53 @@ class RealtimeEngine:
                 self.trip('controller_error: '+packet['error'], t)
             else:
                 self._summary = packet['summary']
+                if packet['info'].get('session_done'):
+                    self.session_result=packet['info']['session_result']
                 self.installed_plans = self._summary['installed_plans']
                 self.jev.decider.client.calls = self._summary['jev_calls']
                 if packet['info'].get('runtime_fault'):
                     self.trip(packet['info']['runtime_fault']['reason'], t)
                 if self.watchdog.accept(packet, t, time.monotonic()):
                     self.last_result = packet
-                    self.active = restore_path(self.original, packet['active'])
+                    if packet.get('active') is not None:
+                        self.active = restore_path(self.original, packet['active'])
         command = self.watchdog.command(t, time.monotonic(), float(scene['observation_stamp']),
                                         alive=self.process.is_alive())
+        proposal=self.watchdog.certificate_candidate(t,time.monotonic(),float(scene['observation_stamp']))
+        if proposal is not None:command=proposal
+        packet=self.watchdog.packet
+        if (packet is not None and packet.get('control_acceleration') is not None
+                and self.watchdog.fault is None and self.watchdog.waiting is None and self.watchdog.sensor_waiting is None):
+            # Transport the requested acceleration, not an old absolute motor
+            # velocity. Anchor to current encoders without refreshing the
+            # command's acquisition timestamp or lease. The actuator certifies
+            # this endpoint again before applying it.
+            limits=self.wbc.limits
+            acceleration=np.clip(packet['control_acceleration'],-limits.acceleration,limits.acceleration)
+            wheel_change=limits.wheels@acceleration
+            acceleration[:2]/=max(1.,float(np.max(abs(wheel_change)))/limits.wheel_acceleration)
+            command=np.asarray(kwargs['measured_control'])+dt*acceleration
+            command=np.clip(command,-limits.velocity,limits.velocity)
+            command[:2]/=max(1.,float(np.max(abs(limits.wheels@command)))/limits.wheel_speed)
+            self.watchdog.packet['command']=command.copy()
         self.actual_feedback = dict(camera_output_source=self.camera['source'], stamp_s=t,
             camera_position=np.asarray(self.camera['position']).tolist(),
             camera_quaternion_xyzw=Rotation.from_matrix(self.camera['rotation']).as_quat().tolist())
         submitted = False
-        if self.watchdog.fault is None:
+        if self.watchdog.fault is None or self.stream_on_fault:
             self.sequence += 1
             snapshot = dict(state=state, scene=scene, t=t, dt=dt, **kwargs,
                 camera=self.camera, perception=self.perception, sequence=self.sequence,
                 observation_wall=started if observation_wall is None else observation_wall)
+            if self.stream_on_fault:
+                # Continue measured telemetry after a latched brake. The watchdog
+                # still rejects every new command; this cannot rearm the robot.
+                snapshot['control_status'] = dict(runtime_fault=self.watchdog.fault,
+                    waiting_for_certificate=self.watchdog.certificate_waiting,
+                    accepted_action_sequence=self.watchdog.sequence,
+                    rejected_command_packets=self.watchdog.rejected,
+                    emergency_stop_required=self.watchdog.emergency_stop_required)
+                snapshot['evaluation'] = getattr(self, 'external_evaluation', None)
             # Freeze before Queue's asynchronous serialization thread can race
             # with mutable sensor buffers. No wait for an agent response.
             submitted = offer(self.inbox, pickle.dumps(snapshot, protocol=pickle.HIGHEST_PROTOCOL))
@@ -191,10 +229,19 @@ class RealtimeEngine:
             self._write('actuator_fault_latched', t, fault=self.watchdog.fault)
             self.fault_logged = True
         info = dict(self.last_result['info']) if self.last_result else {}
+        info['waiting_for_sensor'] = self.watchdog.sensor_waiting
+        info['waiting_for_certificate'] = self.watchdog.certificate_waiting
+        if packet is not None and packet.get('control_acceleration') is not None:
+            info['transport_acceleration'] = np.asarray(packet['control_acceleration']).tolist()
+            info['transport_mode'] = 'measured_velocity_anchored_acceleration'
+        if self.session_result is not None:
+            info.update(session_done=True,session_result=self.session_result)
         info.setdefault('target_position', self.active.sample(t)[0].tolist())
         info.setdefault('original_position', self.original.sample(t)[0].tolist())
         info.update(joint_margin_rad=joint_margin(np.asarray(state)),
             runtime_fault=self.watchdog.fault, safety_brake=self.watchdog.fault is not None,
+            waiting_for_controller=self.watchdog.waiting,
+            command_recoveries=self.watchdog.recoveries,
             command_source_time_s=None if self.last_result is None else self.last_result['t'],
             command_source_wall_s=None if self.last_result is None else self.last_result['observation_wall'],
             command_source_sequence=None if self.last_result is None else self.last_result['sequence'],

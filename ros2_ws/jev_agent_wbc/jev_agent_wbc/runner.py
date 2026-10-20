@@ -9,7 +9,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from .engine import CinematicEngine
-from .candidates import SearchBudget, restore_path, path_hash
+from .candidates import SearchBudget, restore_path, path_hash, path_spec
 from .evaluation import EVALUATION_PROTOCOL, save_json, trajectory_summary
 from .reference import OriginalReference
 from .scenarios import RuntimeScene, NAMES
@@ -22,7 +22,7 @@ from .camera_intent import POLICY,IntentSpec
 from .shot_acceptance import evaluate_shot, attach_acceptance
 
 
-def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, budget=None, model='perplexity', disable_wbc_avoidance=False, target_replay=None, planning_wbc_avoidance=False, planner_model="floating_camera", representation_boxes=3, geometry_preferences=True,preplan=False,phase_program=False):
+def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, budget=None, model='perplexity', disable_wbc_avoidance=False, target_replay=None, planning_wbc_avoidance=False, planner_model="floating_camera", representation_boxes=3, geometry_preferences=True,preplan=False,phase_program=False,async_control=False,execution=None):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     scene = RuntimeScene(Path(case)/'runtime_scene.json')
@@ -32,6 +32,8 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
     lidar = RuntimeLidar()
     for stamp in np.linspace(-.8, 0., 9):
         observed = lidar.synthetic_scan(scene, state, z, float(stamp))
+    if execution is not None:
+        state,z,physical_previous,observed=execution.initial()
     from .combo import gaps, complete_task
     task = json.loads((Path(case)/'task.json').read_text())
     save_json(output/'source_task.json', task)
@@ -58,10 +60,11 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
     # Same explicitly configured pinhole camera as the Isaac measurement rig.
     # This enables geometric projection, not synthetic SAM/visibility evidence.
     fy = .5/np.tan(np.deg2rad(27.5))
+    use_async = bool(async_control or (budget and budget.single_candidate))
     engine = CinematicEngine(original, observed, output, mode=mode, api_url=api_url, model=model,
         subject_model=runtime['subject'],representation_boxes=representation_boxes,geometry_preferences=geometry_preferences,
         planner_model=planner_model, planning_obstacle_avoidance=True if planning_wbc_avoidance else None,
-        coordination_async=bool(budget and budget.single_candidate),
+        coordination_async=use_async,
         preview=preview, budget=budget, limits=Limits(obstacle_avoidance=not disable_wbc_avoidance), intrinsics=[fy*288/384, fy, .5, .5])
     schedule, replayed = [], []
     if target_replay is not None:
@@ -90,28 +93,34 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
     sensor_worker=None
     try:
         from .combo import is_combo
-        if is_combo(original) and not (budget and budget.single_candidate):
+        if is_combo(original) and not use_async:
             engine.warm_workers()
             begin=time.monotonic()
-        if budget and budget.single_candidate:
+        if use_async and execution is None:
             engine.warm_workers()
             from .async_sensor import AsyncRuntimeLidar
             sensor_worker=AsyncRuntimeLidar(lidar,scene,observed)
         if preplan:
             from .initial_planning import prepare
-            startup=prepare(engine,state,observed,z)
+            startup=(prepare(engine,state,observed,z) if execution is None else
+                     execution.prepare(prepare,engine,state,observed,z))
             begin=time.monotonic()
         if phase_program:
             from .phase_program import prepare as prepare_phases
             selected_phase_program=prepare_phases(engine,observed,state,z)
             save_json(output/'phase_program.json',selected_phase_program)
             begin=time.monotonic()
+        if execution is not None:
+            engine.warm_workers()
+            execution.ready([engine])
+            state,z,physical_previous,observed=execution.initial()
         for i in range(round((original.duration+POLICY.terminal_hold_s)/dt)+1):
             iteration_started=time.monotonic()
-            t = i*dt
+            t = i*dt if execution is None else execution.snapshot["t"]
+            if t > original.duration+POLICY.terminal_hold_s+1e-8:break
             if sensor_worker is not None:
                 observed=sensor_worker.poll(state,z,t)
-            elif i % 5 == 0:
+            elif execution is None and i % 5 == 0:
                 observed = lidar.synthetic_scan(scene, state, z, t)
             while schedule and schedule[0][0] <= t+1e-9:
                 installed_at, path, card = schedule.pop(0)
@@ -126,8 +135,11 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
                     source_installed_at=installed_at,revalidation='not performed: fixed-target CPU ablation')
             # Exact velocity of this CPU constant-control integration model.
             control_started=time.monotonic()
-            command, info = engine.step(state, observed, t, dt, base_z=z, commanded_q=state[3:],
-                                        measured_control=engine.wbc.previous.copy())
+            if execution is None:
+                command, info = engine.step(state, observed, t, dt, base_z=z, commanded_q=state[3:],
+                                            measured_control=engine.wbc.previous.copy())
+            else:
+                command,info=execution.step(engine,state,observed,t,dt,z)
             info['control_thread_wall_s']=time.monotonic()-control_started
             p, r, _ = whole_body_kinematics(state, z)
             truth = DynamicCollision(scene.truth_collision(t), t, uncertainty_rate=0.,geometry=engine.wbc.collision.geometry)
@@ -139,21 +151,32 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
             if i % 50 == 0:
                 print(json.dumps(dict(case=runtime['name'], mode=mode, t=t, clearance=clearance,
                     jev_calls=engine.jev.decider.client.calls, installed=engine.installed_plans, tracks=len(observed.get('tracks', [])))), flush=True)
-            if t < original.duration+POLICY.terminal_hold_s:
+            if execution is not None:
+                rp,rr,_=original.sample(t)
+                state,z,physical_previous,observed,_=execution.exchange(command,info,"main_action",0,t,rp,rr)
+            elif t < original.duration+POLICY.terminal_hold_s:
                 state = advance(state, command, dt)
             info['iteration_compute_wall_s']=time.monotonic()-iteration_started
-            if pace > 0:
+            if pace > 0 and execution is None:
                 remaining = (i+1)*dt/pace-(time.monotonic()-begin)
                 if remaining > 0:
                     time.sleep(remaining)
     except Exception as error:
         failure = f'{type(error).__name__}: {error}'
         failure_diagnostics=getattr(error,'diagnostics',None)
+        if hasattr(error, 'qp_problem'):
+            np.savez_compressed(output/'failed_qp.npz', **error.qp_problem)
+        save_json(output/'failure_snapshot.json', dict(time_s=locals().get('t', 0.),
+            state=state, base_z=z, previous_command=engine.wbc.previous,
+            observation=observed, active_path=path_spec(engine.active)))
         engine._write('run_failed', len(rows)*dt, failure=failure,diagnostics=failure_diagnostics)
     finally:
-        summary = trajectory_summary(rows, original, engine.summary(), failure)
+        summary = (trajectory_summary(rows, original, engine.summary(), failure) if execution is None else
+            dict(engine.summary(),completed=bool(rows and rows[-1]['t']>=original.duration and not failure),
+                 failure=failure,safety_pass=not failure,
+                 evaluation_scope='nonuniform controller observations; uniform physical audit belongs to actuator process'))
         summary['failure_diagnostics']=failure_diagnostics
-        if engine.camera_history:
+        if len(engine.camera_history)>=2:
             history=engine.camera_history
             measured_intent=IntentSpec(original,runtime['subject'],engine.intrinsics).score(
                 np.array([r['t'] for r in history]),[r['camera_position'] for r in history],
@@ -172,9 +195,21 @@ def run_case(case, output, mode='jev', api_url=None, pace=1., preview=False, bud
                 safety_source='runner_execution_checks; independent_sweep_audit_is_separate')
             attach_acceptance(summary,acceptance)
             save_json(output/'camera_history.json',history)
+        elif failure:
+            # An initial safety rejection can precede the second observation.
+            # Preserve that algorithm failure without calling a curve evaluator
+            # requiring an interval or inventing unmeasured safety evidence.
+            summary.update(elapsed_shot_s=float(locals().get('t',0.)),
+                intent_success=False,within_budget_success=False,
+                shot_acceptance=dict(status='fail',accepted=False,
+                    failed_checks=['execution_error'],unverified_checks=['insufficient_camera_samples']))
+            save_json(output/'camera_history.json',engine.camera_history)
         summary.update(combo_completion=completion,startup_planning=startup,phase_program=selected_phase_program is not None,backend='kinematic_integration', obstacle_avoidance_enabled=not disable_wbc_avoidance, wall_s=time.monotonic()-begin,
                        observation_source='synthetic_sparse_lidar_raycast', measured_physical_constraints=False,
                        camera_model='configured 384x288 pinhole, 55deg vertical FOV; no RGB observations')
+        if execution is not None:
+            summary.update(backend="physx_measured_controller",observation_source="dual_physx_sparse_lidar",
+                measured_physical_constraints=False,scope="controller audit; authoritative physical safety and acceptance in parent")
         summary['planning_obstacle_avoidance_enabled'] = engine.planning_limits.obstacle_avoidance
         summary.update(target_replay_source=None if target_replay is None else str(Path(target_replay).resolve()),
                        replayed_targets=replayed,
@@ -211,6 +246,7 @@ def main():
     parser.add_argument('--activation-lead', type=float, default=4., help='exact candidate activation lead; never rebased')
     parser.add_argument('--candidate-proposals', type=int, default=6, help='maximum local numerical proposals')
     parser.add_argument('--single-candidate', action='store_true',help='Jev chooses one construction before generation; no fallback candidates')
+    parser.add_argument('--async-control', action='store_true', help='bounded asynchronous sensing/configuration preview, independent of semantic candidate mode')
     parser.add_argument('--preplan',action='store_true',help='approve one measured-start candidate before starting the shot clock')
     parser.add_argument('--phase-program',action='store_true',help='official Jev selects screened phase geometry and timing; source task and deadlines preserved')
     parser.add_argument('--candidate-budget', type=int, default=2, help='maximum full counterfactual branches')
@@ -244,7 +280,7 @@ def main():
                               args.allocation_preview and not args.no_preview, budget, args.model, args.disable_wbc_avoidance,
                               None if args.target_replay_root is None else args.target_replay_root/f"{name}_jev",
                               planning_wbc_avoidance=args.planning_wbc_avoidance, planner_model=args.planner_model,
-                              representation_boxes=args.representation_boxes,geometry_preferences=args.geometry_preferences=='on',preplan=args.preplan,phase_program=args.phase_program)
+                              representation_boxes=args.representation_boxes,geometry_preferences=args.geometry_preferences=='on',preplan=args.preplan,phase_program=args.phase_program,async_control=args.async_control)
             results.append(dict(case=name, **result))
             save_json(args.output/'runs.json', results)
     return 0 if all(r['completed'] for r in results) else 2

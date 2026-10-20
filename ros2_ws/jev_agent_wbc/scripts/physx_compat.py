@@ -81,7 +81,10 @@ class MotorTargets:
             from jev_agent_wbc.jvs_kinematics import JOINT_LOWER, JOINT_UPPER
             # Keep float32 PhysX roundoff inside the unchanged CPU position
             # band. This guards the motor target, never the measured state.
-            padding=2e-5
+            padding=.005
+            # Additional drive-side headroom absorbs encoder/servo error and
+            # command transport age before the WBC interior reserve is spent.
+            # This tightens the stop envelope; physical limits stay unchanged.
             low=np.maximum(np.asarray(positions)-JOINT_LOWER-self.limits.position_margin-padding,0.)
             high=np.maximum(JOINT_UPPER-self.limits.position_margin-padding-np.asarray(positions),0.)
             a=self.limits.acceleration[2:]
@@ -117,7 +120,7 @@ class OrientedCollision:
         self._collision, self._tilt = collision, tilt
 
     def __getattr__(self, name):
-        return getattr(self._collision, name)
+        return getattr(object.__getattribute__(self, '_collision'), name)
 
     def at_time(self, offset):
         return OrientedCollision(self._collision.at_time(offset), self._tilt)
@@ -138,7 +141,15 @@ class OrientedSearch:
 
     def __getattr__(self, name):
         # In particular, fk stays bound to the ORIGINAL measured-tilt search.
-        return getattr(self._search, name)
+        return getattr(object.__getattribute__(self, '_search'), name)
+
+    def __copy__(self):
+        # The optimizer copies a search to build an obstacle-free allocation
+        # seed. Return an independent real search: its _lift must bind to the
+        # copy's policy/collision fields while retaining measured base tilt.
+        # Delegating _lift through a copied proxy would use the original fields.
+        from copy import copy
+        return copy(object.__getattribute__(self, '_search'))
 
 
 _original_refine = None
@@ -175,7 +186,15 @@ def physx_verify(*args, **kwargs):
     return _run_task('verify', args, kwargs)
 
 
+def install_compiled_geometry():
+    import os
+    if os.environ.get('JEV_PHYSX_COMPILED_GEOMETRY')=='1':
+        from jev_agent_wbc.compiled_geometry import install
+        install()
+
+
 def initialize_physx_worker():
+    install_compiled_geometry()
     from jev_agent_wbc.shot_preview_worker import initialize_worker
     initialize_worker()
     from jev_agent_wbc import joint_curve_optimizer
@@ -192,6 +211,7 @@ def initialize_physx_worker():
 
 
 def install_worker_adapter():
+    install_compiled_geometry()
     # Process-local binding consumed by the existing ProcessPool constructor.
     # CPU executables never import this module or change their initializer.
     import jev_agent_wbc.engine as engine

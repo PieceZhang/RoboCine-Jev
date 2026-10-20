@@ -26,6 +26,20 @@ if NUMERIC_SITE:
 import jvs_isaac_sim as backend
 
 
+def resolve_default_xacro(args):
+    """Find the installed ROS helper without importing its ABI into Isaac."""
+    import shutil
+    if args.xacro_executable!='xacro' or shutil.which('xacro') is not None:return
+    root=Path('/opt/ros')/os.environ.get('ROS_DISTRO','humble')
+    executable=root/'bin/xacro'
+    if not executable.is_file():return
+    args.xacro_executable=str(executable)
+    paths=[str(p) for pattern in ('lib/python*/site-packages','local/lib/python*/dist-packages')
+        for p in root.glob(pattern) if p.is_dir()]
+    existing=os.environ.get('JVS_XACRO_PYTHONPATH',os.environ.get('PYTHONPATH',''))
+    os.environ['JVS_XACRO_PYTHONPATH']=os.pathsep.join(filter(None,[existing,*paths]))
+
+
 def arguments():
     parser = backend.build_parser()
     parser.set_defaults(headless=True, physics_hz=100., enable_lidar=False,
@@ -38,6 +52,18 @@ def arguments():
         if action.dest == 'xacro':
             action.required = False
     parser.add_argument('--case', default='all')
+    parser.add_argument('--session-controller', action=argparse.BooleanOptionalAction, default=True,
+                        help='use measured prepared-shot / continuous-combo CPU Agent driver')
+    parser.add_argument('--startup-preplan', action=argparse.BooleanOptionalAction, default=True,
+                        help='prepare a complete initial candidate; disable to match the CPU online random-scene protocol')
+    parser.add_argument('--episode-time-limit',type=float,default=240.)
+    parser.add_argument('--recovery-timeout',type=float,default=15.)
+    parser.add_argument('--startup-planning-timeout',type=float,default=240.)
+    parser.add_argument('--fault-script',type=Path,
+                        help='explicit diagnostic controller delays/errors and LiDAR gaps; physics continues')
+    parser.add_argument('--session-command-mode',choices=['velocity','acceleration','adaptive'],default='adaptive')
+    parser.add_argument('--delay-aware-servo',action=argparse.BooleanOptionalAction,default=False,
+                        help='diagnostic measured-delay gain adaptation; physical safety gates unchanged')
     parser.add_argument('--scenarios', type=Path, default=ROOT/'scenarios')
     parser.add_argument('--mode', choices=['jev', 'strict', 'rule', 'both'], default='jev')
     parser.add_argument('--output', type=Path, required=True)
@@ -62,6 +88,13 @@ def arguments():
     parser.add_argument('--planning-timeout', type=float, default=1.)
     parser.add_argument('--startup-command-timeout', type=float, default=.20)
     parser.add_argument('--single-candidate', action='store_true')
+    parser.add_argument('--compiled-geometry',action=argparse.BooleanOptionalAction,default=False,
+                        help='optional CPU-compiled exact primitive geometry; warm before arming')
+    parser.add_argument('--profile-controller',action='store_true')
+    parser.add_argument('--guard-recovery',action=argparse.BooleanOptionalAction,default=False)
+    parser.add_argument('--certificate-recovery',action=argparse.BooleanOptionalAction,default=False)
+    parser.add_argument('--cinegym-bridge',type=Path,
+                        help='private local IPC descriptor for an external CineGym policy')
     parser.add_argument('--agent-period', type=float, default=.5)
     parser.add_argument('--activation-lead', type=float, default=.9)
     parser.add_argument('--candidate-budget', type=int, default=2)
@@ -73,6 +106,8 @@ def arguments():
     parser.add_argument('--lidar-backend',choices=['native','scalar'],default='native')
     parser.add_argument('--lidar-query-threads',type=int,choices=range(1,9),default=8)
     parser.add_argument('--lidar-processing',choices=['async','sync'],default='async')
+    parser.add_argument('--lidar-hz',type=float,default=10.,
+                        help='requested live scan rate; one in-flight map, no queued backlog')
     parser.add_argument('--lidar-pipeline',action=argparse.BooleanOptionalAction,default=True,
                         help='overlap read-only ray queries with CPU supervision; join before any physical write/render')
     parser.add_argument('--lidar-static-input',choices=['cpu_fixture','full_raycast'],default='cpu_fixture',
@@ -99,8 +134,14 @@ def arguments():
     parser.add_argument('--yaw-acceleration-reserve', type=float, default=None,
                         help='optional separate operating fraction for chassis yaw acceleration')
     args = parser.parse_args()
+    from jev_agent_wbc.runtime_fault_injection import FaultSchedule
+    FaultSchedule.load(args.fault_script)
     from jev_agent_wbc.realtime import RuntimePolicy
-    RuntimePolicy(args.command_timeout, args.sensor_timeout, args.planning_timeout, args.startup_command_timeout)
+    RuntimePolicy(args.command_timeout, args.sensor_timeout, args.planning_timeout, args.startup_command_timeout,
+                  recover_decisions=args.session_controller,recovery_timeout_s=args.recovery_timeout)
+    if any(not math.isfinite(value) or value<=0 for value in
+           (args.episode_time_limit,args.startup_planning_timeout)):
+        parser.error('episode and startup planning limits must be finite and positive')
     if args.virtual_stabilizer_ros:
         parser.error('blocking ROS stabilizer batches are incompatible with this realtime runner')
     if args.motor_targets != 'physical_slew':
@@ -108,9 +149,12 @@ def arguments():
     if (not math.isfinite(args.physics_hz) or args.physics_hz < 50
             or abs(args.physics_hz/50-round(args.physics_hz/50)) > 1e-8):
         parser.error('physics-hz must be a multiple of 50 and at least 50')
+    resolve_default_xacro(args)
     backend.validate_args(args)
     if args.physics_threads is not None and args.physics_threads < 1:
         parser.error('physics-threads must be positive')
+    if not 0 < args.lidar_hz <= 50:
+        parser.error('lidar-hz must be in (0,50]')
     if args.arm_drive_stiffness<=0 or args.wheel_drive_damping<=0:
         parser.error('physical inverse-dynamics drive requires positive stiffness and damping')
     if not 1<=args.solver_position_iterations<=255:parser.error('solver position iterations must be in [1,255]')
@@ -134,6 +178,7 @@ def run_case(args, app, name, mode, output):
     from jev_agent_wbc.reference import OriginalReference
     from jev_agent_wbc.sensors import RuntimeLidar, RAYS
     from physx_compat import install_worker_adapter, subject_from_returns, MotorTargets, configure_rolling_contacts, generalized_gravity
+    os.environ['JEV_PHYSX_COMPILED_GEOMETRY']='1' if args.compiled_geometry else '0'
     install_worker_adapter()
     from jev_agent_wbc.realtime_engine import RealtimeEngine
     from jev_agent_wbc.realtime import RuntimePolicy, realtime_assessment
@@ -148,13 +193,29 @@ def run_case(args, app, name, mode, output):
     from jev_agent_wbc.contracts import native
 
     output.mkdir(parents=True, exist_ok=False)
+    from jev_agent_wbc.runtime_fault_injection import FaultSchedule
+    fault_schedule=FaultSchedule.load(args.fault_script)
+    if args.fault_script is not None:
+        save_json(output/'fault_injection.json',dict(events=fault_schedule.events,
+            role='diagnostic perturbation; not an unperturbed performance run'))
     runtime_scene = RuntimeScene(args.scenarios/name/'runtime_scene.json')
     fixture = runtime_scene.document
     from copy import copy
     args = copy(args)
     args.spawn_x, args.spawn_y, args.spawn_yaw = fixture['initial_state'][:3]
     args.spawn_z = fixture['base_z']
-    reference = OriginalReference(args.scenarios/name/'task.json', fixture['subject']['position'])
+    source_task=json.loads((args.scenarios/name/'task.json').read_text())
+    from jev_agent_wbc.combo import gaps
+    session_combo=bool(gaps(source_task))
+    use_session=bool(args.session_controller and mode=='jev' and args.cinegym_bridge is None)
+    if session_combo and not use_session:
+        raise ValueError('combo phase gaps require --session-controller --mode jev')
+    if session_combo:
+        from jev_agent_wbc.continuous_combo import action_task
+        reference=OriginalReference(action_task(source_task,source_task['shot_phase'][0]),fixture['subject']['position'])
+    else:
+        reference = OriginalReference(source_task, fixture['subject']['position'])
+    save_json(output/'source_task.json',source_task)
     save_json(output/'original_task.json', reference.task)
     save_json(output/'runtime_scene.json', fixture)
     save_json(output/'evaluation_protocol.json', EVALUATION_PROTOCOL)
@@ -170,6 +231,7 @@ def run_case(args, app, name, mode, output):
     stabilized_pose = None
     rows, contacts, failure = [], [], ''
     prediction_snapshots = []
+    validation_failure_snapshot = None
     recording_error = ''
     physical_summary = None
     tick_times, tick_lags, tick_stages = [], [], []
@@ -238,19 +300,32 @@ def run_case(args, app, name, mode, output):
             root = UsdGeom.Xform.Define(stage, '/World/Moving/'+obj['id'])
             root.AddTranslateOp().Set(Gf.Vec3d(*obj['center']))
             UsdPhysics.RigidBodyAPI.Apply(root.GetPrim()).CreateKinematicEnabledAttr(True)
-            shape = UsdGeom.Sphere.Define(stage, str(root.GetPath())+'/Shape')
-            shape.CreateRadiusAttr(obj['radius'])
+            if obj.get('shape')=='box':
+                shape=UsdGeom.Cube.Define(stage,str(root.GetPath())+'/Shape')
+                shape.CreateSizeAttr(1.)
+                shape.AddRotateZOp().Set(float(np.rad2deg(obj.get('yaw_rad',0.))))
+                shape.AddScaleOp().Set(Gf.Vec3f(*obj['size']))
+            else:
+                shape = UsdGeom.Sphere.Define(stage, str(root.GetPath())+'/Shape')
+                shape.CreateRadiusAttr(obj['radius'])
             shape.CreateDisplayColorAttr([Gf.Vec3f(.9, .14, .035)])
             UsdPhysics.CollisionAPI.Apply(shape.GetPrim())
             # Never write USD transforms back to an active kinematic collider:
             # that can overwrite its next PhysX target. Render a separate,
             # non-colliding copy driven exclusively by measured physical poses.
             UsdGeom.Imageable(root.GetPrim()).MakeInvisible()
-            display = UsdGeom.Sphere.Define(stage, '/World/MovingDisplay/'+obj['id'])
-            display.CreateRadiusAttr(obj['radius'])
+            if obj.get('shape')=='box':
+                display=UsdGeom.Cube.Define(stage,'/World/MovingDisplay/'+obj['id'])
+                display.CreateSizeAttr(1.)
+            else:
+                display = UsdGeom.Sphere.Define(stage, '/World/MovingDisplay/'+obj['id'])
+                display.CreateRadiusAttr(obj['radius'])
             display.CreateDisplayColorAttr([Gf.Vec3f(.9, .14, .035)])
             display_ops[obj['id']] = display.AddTranslateOp()
             display_ops[obj['id']].Set(Gf.Vec3d(*obj['center']))
+            if obj.get('shape')=='box':
+                display.AddRotateZOp().Set(float(np.rad2deg(obj.get('yaw_rad',0.))))
+                display.AddScaleOp().Set(Gf.Vec3f(*obj['size']))
         for prim in stage.Traverse():
             if prim.HasAPI(UsdPhysics.RigidBodyAPI):
                 PhysxSchema.PhysxContactReportAPI.Apply(prim).CreateThresholdAttr(0.)
@@ -508,7 +583,7 @@ def run_case(args, app, name, mode, output):
                     dict(subject=acquired_subject,diagnostics=diagnostics))
                 return None
             subject_track = acquired_subject
-            snapshot = lidar.integrate(state,bp[2],stamp,returns,origins)
+            snapshot = lidar.integrate(state,bp[2],stamp,returns,origins,acquisition_duration_s=0.)
             snapshot['sensor_diagnostics'] = diagnostics
             return snapshot
 
@@ -532,11 +607,30 @@ def run_case(args, app, name, mode, output):
         save_json(output/'initial_observed_scene.json', observed)
         if args.lidar_processing == 'async':
             from jev_agent_wbc.async_lidar import AsyncLidar
-            lidar_worker = AsyncLidar(lidar)
-        engine = RealtimeEngine(reference, observed, output, mode=mode, api_url=args.api_url, model=args.model, limits=limits,
+            # All rays complete against one unchanged physical scene. This is
+            # an instantaneous acquisition, not a 1.8 s rolling scanner packet.
+            # Float32 ray hits retain physical self-filter/range uncertainty.
+            lidar_worker = AsyncLidar(lidar,acquisition_duration_s=0.)
+        session_options={}
+        if args.cinegym_bridge is not None:
+            from CineGym.bridge import controller_process as bridge_process
+            session_options=dict(worker_target=bridge_process,stream_on_fault=True,
+                worker_options=dict(bridge_descriptor=str(args.cinegym_bridge)))
+        elif use_session:
+            from jev_agent_wbc.physical_session import controller_process as session_process
+            session_options=dict(worker_target=session_process,stream_on_fault=True,
+                startup_wait_s=args.startup_planning_timeout,worker_options=dict(
+                    session_case=str(args.scenarios/name),session_combo=session_combo,session_command_mode=args.session_command_mode,
+                    startup_preplan=args.startup_preplan,
+                    fault_events=fault_schedule.events,
+                    delay_aware_servo=args.delay_aware_servo,profile_controller=args.profile_controller,
+                    initial_snapshot=dict(state=state.copy(),base_z=float(bp[2]),base_rotation=br.copy(),
+                        measured_control=measured.copy(),scene=observed)))
+        engine = RealtimeEngine(reference, observed, output, **session_options, mode=mode, api_url=args.api_url, model=args.model, limits=limits,
                                  physical_limits=physical_limits,
                                  runtime_policy=RuntimePolicy(args.command_timeout,args.sensor_timeout,
-                                     args.planning_timeout,args.startup_command_timeout),
+                                     args.planning_timeout,args.startup_command_timeout,
+                                     recover_decisions=use_session or args.cinegym_bridge is not None,recovery_timeout_s=args.recovery_timeout),
                                  subject_model=subject_data,
                                  preview=args.allocation_preview and not args.no_preview,
                                  coordination_async=args.async_coordination,
@@ -632,11 +726,16 @@ def run_case(args, app, name, mode, output):
         substeps = round(args.physics_hz*dt)
         from jev_agent_wbc.kc_svsdf import CollisionGeometry
         physical_geometry = CollisionGeometry()
+        from jev_agent_wbc.self_collision import SelfCollision
+        physical_self_collision=SelfCollision()
         current_collision = None
         previous_command = np.zeros(8)
-        end_time = reference.duration+POLICY.terminal_hold_s
+        command_brake_started = None
+        next_scan_s = 1./args.lidar_hz
+        deferred_scans = 0
+        end_time = (args.episode_time_limit if session_combo else reference.duration+POLICY.terminal_hold_s+5.) if use_session else reference.duration+POLICY.terminal_hold_s
         if args.duration_limit is not None:end_time=min(end_time,args.duration_limit)
-        for k in range(round(end_time/dt)+1):
+        for k in range(int(np.ceil(end_time/dt))+1):
             tick_started = time.monotonic()
             rays_pending = False
             ray_finish_wall = 0.
@@ -660,7 +759,15 @@ def run_case(args, app, name, mode, output):
                 except RuntimeError as error:
                     engine.trip(str(error),t)
                     lidar_failed = True
-            if k % 5 == 0 and not lidar_failed:
+            scan_due = t+1e-9 >= next_scan_s
+            for event in fault_schedule.due('lidar_gap',t):
+                engine._write('diagnostic_fault_injected',t,fault=event,physics_continues=True)
+            scan_due = scan_due and not fault_schedule.active('lidar_gap',t)
+            mapping_busy = lidar_worker is not None and lidar_worker.pending
+            if scan_due and mapping_busy:
+                deferred_scans += 1
+            if scan_due and not mapping_busy and not lidar_failed:
+                next_scan_s = max(next_scan_s+1./args.lidar_hz,t)
                 # Pre-roll already acquired t=0 after the last physical step.
                 # Startup rendering does not advance time. Reuse that exact
                 # measurement instead of blocking first dispatch on a duplicate.
@@ -707,34 +814,128 @@ def run_case(args, app, name, mode, output):
                 raise
             info['agent_camera_input']={key:engine.actual_feedback[key] for key in
                 ('camera_output_source','stamp_s','camera_position','camera_quaternion_xyzw')}
+            info['lidar_deferred_ticks'] = deferred_scans
             # A worker certificate refers to an older measurement. Recheck the
             # issued command on CURRENT geometry before it reaches the drives.
             if current_collision is None or current_collision.scene is not observed:
                 current_collision = DynamicCollision(observed, t, geometry=physical_geometry)
             else:
                 current_collision.set_time(t)
-            proof = current_collision.sweep(state, command, dt, bp[2], max_samples=33, base_rotation=br)
-            lower = float(proof['lower'].min())
-            ramp_lower = None
-            try:
-                if not np.isfinite(lower) or lower < current_collision.margin:
-                    raise RuntimeError('current_state_sweep_failed')
-                # Retain the existing interpolation gate, now anchored to the
-                # current measured velocity rather than an older worker state.
-                ramp_lower = certify_control_ramp(observed,state,measured,command,t,dt,bp[2],
-                    steps=substeps,constant_certificate=lower,base_rotation=br,collision=current_collision)
-            except RuntimeError as error:
-                engine.escalate(str(error), t)
-                command = np.zeros(8)
+            proposals=[command]
+            validation_error=None
+            ramp_lower=None
+            brake_index=None
+            recovery_index=None
+            for proposal_index,proposal in enumerate(proposals):
+                command=proposal
+                proof = current_collision.sweep(state, command, dt, bp[2], max_samples=33, base_rotation=br)
+                lower = float(proof['lower'].min())
+                try:
+                    if not np.isfinite(lower) or lower < current_collision.margin:
+                        raise RuntimeError('current_state_sweep_failed')
+                    ramp_lower = certify_control_ramp(observed,state,measured,command,t,dt,bp[2],
+                        steps=substeps,constant_certificate=lower,base_rotation=br,collision=current_collision)
+                    if ((use_session and args.session_command_mode!='velocity') or args.cinegym_bridge is not None
+                            or proposal_index==recovery_index or engine.watchdog.certificate_waiting is not None):
+                        self_lower=physical_self_collision.sweep(state,measured,command,dt)
+                        info['current_self_sweep_lower_m']=self_lower
+                        if self_lower<physical_self_collision.margin:
+                            raise RuntimeError('current_self_sweep_failed')
+                except RuntimeError as error:
+                    validation_error=error
+                    if (use_session and proposal_index==len(proposals)-1 and brake_index is None
+                            and engine.watchdog.fault is None and engine.watchdog.packet is not None):
+                        # Try an attainable deceleration endpoint, never an
+                        # instantaneous stop. It must satisfy the same current
+                        # actuator bounds and BOTH nonlinear sweep gates.
+                        braking=MotorTargets(physical_limits)
+                        braking.step(np.zeros(8),dt,measured,state[3:],wheels)
+                        bounds=engine.transport_bounds
+                        bounds.previous=measured.copy()
+                        A,lo,hi=bounds.bounds(state[3:],dt,commanded_q=state[3:])
+                        if max(np.max(lo-A@braking.control),np.max(A@braking.control-hi))<=1e-6:
+                            brake_index=len(proposals)
+                            proposals.append(braking.control.copy())
+                            info['command_validation_retry_reason']=str(error)
+                    if (args.guard_recovery and proposal_index==len(proposals)-1 and recovery_index is None
+                            and engine.watchdog.fault is None and engine.watchdog.waiting is None
+                            and engine.watchdog.sensor_waiting is None and engine.watchdog.packet is not None):
+                        from jev_agent_wbc.physical_guard import recovery_proposal
+                        try:
+                            alternative,guard_info=recovery_proposal(current_collision,state,measured,
+                                physical_limits,dt,bp[2],br)
+                        except RuntimeError as recovery_error:
+                            info['guard_recovery_rejected']=str(recovery_error)
+                        else:
+                            recovery_index=len(proposals);proposals.append(alternative)
+                            info['guard_recovery_proposal']=guard_info
+                    continue
+                validation_error=None
+                waiting=engine.watchdog.certificate_waiting
+                fresh_tracks=[track['id'] for track in observed.get('tracks',[]) if
+                    waiting is not None and track['age_s']<=engine.policy.sensor_timeout_s and
+                    float(observed['observation_stamp'])-track['age_s']>waiting['sensor_stamp']+1e-9]
+                if engine.watchdog.certificate_passed(t,time.monotonic(),float(observed['observation_stamp']),fresh_tracks):
+                    engine._write('physical_certificate_recovered',t,source_sequence=engine.watchdog.sequence,
+                        fresh_observation_required=True,all_current_sweep_gates_passed=True)
+                if proposal_index and engine.watchdog.packet is not None:
+                    engine.watchdog.packet['command']=command.copy()
+                if proposal_index==brake_index:
+                    command_brake_started=t if command_brake_started is None else command_brake_started
+                    engine.watchdog.packet.update(control_acceleration=None,guard_brake=True)
+                    info.update(command_override_source='measured_safety_brake',command_override_time_s=t,
+                        brake_interval_certified_s=dt)
+                    engine._write('command_validation_retry',t,reason=info['command_validation_retry_reason'],
+                        source_sequence=engine.watchdog.sequence,original_command_lease_preserved=True)
+                elif proposal_index==recovery_index:
+                    command_brake_started=t if command_brake_started is None else command_brake_started
+                    engine.watchdog.packet.update(control_acceleration=None,guard_brake=True)
+                    info.update(command_override_source='measured_safety_recovery',command_override_time_s=t,
+                        recovery_interval_certified_s=dt)
+                    engine._write('command_validation_recovery',t,source_sequence=engine.watchdog.sequence,
+                        original_command_lease_preserved=True,camera_task_preserved=False)
+                elif engine.watchdog.packet is not None and not engine.watchdog.packet.get('guard_brake'):
+                    command_brake_started=None
+                if command_brake_started is not None and t-command_brake_started>engine.policy.recovery_timeout_s:
+                    validation_error=RuntimeError('command_validation_recovery_exhausted')
+                break
+            if validation_error is not None:
+                if validation_failure_snapshot is None:
+                    validation_failure_snapshot=dict(t=t,dt=dt,
+                        state=state.copy(),base_z=bp[2],base_rotation=br.copy(),measured_control=measured.copy(),
+                        measured_wheels=wheels.copy(),proposals=proposals,scene=observed,
+                        reason=str(validation_error),lower_m=lower,ramp_lower_m=ramp_lower,
+                        command_source_time_s=None if engine.watchdog.packet is None else engine.watchdog.packet['t'])
+                if args.certificate_recovery and str(validation_error) in (
+                        'current_state_sweep_failed','current_self_sweep_failed',
+                        'interpolated motor command fails dynamic clearance certificate'):
+                    was_waiting=engine.watchdog.certificate_waiting is not None
+                    obstacle_indices=proof.get('obstacle_indices',np.empty(0,dtype=int))
+                    bad=np.min(proof['lower'],axis=1)<current_collision.margin if len(obstacle_indices) else []
+                    required=current_collision.track_ids[obstacle_indices][bad] if len(obstacle_indices) else []
+                    engine.watchdog.wait_for_certificate(str(validation_error),t,time.monotonic(),
+                        float(observed['observation_stamp']),required)
+                    if not was_waiting:engine._write('physical_certificate_waiting',t,
+                        reason=str(validation_error),braking_certified=False)
+                else:engine.escalate(str(validation_error),t)
+                command=np.zeros(8)
             info['command_sweep_lower_m'] = lower
             info['motor_ramp_sweep_lower_m'] = ramp_lower
             info['runtime_fault'] = engine.watchdog.fault
-            info['safety_brake'] = engine.watchdog.fault is not None
-            info['brake_collision_certified'] = False if engine.watchdog.fault else None
+            info['waiting_for_certificate'] = engine.watchdog.certificate_waiting
+            if engine.watchdog.certificate_waiting is not None:command=np.zeros(8)
+            info['safety_brake'] = engine.watchdog.fault is not None or engine.watchdog.certificate_waiting is not None
+            info['brake_collision_certified'] = False if info['safety_brake'] else None
             # This instantaneous endpoint sweep does not certify the actual
             # acceleration-limited braking path; retain measured physical audit.
             truth = DynamicCollision(runtime_scene.truth_collision(t), t, uncertainty_rate=0.,geometry=physical_geometry)
             clearance = float(truth.clearance(state, bp[2], br).min())
+            if args.cinegym_bridge is not None:
+                prior=getattr(engine,'external_evaluation',None) or {}
+                engine.external_evaluation=dict(stamp_s=t,truth_clearance_m=clearance,
+                    min_clearance_m=min(clearance,prior.get('min_clearance_m',float('inf'))),
+                    collision_samples=prior.get('collision_samples',0)+int(clearance<0.),
+                    physical_contacts=sum(c['points']>0 for c in contacts))
             info['emergency_stop_required'] = engine.watchdog.emergency_stop_required
             fk, fr, _ = whole_body_kinematics(state, bp[2], br)
             info['fk_position_error_m'] = float(np.linalg.norm(fk-cp))
@@ -776,6 +977,10 @@ def run_case(args, app, name, mode, output):
             if k % 50 == 0:
                 print(json.dumps(dict(case=name, mode=mode, t=t, clearance=clearance, contacts=len(contacts),
                     jev_calls=engine.jev.decider.client.calls, installed=engine.installed_plans)), flush=True)
+            if use_session and info.get('session_done'):
+                result=info['session_result']
+                end_time=(t if result.get('completed') else
+                    max(t,float(source_task['reference_camera_trajectory']['samples'][-1]['t'])+POLICY.terminal_hold_s))
             if t >= end_time:
                 run_end = time.monotonic()
                 break
@@ -790,7 +995,7 @@ def run_case(args, app, name, mode, output):
                 # wall time consumed by RGB capture or a stalled main callback.
                 requested_command = engine.watchdog.command(physical_t,time.monotonic(),
                     float(observed['observation_stamp']),alive=engine.process.is_alive())
-                if physical_t >= reference.duration:
+                if not use_session and physical_t >= reference.duration:
                     requested_command = np.zeros(8)
                 # Match the CPU command contract: constant endpoint velocity
                 # throughout the control interval when command_ramp is false.
@@ -836,6 +1041,8 @@ def run_case(args, app, name, mode, output):
         import traceback
         traceback.print_exc()
     finally:
+        if validation_failure_snapshot is not None:
+            save_json(output/'validation_failure_snapshot.json',validation_failure_snapshot)
         if loop_profile is not None:
             loop_profile.disable()
             loop_profile.dump_stats(str(output/'loop_profile.pstats'))
@@ -879,10 +1086,12 @@ def run_case(args, app, name, mode, output):
             summary['physical_camera_tracking']['role'] = 'primary Agent and visual evaluation input'
         contact_count = sum(c['points'] > 0 for c in contacts)
         summary.update(backend='isaac_physx', physics_hz=args.physics_hz, wall_s=time.monotonic()-begin,
+            compiled_geometry=bool(args.compiled_geometry),certificate_recovery=bool(args.certificate_recovery),
             pace=args.pace, physics_waits_for_agent=False,
             fabric_enabled=args.fabric,
             lidar_backend=args.lidar_backend,lidar_processing=args.lidar_processing,
             lidar_query_threads=args.lidar_query_threads,
+            lidar_requested_hz=args.lidar_hz,
             lidar_pipeline=args.lidar_pipeline,
             native_rays_validated=0 if native_ray is None else native_ray.validated_rays,
             physics_threads=args.physics_threads,
@@ -969,6 +1178,9 @@ def run_case(args, app, name, mode, output):
                 ticks_over_20ms=sum(x>.02 for x in tick_times),
                 max_lag_s=max(tick_lags,default=0.),
                 scope='live physics, sensors, watchdog, audit and RGB; startup/shutdown excluded')
+            if use_session:
+                from jev_agent_wbc.physical_session_audit import assess_session
+                summary=assess_session(summary,rows,source_task,subject_data,engine.intrinsics,output)
             summary['realtime']=realtime_assessment(timing,
                 None if engine.watchdog is None else engine.watchdog.fault, summary['shot_acceptance']['accepted'])
             save_json(output/'realtime_timing.json',dict(tick_wall_s=tick_times,lag_s=tick_lags,
@@ -1234,6 +1446,13 @@ def main():
     app = SimulationApp(dict(headless=args.headless, width=args.width, height=args.height,
                              renderer='RaytracedLighting', anti_aliasing=0, multi_gpu=False,
                              limit_cpu_threads=8))
+    # SimulationApp overwrites OPENBLAS_NUM_THREADS with its Kit thread limit.
+    # Spawned servo/map/planning processes must retain the CPU benchmark's
+    # single-threaded small-matrix numerics. PhysX and native ray thread counts
+    # remain independently configured above.
+    for variable in ('OPENBLAS_NUM_THREADS','OMP_NUM_THREADS','MKL_NUM_THREADS'):
+        os.environ[variable]='1'
+    exit_code = 2
     try:
         import omni.kit.app
         manager = omni.kit.app.get_app().get_extension_manager()
@@ -1248,7 +1467,7 @@ def main():
         args.output.mkdir(parents=True, exist_ok=True)
         save_json(args.output/'provenance.json', source_manifest(ROOT,
             {key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()}))
-        names = list(NAMES) if args.case == 'all' else args.case.split(',')
+        names = (list(NAMES)+sorted(p.name for p in args.scenarios.glob('combo_*') if p.is_dir())) if args.case == 'all' else args.case.split(',')
         for name in names:
             if (Path(name).name != name or name in ('.', '..') or
                     not all((args.scenarios/name/file).is_file() for file in ('task.json', 'runtime_scene.json'))):
@@ -1258,7 +1477,8 @@ def main():
             for mode in (['strict', 'jev'] if args.mode == 'both' else [args.mode]):
                 results.append(run_case(args, app, name, mode, args.output/f'{name}_{mode}'))
                 save_json(args.output/'runs.json', results)
-        return 0 if all(r['completed'] for r in results) else 2
+        exit_code = 0 if all(r.get('shot_acceptance',{}).get('accepted',False) for r in results) else 2
+        return exit_code
     except Exception as error:
         import traceback
         traceback.print_exc()
@@ -1266,7 +1486,15 @@ def main():
         (args.output/'runner_failure.json').write_text(json.dumps(dict(error=str(error), traceback=traceback.format_exc()))+'\n')
         return 2
     finally:
-        app.close()
+        # Fast Kit shutdown can terminate natively before Python returns. Give
+        # Kit the actual result before releasing the framework as well.
+        omni.kit.app.get_app().post_quit(exit_code)
+        try:
+            app.close()
+        except SystemExit:
+            # Kit's normal shutdown may call sys.exit(0); retain the actual
+            # experiment result instead of turning failed episodes into exit 0.
+            pass
 
 
 if __name__ == '__main__':

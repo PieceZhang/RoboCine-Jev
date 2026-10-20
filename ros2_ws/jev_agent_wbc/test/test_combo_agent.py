@@ -169,7 +169,7 @@ def test_combo_choices_do_not_offer_unimplemented_global_timing():
     class Client:
         def ask(self,evidence,questions):
             choices=questions['generator']['criteria']
-            assert set(choices)=={'joint_curve','joint_vertical'}
+            assert set(choices)=={'body_timing','configuration','joint_curve','joint_vertical'}
             return {'generator':{'choice':'joint_curve'}}
     decider=CandidateDecider(Client())
     decision=decider.decide(dict(stage='strategy',objective='visible_intent_completion',

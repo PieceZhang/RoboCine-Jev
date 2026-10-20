@@ -17,9 +17,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 
-def arguments():
+def arguments(argv=None):
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--robot', choices=['g1', 'go2', 'ridgeback'], required=True)
+    source = p.add_mutually_exclusive_group(required=True)
+    source.add_argument('--robot', choices=['g1', 'go2', 'ridgeback'])
+    source.add_argument('--robot-dir', type=Path, help='Robot_* folder containing robot.json and its sensor configuration.')
     p.add_argument('--output', type=Path, required=True)
     p.add_argument('--config', type=Path)
     p.add_argument('--poses', type=int, default=64, help='Sobol joint configurations, plus home and individual joint endpoints.')
@@ -28,7 +30,106 @@ def arguments():
     p.add_argument('--ray-backend', choices=['scalar', 'native'], default='native')
     p.add_argument('--camera-offset-grid', action='store_true', help='Compare finite fixed mounting offsets using housing overlaps and frustum queries.')
     p.add_argument('--only-camera', action='store_true', help='Skip LiDAR ring tests; never counts as LiDAR acceptance.')
-    return p.parse_args()
+    p.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)
+    return p.parse_args(argv)
+
+
+def mobile_profile(folder, config_override=None):
+    """Resolve a standalone profile without importing Isaac or starting Kit."""
+    from jev_agent_wbc.robot_sensor_rig import load_config
+    folder = Path(folder).resolve()
+    profile = json.loads((folder/'robot.json').read_text())
+    config = Path(config_override).resolve() if config_override else folder/profile['sensors']
+    spec, config_hash = load_config(profile['robot_key'], config)
+    if not 1 <= len(spec['lidars']) <= 2:
+        raise ValueError('a mobile robot must have one main LiDAR and at most one auxiliary LiDAR')
+    acquisition_keys = ('horizontal_samples', 'elevation_deg', 'min_range_m', 'max_range_m')
+    first = {key: spec['lidars'][0][key] for key in acquisition_keys}
+    if any({key: lidar[key] for key in acquisition_keys} != first for lidar in spec['lidars'][1:]):
+        raise ValueError('all LiDAR acquisition parameters on the same robot must match')
+    asset = (folder/profile['usd']).resolve()
+    return profile, spec, config.resolve(), asset, config_hash
+
+
+def mobile_posture_targets(profile, names, limits, initial, pose_count, seed, skip_endpoints=False):
+    """Use physical joint bounds, including torso translation in metres."""
+    import numpy as np
+    from scipy.stats import qmc
+    if pose_count < 0:
+        raise ValueError('pose count must be nonnegative')
+    configured = profile['joints']
+    indices = [names.index(item['name']) for item in configured]
+    if not indices or len(set(indices)) != len(indices):
+        raise ValueError('coverage requires unique configured arm/torso joints')
+    physical_limits = np.asarray(limits, dtype=float)
+    bounds = physical_limits[indices]
+    if not np.isfinite(bounds).all() or np.any(bounds[:, 1] <= bounds[:, 0]):
+        raise ValueError('coverage requires finite nonempty physical joint limits')
+    home = np.asarray(initial, dtype=float).copy()
+    for name, value in profile.get('passive_joint_positions', {}).items():
+        index = names.index(name)
+        if not physical_limits[index, 0] <= value <= physical_limits[index, 1]:
+            raise ValueError(f'passive home for {name} lies outside the physical limits')
+        home[index] = value
+    for item, index, (lo, hi) in zip(configured, indices, bounds):
+        if not lo <= item['home'] <= hi:
+            raise ValueError(f"home for {item['name']} lies outside the physical limits")
+        home[index] = item['home']
+    lower, upper = bounds.T
+    targets = [('home', home.copy())]
+    if not skip_endpoints:
+        for index, lo, hi in zip(indices, lower, upper):
+            for label, value in [('low', lo), ('high', hi)]:
+                target = home.copy(); target[index] = value
+                targets.append((names[index]+'_'+label, target))
+    if pose_count:
+        samples = qmc.Sobol(len(indices), scramble=True, seed=seed).random_base2(int(np.ceil(np.log2(pose_count))))[:pose_count]
+        for number, values in enumerate(lower+(upper-lower)*samples):
+            target = home.copy(); target[indices] = values
+            targets.append((f'sobol_{number:03d}', target))
+    return home, indices, lower, upper, targets
+
+
+def sampled_acceptance(summary):
+    """A diagnostic or missing ring scan can never pass sensor acceptance."""
+    return bool(summary['posture_count'] and not summary['diagnostic_prefix']
+                and summary['lidar_ring_test_executed']
+                and summary['original_revolute_joint_limits_unchanged']
+                and summary.get('original_prismatic_joint_limits_unchanged', True)
+                and summary['camera_gpu_render_verified']
+                and summary['camera_all_sampled_views_clear']
+                and summary['camera_all_sampled_housings_clear']
+                and summary['lidar_origin_overlap_pose_count'] == 0
+                and summary['lidar_all_test_targets_detected']
+                and summary.get('posture_tracking_pass', True))
+
+
+def saved_acceptance_status(output, child_status):
+    """Kit exit 0 alone is insufficient evidence of a completed GPU audit."""
+    output = Path(output)
+    try:
+        summary = json.loads((output/'summary.json').read_text())
+    except (OSError, ValueError):
+        return 2
+    return 0 if (child_status == 0 and summary.get('complete')
+                 and summary.get('sampled_sensor_acceptance_pass')
+                 and not (output/'error.txt').exists()) else 2
+
+
+def fixed_chain_allowed_pairs(neighbours, fixed_neighbours):
+    """Rigid assemblies may contain arbitrarily many explicit fixed links."""
+    components = {}
+    for owner in neighbours:
+        connected, pending = set(), [owner]
+        while pending:
+            body = pending.pop()
+            if body not in connected:
+                connected.add(body)
+                pending.extend(fixed_neighbours[body]-connected)
+        components[owner] = connected
+    return {owner: set.union(*(components[adjacent] for body in connected
+                               for adjacent in neighbours[body]))
+            for owner, connected in components.items()}
 
 
 def main():
@@ -36,9 +137,32 @@ def main():
     if a.poses < 0:
         raise ValueError('--poses must be nonnegative')
     a.output = a.output.resolve()
+    if a.robot_dir and not a.worker:
+        # A parent outside Kit verifies completion even if Kit exits Python 0
+        # during an exception or rendering shutdown.
+        import subprocess
+        if a.output.exists():
+            raise FileExistsError(a.output)
+        child = subprocess.run([sys.executable, str(Path(__file__).resolve()), *sys.argv[1:], '--worker'])
+        return saved_acceptance_status(a.output, child.returncode)
+    if a.robot_dir:
+        profile, spec, config, asset, config_hash = mobile_profile(a.robot_dir, a.config)
+        a.robot = profile['robot_key']
+        a.config = config
+        a.robot_dir = a.robot_dir.resolve()
+        a.mobile_profile = profile, spec, asset, config_hash
+        a.asset_source = asset.read_bytes()
+        a.profile_source = (a.robot_dir/'robot.json').read_bytes()
     a.output.mkdir(parents=True, exist_ok=False)
     (a.output/'validator_source.py').write_bytes(Path(__file__).read_bytes())
-    (a.output/'arguments.json').write_text(json.dumps(vars(a), indent=2, default=str)+'\n')
+    recorded_arguments = {key: value for key, value in vars(a).items()
+                          if key not in ('mobile_profile', 'asset_source', 'profile_source')}
+    (a.output/'arguments.json').write_text(json.dumps(recorded_arguments, indent=2, default=str)+'\n')
+    if a.robot_dir:
+        (a.output/'robot_profile.json').write_bytes(a.profile_source)
+        (a.output/'sensor_config.json').write_bytes(a.config.read_bytes())
+        (a.output/'asset_entry_source.usd').write_bytes(a.asset_source)
+        a.config = a.output/'sensor_config.json'
     os.environ.setdefault('OMNI_KIT_ACCEPT_EULA', 'YES')
     os.environ.setdefault('ACCEPT_EULA', 'Y')
     from isaacsim import SimulationApp
@@ -74,25 +198,39 @@ def run(a, app):
     world = World(physics_dt=.01, rendering_dt=.01, stage_units_in_meters=1.)
     stage = world.stage
     root = '/World/Robot'
-    spec, config_hash = load_config(a.robot, a.config)
-    asset = (ROOT/spec['asset']).resolve()
+    profile = None
+    if a.robot_dir:
+        profile, spec, asset, config_hash = a.mobile_profile
+        if asset.read_bytes() != a.asset_source:
+            raise RuntimeError('robot asset entry changed during simulator startup; use an immutable model path')
+    else:
+        spec, config_hash = load_config(a.robot, a.config)
+        asset = (ROOT/spec['asset']).resolve()
     add_reference_to_stage(str(asset), root)
     body_prims = [p for p in Usd.PrimRange(stage.GetPrimAtPath(root)) if p.HasAPI(UsdPhysics.RigidBodyAPI)]
     body_paths = [p.GetPath() for p in body_prims]
     body_path_set = set(map(str, body_paths))
     neighbours = {str(path): {str(path)} for path in body_paths}
-    original_joint_limits = {}
+    fixed_neighbours = {path: {path} for path in neighbours}
+    original_joint_limits, original_prismatic_limits = {}, {}
     for p in Usd.PrimRange(stage.GetPrimAtPath(root)):
         if p.IsA(UsdPhysics.Joint):
             j = UsdPhysics.Joint(p)
             ends = [str(t) for rel in (j.GetBody0Rel(), j.GetBody1Rel()) for t in rel.GetTargets()]
             if len(ends) == 2 and all(e in neighbours for e in ends):
                 neighbours[ends[0]].add(ends[1]); neighbours[ends[1]].add(ends[0])
+                if p.IsA(UsdPhysics.FixedJoint):
+                    fixed_neighbours[ends[0]].add(ends[1]); fixed_neighbours[ends[1]].add(ends[0])
         if p.IsA(UsdPhysics.RevoluteJoint):
             j = UsdPhysics.RevoluteJoint(p)
             original_joint_limits[str(p.GetPath())] = [j.GetLowerLimitAttr().Get(), j.GetUpperLimitAttr().Get()]
+        elif p.IsA(UsdPhysics.PrismaticJoint):
+            j = UsdPhysics.PrismaticJoint(p)
+            original_prismatic_limits[str(p.GetPath())] = [j.GetLowerLimitAttr().Get(), j.GetUpperLimitAttr().Get()]
     # Adjacent links and short fixed joint chains can overlap by construction.
     allowed_pairs = {key: set.union(*(neighbours[v] for v in values)) for key, values in neighbours.items()}
+    if profile:
+        allowed_pairs = fixed_chain_allowed_pairs(neighbours, fixed_neighbours)
     colliders = []
     for p in Usd.PrimRange(stage.GetPrimAtPath(root), Usd.TraverseInstanceProxies()):
         if p.HasAPI(UsdPhysics.CollisionAPI) and UsdPhysics.CollisionAPI(p).GetCollisionEnabledAttr().Get():
@@ -100,18 +238,31 @@ def run(a, app):
             while parent and str(parent.GetPath()) not in body_path_set:
                 parent = parent.GetParent()
             if parent:
-                colliders.append((p.GetPath(), str(parent.GetPath())))
+                geometry = ([p] if p.IsA(UsdGeom.Gprim) else
+                            [child for child in Usd.PrimRange(p, Usd.TraverseInstanceProxies()) if child.IsA(UsdGeom.Gprim)])
+                if not profile:
+                    geometry = [p]
+                if not geometry:
+                    raise ValueError(f'collision container has no queryable geometry: {p.GetPath()}')
+                colliders.extend((child.GetPath(), str(parent.GetPath())) for child in geometry)
+    colliders = list(dict.fromkeys(colliders))
     for p in body_prims:
         PhysxSchema.PhysxRigidBodyAPI.Apply(p).CreateDisableGravityAttr(True)
     anchor = None
-    base_name = {'g1': 'pelvis', 'go2': 'base', 'ridgeback': 'base_link'}[a.robot]
-    height = {'g1': .80, 'go2': .45, 'ridgeback': 0.}[a.robot]
-    if a.robot != 'ridgeback':
+    base_name = profile['base_link'] if profile else {'g1': 'pelvis', 'go2': 'base', 'ridgeback': 'base_link'}[a.robot]
+    height = profile.get('coverage_base_height_m', 0.) if profile else {'g1': .80, 'go2': .45, 'ridgeback': 0.}[a.robot]
+    fixture_base_position = np.array([0., 0., height])
+    if profile or a.robot != 'ridgeback':
         set_usd_transform(stage.GetPrimAtPath(root), transform([0., 0., height], np.eye(3)))
         anchor = UsdPhysics.FixedJoint.Define(stage, '/World/FixtureAnchor')
-        anchor.CreateBody1Rel().SetTargets([root+'/'+base_name])
-        anchor.CreateLocalPos0Attr(Gf.Vec3f(0., 0., height))
-        anchor.CreateLocalRot0Attr(Gf.Quatf(1.))
+        base_prim = next(p for p in body_prims if p.GetName() == base_name)
+        base_matrix = (np.asarray(UsdGeom.XformCache().GetLocalToWorldTransform(base_prim)).T if profile
+                       else transform([0., 0., height], np.eye(3)))
+        fixture_base_position = base_matrix[:3, 3].copy()
+        base_quat = Rotation.from_matrix(base_matrix[:3, :3]).as_quat()
+        anchor.CreateBody1Rel().SetTargets([base_prim.GetPath()])
+        anchor.CreateLocalPos0Attr(Gf.Vec3f(*map(float, fixture_base_position)))
+        anchor.CreateLocalRot0Attr(Gf.Quatf(float(base_quat[3]), Gf.Vec3f(*map(float, base_quat[:3]))))
         anchor.CreateLocalPos1Attr(Gf.Vec3f(0.))
         anchor.CreateLocalRot1Attr(Gf.Quatf(1.))
     else:
@@ -129,8 +280,12 @@ def run(a, app):
     joint_limits_unchanged = all([UsdPhysics.RevoluteJoint(stage.GetPrimAtPath(path)).GetLowerLimitAttr().Get(),
                                   UsdPhysics.RevoluteJoint(stage.GetPrimAtPath(path)).GetUpperLimitAttr().Get()] == limits
                                  for path, limits in original_joint_limits.items())
+    prismatic_limits_unchanged = all([UsdPhysics.PrismaticJoint(stage.GetPrimAtPath(path)).GetLowerLimitAttr().Get(),
+                                     UsdPhysics.PrismaticJoint(stage.GetPrimAtPath(path)).GetUpperLimitAttr().Get()] == limits
+                                    for path, limits in original_prismatic_limits.items())
     (a.output/'sensor_mounts.json').write_text(json.dumps(rig.manifest(), indent=2)+'\n')
-    robot = world.scene.add(SingleArticulation(prim_path=root, name='robot'))
+    articulation_path = root+'/'+profile.get('articulation_root', '').strip('/') if profile else root
+    robot = world.scene.add(SingleArticulation(prim_path=articulation_path.rstrip('/'), name='robot'))
     bodies = {}
     for name in rig.parent_names | {base_name}:
         p = next(p for p in body_prims if p.GetName() == name)
@@ -146,10 +301,17 @@ def run(a, app):
         set_usd_transform(cube.GetPrim(), transform([100.+i, 0., 0.], np.eye(3)))
         probes.append(cube)
     world.reset()
+    root_from_base = None
+    if profile:
+        measured_root = pose_transform(*robot.get_world_pose())
+        measured_base = pose_transform(*bodies[base_name].get_world_pose())
+        root_from_base = np.linalg.inv(measured_root) @ measured_base
     names = robot.dof_names
     limits = np.asarray(robot._articulation_view.get_dof_limits())[0]
     home = np.asarray(robot.get_joint_positions()).copy()
     for i, name in enumerate(names):
+        if profile:
+            continue
         if a.robot == 'g1':
             for token, value in [('hip_pitch', -.312), ('knee', .669), ('ankle_pitch', -.363), ('elbow', .6)]:
                 if token in name:
@@ -165,26 +327,35 @@ def run(a, app):
             home[i] = dict(zip(['ur_arm_shoulder_pan_joint', 'ur_arm_shoulder_lift_joint', 'ur_arm_elbow_joint',
                                'ur_arm_wrist_1_joint', 'ur_arm_wrist_2_joint', 'ur_arm_wrist_3_joint'],
                               [0., -1.1, 1.6, -.5, np.pi/2, 0.]))[name]
-    if a.robot == 'g1':
+    if profile:
+        home, indices, lower, upper, targets = mobile_posture_targets(
+            profile, names, limits, home, a.poses, a.seed, a.skip_endpoints)
+    elif a.robot == 'g1':
         indices = [i for i, n in enumerate(names) if any(s in n for s in ('shoulder', 'elbow', 'wrist', 'waist'))]
     elif a.robot == 'go2':
         indices = [names.index('joint'+str(i)) for i in range(1, 7)]
     else:
         indices = [i for i, n in enumerate(names) if n.startswith('ur_arm_')]
-    lower = np.maximum(limits[indices, 0], -2*np.pi)+.02
-    upper = np.minimum(limits[indices, 1], 2*np.pi)-.02
-    home = np.clip(home, limits[:, 0]+.001, limits[:, 1]-.001)
-    targets = [('home', home.copy())]
-    for i, lo, hi in ([] if a.skip_endpoints else zip(indices, lower, upper)):
-        for label, value in [('low', lo), ('high', hi)]:
-            q = home.copy(); q[i] = value
-            targets.append((names[i]+'_'+label, q))
-    if a.poses:
-        samples = qmc.Sobol(len(indices), scramble=True, seed=a.seed).random_base2(int(np.ceil(np.log2(a.poses))))[:a.poses]
-        for k, values in enumerate(lower+(upper-lower)*samples):
-            q = home.copy(); q[indices] = values
-            targets.append((f'sobol_{k:03d}', q))
-    robot._articulation_view.set_gains(kps=np.full((1, len(names)), 1000.), kds=np.full((1, len(names)), 60.))
+    if not profile:
+        lower = np.maximum(limits[indices, 0], -2*np.pi)+.02
+        upper = np.minimum(limits[indices, 1], 2*np.pi)-.02
+        home = np.clip(home, limits[:, 0]+.001, limits[:, 1]-.001)
+        targets = [('home', home.copy())]
+        for i, lo, hi in ([] if a.skip_endpoints else zip(indices, lower, upper)):
+            for label, value in [('low', lo), ('high', hi)]:
+                q = home.copy(); q[i] = value
+                targets.append((names[i]+'_'+label, q))
+        if a.poses:
+            samples = qmc.Sobol(len(indices), scramble=True, seed=a.seed).random_base2(int(np.ceil(np.log2(a.poses))))[:a.poses]
+            for k, values in enumerate(lower+(upper-lower)*samples):
+                q = home.copy(); q[indices] = values
+                targets.append((f'sobol_{k:03d}', q))
+    kps, kds = np.full((1, len(names)), 1000.), np.full((1, len(names)), 60.)
+    if profile:
+        for item in profile['joints']:
+            kps[0, names.index(item['name'])] = item['kp']
+            kds[0, names.index(item['name'])] = item['kd']
+    robot._articulation_view.set_gains(kps=kps, kds=kds)
     controller = robot.get_articulation_controller()
     query = get_physx_scene_query_interface()
     native_batch = None
@@ -210,7 +381,10 @@ def run(a, app):
         distances, elevations = ([.12, .16, .20], [.08, .11, .14]) if a.robot == 'g1' else ([0., .025, .05, .075], [-.06, 0., .06, .12])
         if a.robot == 'ridgeback':
             distances, elevations = [0., .04, .08], [-.06, 0., .06]
-        offset_scores = [dict(translation_m=(forward*d+up*u+right*r).tolist(), housing_overlap_poses=0,
+        centre = np.asarray(rig.camera_spec['translation_m']) if profile else np.zeros(3)
+        if profile:
+            distances, elevations = [-.04, 0., .04], [-.04, 0., .04]
+        offset_scores = [dict(translation_m=(centre+forward*d+up*u+right*r).tolist(), housing_overlap_poses=0,
                               self_view_poses=0, self_ray_fraction_sum=0., any_failure_poses=0)
                          for d in distances for u in elevations for r in [-.04, 0., .04]]
         half_width = np.tan(np.deg2rad(rig.camera_spec['horizontal_fov_deg'])/2)
@@ -261,7 +435,13 @@ def run(a, app):
             if anchor is not None:
                 quat = Rotation.from_euler('xyz', tilt).as_quat()
                 anchor.GetLocalRot0Attr().Set(Gf.Quatf(float(quat[3]), Gf.Vec3f(*map(float, quat[:3]))))
-                robot.set_world_pose(np.array([0., 0., height]), quat[[3, 0, 1, 2]])
+                if profile:
+                    desired_base = transform(fixture_base_position, Rotation.from_quat(quat).as_matrix())
+                    desired_root = desired_base @ np.linalg.inv(root_from_base)
+                    root_quat = Rotation.from_matrix(desired_root[:3, :3]).as_quat()
+                    robot.set_world_pose(desired_root[:3, 3], root_quat[[3, 0, 1, 2]])
+                else:
+                    robot.set_world_pose(fixture_base_position.copy(), quat[[3, 0, 1, 2]])
             else:
                 target = target.copy()
                 target[names.index('dummy_base_revolute_z_joint')] = tilt[2]
@@ -279,6 +459,8 @@ def run(a, app):
             labels = np.asarray(segmentation['data'])
             if not pixels.size or not labels.size:
                 raise RuntimeError('empty RGB or segmentation: rendering is not verified')
+            # Replicator reports labels that actually contribute pixels. A
+            # correctly clear view can therefore contain no 'robot' entry.
             mask = np.isin(labels, ids)
             image = frames/f'{number:03d}_{label}.png'
             Image.fromarray(pixels).save(image)
@@ -298,6 +480,15 @@ def run(a, app):
                           camera_self_occlusion_fraction=float(mask.mean()),
                           camera_centre_self_occluded=bool(mask[h//2-8:h//2+8, w//2-8:w//2+8].any()),
                           camera_housing_other_body_overlaps=overlaps, rgb=str(image.relative_to(a.output)))
+            if profile:
+                error = np.abs(np.asarray(robot.get_joint_positions())-target)
+                prismatic_names = {stage.GetPrimAtPath(path).GetName() for path in original_prismatic_limits}
+                angular = [i for i in indices if names[i] not in prismatic_names]
+                linear = [i for i in indices if names[i] in prismatic_names]
+                record['max_joint_state_error_rad'] = float(np.max(error[angular], initial=0.))
+                record['max_joint_state_error_m'] = float(np.max(error[linear], initial=0.))
+                record['posture_tracking_pass'] = bool(record['max_joint_state_error_rad'] <= .02
+                                                       and record['max_joint_state_error_m'] <= .002)
             record['lidar_origin_robot_overlaps'] = lidar_overlaps
             record['robot_nonadjacent_body_overlaps'] = self_collisions()
             record['self_mask'] = str(mask_path.relative_to(a.output))
@@ -327,6 +518,12 @@ def run(a, app):
                     score['self_view_poses'] += int(fractions[index] > 0.)
                     score['self_ray_fraction_sum'] += float(fractions[index])
                     score['any_failure_poses'] += int(collides or fractions[index] > 0.)
+                    if profile and not record['robot_nonadjacent_body_overlaps']:
+                        score['feasible_posture_count'] = score.get('feasible_posture_count', 0)+1
+                        score['feasible_housing_overlap_poses'] = score.get('feasible_housing_overlap_poses', 0)+int(collides)
+                        score['feasible_self_view_poses'] = score.get('feasible_self_view_poses', 0)+int(fractions[index] > 0.)
+                        score['feasible_self_ray_fraction_sum'] = score.get('feasible_self_ray_fraction_sum', 0.)+float(fractions[index])
+                        score['feasible_any_failure_poses'] = score.get('feasible_any_failure_poses', 0)+int(collides or fractions[index] > 0.)
             rows.append(record)
             for radius in ([] if a.only_camera else [.7, 1.5]):
                 for z in [.06, .20, .50, .90, 1.35]:
@@ -399,9 +596,10 @@ def run(a, app):
         elapsed = time.monotonic()-started
         feasible_rows = [r for r in rows if not r['robot_nonadjacent_body_overlaps']]
         summary = dict(robot=a.robot, protocol='actual_rtx_physx_sampled_sensor_coverage/v1',
-                       asset=str(asset), asset_sha256=hashlib.sha256(asset.read_bytes()).hexdigest(), config_sha256=config_hash,
+                       asset=str(asset), asset_sha256=hashlib.sha256(a.asset_source if profile else asset.read_bytes()).hexdigest(), config_sha256=config_hash,
                        posture_count=len(rows), sampled_joints=[names[i] for i in indices], joint_names=names,
                        original_revolute_joint_limits_unchanged=joint_limits_unchanged,
+                       original_prismatic_joint_limits_unchanged=prismatic_limits_unchanged,
                        original_robot_collision_shapes_checked=len(colliders),
                        original_robot_self_overlap_pose_count=len(rows)-len(feasible_rows),
                        no_nonadjacent_overlap_pose_count=len(feasible_rows),
@@ -417,7 +615,7 @@ def run(a, app):
                        lidar_all_test_targets_detected=bool(detection_rows) and all(not r['missing'] for r in detection_rows),
                        camera_all_sampled_views_clear=all(r['camera_self_occlusion_fraction']==0 for r in rows),
                        camera_all_sampled_housings_clear=all(not r['camera_housing_other_body_overlaps'] for r in rows),
-                       diagnostic_prefix=a.skip_endpoints,
+                       diagnostic_prefix=a.skip_endpoints or bool(profile and a.poses < 64),
                        lidar_ring_test_executed=not a.only_camera,
                        ray_backend=a.ray_backend, native_rays_validated_against_scalar=validated_native_rays,
                        query_max_range_m=4.5 if native_batch is not None else max(l['spec']['max_range_m'] for l in rig.lidars),
@@ -425,15 +623,31 @@ def run(a, app):
                        payload_mass_and_bracket_verified=False, simulation_seconds=steps*.01, wall_seconds=elapsed,
                        pace_requested=1, realtime_ratio=steps*.01/elapsed,
                        scope='Anchored gravity-free finite posture queries with actual RTX images and actual PhysX rays. Pose placement is not a locomotion trajectory. Camera housing is a 64x48x44 mm query proxy; no payload mass or cable model.')
+        if profile:
+            prismatic_names = {stage.GetPrimAtPath(path).GetName() for path in original_prismatic_limits}
+            summary['sampled_joint_units'] = ['m' if names[i] in prismatic_names else 'rad' for i in indices]
+            summary['sampled_joint_lower'] = summary.pop('sampled_joint_lower_rad')
+            summary['sampled_joint_upper'] = summary.pop('sampled_joint_upper_rad')
+            summary['profile_sha256'] = hashlib.sha256(a.profile_source).hexdigest()
+            summary['complete'] = True
+            summary['posture_tracking_pass'] = all(r['posture_tracking_pass'] for r in rows)
+            summary['sampled_sensor_acceptance_pass'] = sampled_acceptance(summary)
+            summary['full_posture_coverage_pass'] = False
+            summary['sufficient_for_collision_avoidance_verified'] = False
         (a.output/'summary.json').write_text(json.dumps(summary, indent=2)+'\n')
         if offset_scores:
-            ordered = sorted(offset_scores, key=lambda s: (s['any_failure_poses'], s['housing_overlap_poses'], s['self_ray_fraction_sum']))
+            ordered = sorted(offset_scores, key=lambda s: (s.get('feasible_any_failure_poses', s['any_failure_poses']),
+                                                           s.get('feasible_housing_overlap_poses', s['housing_overlap_poses']),
+                                                           s.get('feasible_self_ray_fraction_sum', s['self_ray_fraction_sum'])))
             (a.output/'camera_mount_search.json').write_text(json.dumps(dict(postures=len(rows), rays_per_view=len(optical_rays),
                 scope='Finite collision-proxy/frustum search; chosen offset still requires actual RGB and continuous clearance validation.',
                 candidates=ordered), indent=2)+'\n')
-        stage.GetRootLayer().Export(str(a.output/'tested_scene.usda'))
+        if profile:
+            stage.Flatten().Export(str(a.output/'tested_scene.usda'))
+        else:
+            stage.GetRootLayer().Export(str(a.output/'tested_scene.usda'))
         print('SUMMARY', json.dumps(summary), flush=True)
-        return 0
+        return 0 if not profile or summary['sampled_sensor_acceptance_pass'] else 2
     finally:
         if native_batch is not None:
             native_batch.close()

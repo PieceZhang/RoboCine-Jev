@@ -541,10 +541,31 @@ class CandidateDecider:
                 allowed=evidence['construction'].get('allowed_directions')
                 families={k:v for k,v in FAMILIES.items()
                           if allowed is None or set(options(k))&set(allowed)}
+                if evidence['construction'].get('measured_initial_boundary'):
+                    # These generators require an already executing path. Never
+                    # offer a startup choice that generate() cannot construct.
+                    families={k:v for k,v in families.items()
+                              if k not in ('body_timing','configuration')}
                 if evidence['construction'].get('combo_fixed_phase_clock'):
                     families={k:('Preserve every ordered action and transition at its authored time. '
                         'Jointly construct one continuous piecewise camera/body trajectory; '+v)
-                        for k,v in families.items() if k in ('joint_curve','joint_vertical')}
+                        for k,v in families.items() if k in ('body_timing','configuration','joint_curve','joint_vertical')}
+                if evidence['construction'].get('bundle_construction'):
+                    # Bind generator AND seed before numerical generation.
+                    # Exact-candidate approval and all safety gates still follow.
+                    plans = {family+'__'+direction: plan for family in families
+                             for direction, plan in options(family,
+                                 combo=bool(evidence['construction'].get('combo_fixed_phase_clock'))).items()
+                             if allowed is None or direction in allowed}
+                    descriptions = {key: families[plan['family']]+' Seed: '+plan['direction']+
+                                    '; amplitude '+str(plan['amplitude_m'])+' m.'
+                                    for key, plan in plans.items()}
+                    answer = self.client.ask(evidence, {'construction': choice(
+                        'Select one complete generator and spatial seed using current measured motion. '
+                        'This binds exactly one candidate; it does not authorize execution.', descriptions)})
+                    plan = plans[answer['construction']['choice']]
+                    return dict(stage=stage, strategy=plan['family'], search_config=plan['search_config'],
+                                construction_plan=plan, single_candidate=True, bundled_construction=True)
                 answer=self.client.ask(evidence,{'generator':choice(
                     'Select the ONE generator and displacement plane that should construct the executable repair.',families)})
                 return dict(stage=stage,strategy=answer['generator']['choice'],single_candidate=True)

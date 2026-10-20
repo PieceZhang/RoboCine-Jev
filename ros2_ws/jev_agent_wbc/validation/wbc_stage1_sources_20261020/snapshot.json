@@ -1,0 +1,10 @@
+{
+  "WBC_INTEGRATION.md": "dfb453d65f11f85d26678adff392c5452703e915ca6a188ffc8147cd623dbc87",
+  "ROBOT_DEPLOYMENT.json": "bc05c2850aea8617f5cbe8bd374cab13b556b6f62107b3bff442e6a52b7859eb",
+  "ROBOT_DEPLOYMENT.md": "9cf92ea6818bac3f29cf7fe179df193cf0273cd0cf5e6332a1aadb865b3fe829",
+  "jev_agent_wbc/wbc_protocol.py": "c6a3ac2d12e1e2585298ad0ba2156d93b336a84ce4333caa385b1921ea2433be",
+  "jev_agent_wbc/wbc_evidence.py": "8bef7e6515da88c44da21431f1fec2d4760637fc9067869e6ef5267a8abf23a0",
+  "scripts/check_wbc_readiness.py": "736c3ad9c5c93c2a686aed15e8dd7bbd0efd0f60b6037c57fd3e6fee6de37e84",
+  "scripts/wbc_task_gateway.py": "65d915a67b48d209da64082f5e421110c3ad449fef3ec56b9ccba8c496d9e422",
+  "scripts/audit_legged_camera_probe.py": "50635a2908c512f354379e80be66aa691bcdf0462b5af2b3497523ef1d875b52"
+}

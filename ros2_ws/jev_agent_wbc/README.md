@@ -1,5 +1,13 @@
 # Jev 相机意图规划与独立执行层
 
+## CineGym 随机场景与 PhysX 调试（2026-10-20）
+
+[CineGym 使用说明](CineGym/README.md) 包含受限速度/加速度的随机动态球体、不同高度和宽度的落地箱体，以及独立 CPU 可行路径见证。随机测试只使用单运镜或两个运镜的组合，难度为 easy / medium；生成标签和几何可行见证不能替代在线成功率。
+
+本轮使用官方 TypeSafe `jev-1.14.0`，先运行 CPU 闭环，再进行 PhysX 闭环，保持 `pace=1`、100 Hz 物理、50 Hz 控制和原始物理相机。冻结的原始版、仅工程改进版、Agent 加工程改进版使用同一批 40 个随机场景和同一审计器；完整验收、运行至结束、物理安全及物理循环时延分别统计。结果见 [PhysX 报告](results/cinegym_physx_iteration_20261020_0211/report.txt)，不将局部避障恢复或停止后无接触称为任务成功。
+
+改进分为 [Agent 方法候选与工程优化两类](results/cinegym_physx_iteration_20261020_0211/IMPROVEMENTS.txt)。稀疏动态占用、实测执行状态驱动的时序重规划和证据约束的异步决策恢复是候选方法，尚需独立消融才能支持论文贡献；CPU 几何加速、PhysX 接口、执行等待/故障处理和评测修复作为工程优化。可选的 `--compiled-geometry --certificate-recovery` 使用方法见 CineGym 的 PhysX 章节。
+
 ## Combo CPU 接入与闭环测试（2026-10-18）
 
 CPU `runner --mode jev` 现在可直接接收 `combo_01_easy` 至 `combo_06_hard`
@@ -547,7 +555,7 @@ OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 OMNI_KIT_ACCEPT_EULA=YES \
   /usr/bin/python3 ros2_ws/jev_agent_wbc/scripts/jvs_isaac_bootstrap.py \
   --isaac-python /home/w84384651/miniconda3/envs/env_isaaclab/bin/python \
   --runner ros2_ws/jev_agent_wbc/scripts/run_isaac.py -- \
-  --case orbit --mode both --physics-hz 100 --camera-output execution --pace 1 --record --output /tmp/jev_physx_new
+  --case orbit --mode both --physics-hz 200 --camera-output execution --pace 1 --record --output /tmp/jev_physx_new
 
 # Isaac 退出后独立离线评分，包括中止运行的已执行前缀
 /home/w84384651/miniconda3/envs/sam2/bin/python \
@@ -760,3 +768,43 @@ OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /usr/bin/python3 \
 ```
 
 六个衔接夹具之间会重置状态，单个衔接内部不重置。实测边界重放保留前一段实际终态、速度、最近观测历史及对应障碍物时间偏移，但依然属于独立边界测试，不能冒充从 combo 起点连续运行到终点。API 仍使用官方 `https://api.typesafe.ai/v1/systemone` 和 `jev-1.14.0`，密钥只从本地文件加载。
+
+
+### PhysX 连续任务与恢复接口
+
+`run_isaac.py --mode jev` 默认启用 `--session-controller`。单动作复用 CPU 的
+准备后执行流程；组合动作复用 `continuous_combo`，保留作者任务中的阶段和空隙，
+以安全的自由构型衔接执行下一阶段。该接口只接受 PhysX 实测状态和物理时钟，
+不会把 CPU 积分状态当作物理观测。组合过程中不重置机器人、障碍物或传感器历史。
+启动准备在物理执行计时前完成，单独受 `--startup-planning-timeout` 约束；启动
+时间不能计入“实时执行通过”的证据。
+
+执行保持 100 Hz 物理、50 Hz 监督、原始相机反馈和 `pace=1`。无录制测试不产生
+RGB 开销。Isaac 启动后恢复数值库的单线程环境，避免 Kit 的线程设置传给控制、
+建图和数值规划子进程；`controller_numeric_runtime` 保存实际数值库线程数。
+LiDAR 保留完整双扫描范围和原建图算法，只允许一帧在途。上一帧忙时延后下一次
+采集，不排队积压；时间戳始终为采集时刻。`--lidar-hz` 默认为原有的 10 Hz。
+
+决策超过 1 秒会记录等待状态，保留正在计算的结果和已安装轨迹；最长等待由
+`--recovery-timeout` 控制，默认 15 秒。可恢复计算/API 错误最多重试三次。
+初始准备按输入摘要保存已完成阶段，选择接口失败时可复用同一候选；输入改变或
+候选验证失败会使生成该候选的策略与构造断点一并失效，并携带拒绝原因重新决策；
+不会反复锁定同一个失败策略。替换候选失败不自动废弃仍在执行、逐步通过
+安全验证的现有轨迹。
+
+命令仍在 100 ms 后过期，观测仍在 200 ms 后过期，超时请求制动。恢复必须来自
+新的、有序的命令；观测超时还要求命令绑定新的有效观测。不会延长旧命令或旧
+观测的有效期。碰撞、无法通过当前状态安全验证以及恢复期限耗尽仍会锁存故障。
+任务截止时若实测速度无法瞬间归零，可请求满足原物理约束的制动；镜头截止时间
+和终帧验收不延长。零命令本身不代表移动障碍场景中的安全证明。
+当前状态下的命令验证失败时，先尝试实际执行器可达的制动端点，仍须通过同样的
+执行器、整机扫掠和自碰撞验证；制动也无法获得证书才锁存故障。恢复不刷新原命令
+租期，连续制动重试也受恢复时限约束。
+
+未配置 `xacro` 路径的普通终端会自动查找对应 ROS 安装。ROS Python 路径仅传给
+模型展开子进程，避免把 ROS 的 Python 依赖混入 Isaac 运行环境。
+
+结果以父进程记录的每个物理采样点验收，涵盖控制器等待期间，不能用稀疏的
+控制器历史替代。`shot_acceptance`、`safety_pass`、`realtime.timing_pass` 和
+`realtime.success` 分别报告；组合任务要求全部主镜头通过，衔接阶段另受安全检查。
+详细试验源码快照、参数和结果保存在 `results/physx_recovery_20261019/`。

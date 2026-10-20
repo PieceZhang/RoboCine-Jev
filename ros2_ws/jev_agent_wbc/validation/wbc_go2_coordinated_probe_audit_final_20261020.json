@@ -1,0 +1,56 @@
+{
+  "schema": "legged_camera_probe_independent_audit/v1",
+  "source_directory": "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/results/wbc_camera_coordinated_01",
+  "audit_passed": true,
+  "errors": [],
+  "physical_samples": 300,
+  "camera_samples": 151,
+  "sample_scope": "G1 all active camera samples; Go2 existing declared t>=3s evaluation window",
+  "position_rmse_m": 0.330636466597141,
+  "orientation_rmse_rad": 0.06077246073716298,
+  "tracking_thresholds": {
+    "position_rmse_m": 0.05,
+    "orientation_rmse_rad": 0.15
+  },
+  "local_tracking_pass": false,
+  "general_continuous_tracking_verified": false,
+  "avoidance_verified": false,
+  "measured_motion": {
+    "base_displacement_world_m": [
+      0.5492179840803146,
+      0.2010737955570221,
+      0.003085196018218994
+    ],
+    "base_translation_span_m": 0.5852714788110762,
+    "upper_joint_span_norm_rad": 1.337925307247497,
+    "coordinated_motion_observed": true,
+    "interpretation": "observed motion only; contact and collision safety are separate"
+  },
+  "target_semantics": "held target actually issued for the preceding control interval",
+  "decoded_images": [
+    {
+      "file": "camera_rgb.png",
+      "size": [
+        640,
+        480
+      ],
+      "mode": "RGBA",
+      "sha256": "46d41612e5f3d0793146fc47aebf24aaa713839a6b00f1238d65a595b6a91652"
+    },
+    {
+      "file": "camera_direction_probe.png",
+      "size": [
+        640,
+        480
+      ],
+      "mode": "RGBA",
+      "sha256": "d845411fbf090e4a3918e34007f6e9c841a66389cdbd8ac2eaadf4bbcddec9bd"
+    }
+  ],
+  "input_sha256": {
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/results/wbc_camera_coordinated_01/summary.json": "758c1dbb06a4777940e4a90e383e16f76dc7a607209c5113c7a0852930e5cc82",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/results/wbc_camera_coordinated_01/measurements.jsonl": "a85186381c49eecada266b784cc5a4eade58d65669937fff636ec6e291366937",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/scripts/audit_legged_camera_probe.py": "50635a2908c512f354379e80be66aa691bcdf0462b5af2b3497523ef1d875b52"
+  },
+  "audit_source_snapshot": "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/validation/wbc_go2_coordinated_probe_audit_final_20261020_source.py"
+}

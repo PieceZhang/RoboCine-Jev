@@ -239,6 +239,17 @@ def synthetic_view(run, t, overview=False, reference=False):
         uv,z=project(face,eye,rotation,width=image_width)
         if np.all(z>.02): d.polygon([tuple(v) for v in uv],fill=color,outline='#284d78')
     for obj in run.runtime.obstacles(t):
+        if obj.get('shape','sphere')=='box':
+            from itertools import product
+            from jev_agent_wbc.runtime_obstacles import box_rotation
+            corners=np.array(list(product((-1.,1.),repeat=3)))*np.asarray(obj['size'])/2
+            corners=corners@box_rotation(obj).T+obj['center']
+            indices=((0,1,3,2),(4,6,7,5),(0,4,5,1),(2,3,7,6),(0,2,6,4),(1,5,7,3))
+            faces=[corners[list(ids)] for ids in indices]
+            for face in sorted(faces,key=lambda x:-np.linalg.norm(x.mean(axis=0)-eye)):
+                uv,z=project(face,eye,rotation,width=image_width)
+                if np.all(z>.02):d.polygon([tuple(v) for v in uv],fill='#9e7952',outline='#dfbb7d')
+            continue
         c=np.asarray(obj['center']); uv,z=project([c],eye,rotation,width=image_width)
         if z[0]>.1:
             rad=300*.5/np.tan(np.deg2rad(27.5))*obj['radius']/z[0]; x,y=uv[0]

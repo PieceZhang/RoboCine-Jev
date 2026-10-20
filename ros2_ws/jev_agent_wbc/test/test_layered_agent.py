@@ -107,10 +107,9 @@ def test_unconfirmed_objects_keep_height_evidence_without_claiming_motion():
     assert 'keyframes' not in json.dumps(snapshot['object_observations'])
 
 
-def test_barrier_policy_distinguishes_body_and_motion_without_changing_margin():
+def test_barrier_policy_brakes_movers_early_without_changing_margin():
     collision=observed(.16);gains=barrier_gains(collision,np.array([0]))
-    assert np.all(gains[:,collision.geometry.shape_bodies==0]==12.)
-    assert np.all(gains[:,collision.geometry.shape_bodies!=0]==6.)
+    np.testing.assert_array_equal(gains,np.where(collision.geometry.shape_bodies[None,:]==0,12.,6.))
     assert np.all(barrier_gains(observed(.16,.01),np.array([0]))==2.)
     assert collision.margin==.025
 
@@ -271,9 +270,12 @@ def test_first_motion_vote_is_only_a_hint_and_does_not_move_collision_map():
     mapping=DynamicLidarMap(voxel_size=.035);mapping.stamp=1.
     center=np.array([1.,0.,.8]);extent=np.full(3,.12)
     mapping.tracks[4]=dict(moving=False,stamp=1.,points=np.array([center]),
-        center=center,velocity=np.array([-.08,0.,0.]),extent=extent,sphere=dict(radius=.12),motion_votes=1)
+        center=center,velocity=np.array([-.08,0.,0.]),extent=extent,
+        sphere=dict(radius=.12,residual_m=0.),motion_votes=1)
     snapshot=mapping.snapshot();obj=snapshot['object_observations'][0]
-    assert snapshot['tracks']==[] and not obj['moving_confirmed']
+    assert len(snapshot['tracks'])==1 and not obj['moving_confirmed']
+    assert not snapshot['tracks'][0]['moving_confirmed']
+    np.testing.assert_allclose(snapshot['tracks'][0]['center'],center)
     np.testing.assert_array_equal(obj['velocity'],0.)
     assert obj['motion_hint']['confirmed'] is False
     np.testing.assert_allclose(obj['motion_hint']['velocity_estimate'],[-.08,0.,0.])

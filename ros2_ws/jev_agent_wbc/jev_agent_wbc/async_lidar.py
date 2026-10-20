@@ -10,7 +10,12 @@ from queue import Empty, Full
 import time
 
 
-def _worker(inbox,outbox,lidar):
+def _worker(inbox,outbox,lidar,integration_options):
+    # This worker is bounded to one finite physical episode. Avoid a cyclic-GC
+    # scan of the accumulated map in the middle of a sensor lease.
+    import gc
+    gc.collect()
+    gc.disable()
     outbox.put(pickle.dumps(dict(ready=True)))
     while True:
         item=inbox.get()
@@ -18,7 +23,7 @@ def _worker(inbox,outbox,lidar):
         state,base_z,stamp,returns,origins,extra=pickle.loads(item)
         started=time.monotonic()
         try:
-            snapshot=lidar.integrate(state,base_z,stamp,returns,origins)
+            snapshot=lidar.integrate(state,base_z,stamp,returns,origins,**integration_options)
             outbox.put(pickle.dumps(dict(snapshot=snapshot,extra=extra,
                 integration_wall_s=time.monotonic()-started),protocol=pickle.HIGHEST_PROTOCOL))
         except Exception as error:
@@ -27,10 +32,10 @@ def _worker(inbox,outbox,lidar):
 
 
 class AsyncLidar:
-    def __init__(self,lidar):
+    def __init__(self,lidar,**integration_options):
         ctx=mp.get_context('spawn')
         self.inbox,self.outbox=ctx.Queue(1),ctx.Queue(1)
-        self.process=ctx.Process(target=_worker,args=(self.inbox,self.outbox,lidar),name='physx-lidar-mapping')
+        self.process=ctx.Process(target=_worker,args=(self.inbox,self.outbox,lidar,dict(integration_options)),name='physx-lidar-mapping')
         self.pending=False;self.closed=False;self.last_stamp=float('-inf')
         self.process.start()
         try:

@@ -20,6 +20,7 @@ from .shot_preview_worker import initialize_worker
 from .whole_body_qp import Limits, whole_body_kinematics
 from .safety import solve_with_certificate
 from .kinematic_feasibility import POLICY as KINEMATIC_POLICY
+from .phase_checkpoint import evaluate_phase as evaluate_phase_checkpoint
 
 
 def geometry_feedback_snapshot(guidance,box_budget,state,t,base_z,base_rotation):
@@ -68,6 +69,11 @@ class CinematicEngine:
         self.planner_model = planner_model
         self.runtime_policy = runtime_policy
         self.runtime_fault = None
+        self.runtime_delays = set()
+        self.runtime_retries = 0
+        self.runtime_recovery_started = None
+        self.last_execution_certificate = None
+        self.runtime_retry_after = -float('inf')
         self.math_started_wall = None
         self.subject_model = subject_model
         from .representation_jvs import JVSGeometryBackend
@@ -178,16 +184,112 @@ class CinematicEngine:
         self.math_started_wall = time.monotonic()
         self.math_future = self.pool.submit(function, *args, **kwargs)
 
+    def _refresh_verification(self, result, error, scene, state, t, base_z, commanded_q):
+        """Retry one stale proof against fresh sensors, preserving approval/path.
+
+        Never rebase activation or extend a lease. The new worker runs the
+        complete verifier and its result still passes installation_guard.
+        """
+        refreshable={'latest_verification_expired',
+            'camera_left_verified_state_neighborhood',
+            'configuration_left_verified_kinematic_neighborhood'}
+        if error not in refreshable or self.runtime_policy is None or not self.runtime_policy.recover_decisions:
+            return False
+        candidate=result['candidate'];approval=result['approval']
+        attempts=getattr(self,'verification_refreshes',{})
+        if (attempts.get(candidate.id,0)>=1 or self.math_future is not None
+                or candidate.path.activation_s-t<=.2
+                or path_hash(self.active)!=approval.parent_id
+                or not 0<=t-float(scene['observation_stamp'])<=self.runtime_policy.sensor_timeout_s):
+            return False
+        attempts[candidate.id]=attempts.get(candidate.id,0)+1
+        self.verification_refreshes=attempts
+        self._submit_math('verify',verify_candidate,candidate,approval,self.original,
+            scene,np.asarray(state).copy(),self.wbc.previous.copy(),t,base_z,self.planning_limits,
+            evidence=self.perception.snapshot(t),intrinsics=self.intrinsics,budget=self.budget,
+            commanded_q=None if commanded_q is None else np.asarray(commanded_q).copy())
+        self._write('verification_refreshed',t,candidate_id=candidate.id,reason=error,
+            attempt=attempts[candidate.id],activation_s=candidate.path.activation_s,
+            approval_reused=True,full_verification_required=True)
+        return True
+
+    def _phase_recovery_checkpoint(self,t):
+        recovery=getattr(self,'runtime_recovery_started',None)
+        if recovery is None or not self.runtime_policy.recover_decisions:return False
+        phases=getattr(getattr(self,'original',None),'task',{}).get('shot_phase',[])
+        if len(phases)<2:return False
+        certificate=getattr(self,'last_execution_certificate',None)
+        observation=getattr(self,'geometry_scene',None)
+        if (certificate is None or observation is None
+                or not 0<=t-certificate['time_s']<=self.runtime_policy.sensor_timeout_s
+                or not 0<=t-float(observation['observation_stamp'])<=self.runtime_policy.sensor_timeout_s
+                or certificate['clearance_m']<self.wbc.collision.margin
+                or certificate['self_clearance_m']<self.wbc.self_collision.margin):return False
+        from .camera_intent import POLICY
+        checked=getattr(self,'recovery_checkpoint_phases',set())
+        pending=getattr(self,'recovery_checkpoint_pending',None)
+        if pending is not None:
+            if not pending['future'].done():return False
+            self.recovery_checkpoint_pending=None
+            index=pending['index'];checked.add(index);self.recovery_checkpoint_phases=checked
+            if pending['episode_start']!=recovery['time_s']:return False
+            try:result=pending['future'].result()
+            except Exception as error:
+                self._write('decision_checkpoint_unverified',t,index=index,reason=str(error))
+                return False
+            if result is None:return False
+            self._write('decision_phase_checkpoint',t,index=index,phase_end_s=phases[index]['end_s'],
+                accepted=bool(result['accepted']),failed_checks=result['failed_checks'],
+                scope='provisional observed-camera phase checkpoint; final physical whole-shot audit unchanged')
+            if result['accepted']:
+                self.runtime_recovery_started=None;self.runtime_retries=0
+                # Pending API/worker deadlines, physical latches, original task
+                # deadlines and approval bindings remain in force.
+                return True
+        for index,phase in enumerate(phases[:-1]):
+            boundary=phase['end_s']+POLICY.terminal_hold_s
+            if index in checked or t<boundary or boundary<recovery['time_s']:continue
+            # Reuse the existing bounded numerical worker. At most one phase
+            # audit is queued; no camera-shape work blocks the measured servo.
+            history=[row for row in self.camera_history if row['t']<=boundary+1e-8]
+            try:
+                future=self.pool.submit(evaluate_phase_checkpoint,self.original,phase,history,self.subject_model,
+                    self.intrinsics,self.runtime_policy.sensor_timeout_s)
+            except Exception as error:
+                checked.add(index);self.recovery_checkpoint_phases=checked
+                self._write('decision_checkpoint_unverified',t,index=index,reason=str(error))
+                return False
+            self.recovery_checkpoint_pending=dict(future=future,index=index,episode_start=recovery['time_s'])
+            self._write('decision_phase_checkpoint_submitted',t,index=index,physics_waits=False)
+            break
+        return False
+
     def _runtime_deadline(self, t):
         if self.runtime_policy is None or self.runtime_fault is not None:
             return
         now = time.monotonic()
+        recovery=getattr(self,'runtime_recovery_started',None)
+        if recovery is not None and max(t-recovery['time_s'],now-recovery['wall_s'])>self.runtime_policy.recovery_timeout_s:
+            self.runtime_fault=dict(reason='decision_recovery_exhausted',time_s=t,
+                elapsed_wall_s=now-recovery['wall_s'])
+            self.pending_candidates.clear()
+            self._write('runtime_fault_latched',t,reason='decision_recovery_exhausted',
+                action='bounded recovery expired; brake and require a new session')
+            return
+        if recovery is not None:self._phase_recovery_checkpoint(t)
         stages = [('planning_pipeline_timeout', self.pipeline_started_wall),
                   ('planning_'+self.math_kind+'_timeout',
                    self.math_started_wall if self.math_future is not None else None),
                   ('semantic_timeout', self.jev.submitted_wall if self.jev.future is not None else None)]
         for reason, started in stages:
             if started is not None and now-started > self.runtime_policy.planning_timeout_s:
+                if self.runtime_policy.recover_decisions and now-started <= self.runtime_policy.recovery_timeout_s:
+                    key=(reason,started)
+                    if key not in self.runtime_delays:
+                        self.runtime_delays.add(key)
+                        self._write('decision_waiting',t,reason=reason,elapsed_wall_s=now-started,
+                            action='continue certified execution; retain pending result for fresh verification')
+                    continue
                 self.runtime_fault = dict(reason=reason, time_s=t, elapsed_wall_s=now-started)
                 self._write('runtime_fault_latched', t, **{k:v for k,v in self.runtime_fault.items() if k!='time_s'},
                             action='brake; discard late results; explicit rearm required')
@@ -197,6 +299,30 @@ class CinematicEngine:
 
     def _runtime_failure(self, reason, t):
         if self.runtime_policy is not None and self.runtime_fault is None:
+            if self.runtime_policy.recover_decisions and getattr(self,'runtime_recovery_started',None) is None:
+                self.runtime_recovery_started=dict(time_s=t,wall_s=time.monotonic(),reason=reason)
+            if self.runtime_policy.recover_decisions and self.runtime_retries < self.runtime_policy.max_retries:
+                self.runtime_retries += 1
+                self._write('decision_retry',t,reason=reason,attempt=self.runtime_retries,
+                    action='preserve active trajectory; rebuild from latest observation')
+                return
+            certificate=getattr(self,'last_execution_certificate',None)
+            observation=getattr(self,'geometry_scene',None)
+            fresh_execution=(certificate is not None and observation is not None
+                and 0<=t-certificate['time_s']<=self.runtime_policy.sensor_timeout_s
+                and 0<=t-float(observation['observation_stamp'])<=self.runtime_policy.sensor_timeout_s
+                and certificate['clearance_m']>=self.wbc.collision.margin
+                and certificate['self_clearance_m']>=self.wbc.self_collision.margin)
+            if self.runtime_policy.recover_decisions and fresh_execution:
+                # Failure to construct a replacement is not a revocation of
+                # the last executable objective, including the authored path.
+                # Continuation is provisional: THIS step must again pass all
+                # WBC gates, and physical execution rechecks the current state.
+                self.runtime_retry_after=t+2.
+                self._write('decision_retry_budget_exhausted',t,reason=reason,
+                    action='retain objective under fresh execution certificates; bounded recovery cooldown',
+                    original_objective=self.active is self.original,certificate=certificate)
+                return
             self.runtime_fault = dict(reason=reason, time_s=t)
             self.pending_candidates.clear()
             self._write('runtime_fault_latched', t, reason=reason,
@@ -224,8 +350,9 @@ class CinematicEngine:
             from .directed_search import construction_evidence
             construction=construction_evidence(self.original,self.active,self.geometry_scene,t,t+self.budget.activation_lead_s,
                 mount_height_m=None if geometry is None else geometry['world_from_mount']['translation_m'][2])
+            construction['bundle_construction'] = True
         return dict(planner_model=self.planner_model, actual_robot_feedback=self.actual_feedback,construction=construction,
-            bundle_search_choices=bool(getattr(self.wbc,'body_aware',False)),
+            bundle_search_choices=True,
             robot_geometry=geometry,
             camera_task=TaskContext(self.original.sha256,t,self.original.duration,
                 earliest_change,self.report.get('kinematics',{}).get('first_failure_s'),
@@ -387,7 +514,7 @@ class CinematicEngine:
                 self._write('math_failure', t, kind=kind,
                             checks=result.get('checks'), visual_checks=result.get('visual_checks'),
                             common_prefix=result.get('common_prefix'),
-                            kinematics=result.get('kinematics'),kinematic_prior=result.get('kinematic_prior'),
+                            kinematics=result.get('kinematics'),construction_diagnostics=result.get('construction_diagnostics'),kinematic_prior=result.get('kinematic_prior'),
                             untested_proposals=result.get('untested_proposals'),search_exhausted=result.get('search_exhausted'),
                             evaluations=result.get('evaluations'))
             elif kind == 'diagnose':
@@ -475,9 +602,10 @@ class CinematicEngine:
                 error = error or support_violation(result['approval'], self.perception.snapshot(t))
                 if error:
                     self.rejected_stale += 1
-                    self._feedback(error, t)
+                    refreshed=self._refresh_verification(result,error,scene,state,t,base_z,commanded_q)
+                    if not refreshed:self._feedback(error, t)
                     self._write('installation_rejected', t, error=error,
-                                diagnostics=result.get('installation_diagnostics'))
+                                diagnostics=result.get('installation_diagnostics'),fresh_verification_pending=refreshed)
                 else:
                     candidate = result['candidate']
                     self.active = candidate.path
@@ -492,6 +620,8 @@ class CinematicEngine:
                     self.wbc.guide_costs.clear()
                     self.last_install_s = t
                     self.installed_plans += 1
+                    self.runtime_retries=0
+                    self.runtime_recovery_started=None
                     self.pending_feedback.clear()
                     latency = time.monotonic()-self.pipeline_started_wall
                     self.pipeline_latencies.append(latency)
@@ -514,6 +644,9 @@ class CinematicEngine:
             return
         semantic = self.jev.poll()
         if semantic is not None:
+            if semantic.get('stage') == 'strategy' and semantic.get('bundled_construction'):
+                self._write('search_strategy', t, **semantic)
+                semantic = dict(semantic, stage='configuration')
             if 'error' in semantic:
                 self._runtime_failure('semantic_failure: '+str(semantic['error']), t)
                 self._feedback('semantic: '+semantic['error'], t)
@@ -568,7 +701,7 @@ class CinematicEngine:
                         evidence=self.perception.snapshot(t), intrinsics=self.intrinsics, budget=self.budget,
                         commanded_q=None if commanded_q is None else np.asarray(commanded_q).copy())
                 self.pending_candidates = {}
-        if (self.runtime_fault is None and self.math_future is None and self.jev.future is None and
+        if (self.runtime_fault is None and t>=self.runtime_retry_after and self.math_future is None and self.jev.future is None and
                 t-max(self.last_report_s, self.last_attempt_s) >= self.cooldown and
                 self.original.duration-t > self.budget.activation_lead_s+.8):
             self._submit_math('diagnose', diagnose_bounded, self.original, scene, np.asarray(state).copy(),
@@ -605,6 +738,9 @@ class CinematicEngine:
                         safety_guaranteed=False,command_published=False)
             raise
         solved_wall=time.monotonic()
+        self.last_execution_certificate=dict(time_s=t,
+            clearance_m=float(info.get('command_sweep_lower_m',-float('inf'))),
+            self_clearance_m=float(info.get('self_clearance_lower_m',-float('inf'))))
         guide = getattr(self.wbc,'geometry_guidance',None)
         if self.geometry_feedback_future is not None and self.geometry_feedback_future.done():
             future,self.geometry_feedback_future=self.geometry_feedback_future,None

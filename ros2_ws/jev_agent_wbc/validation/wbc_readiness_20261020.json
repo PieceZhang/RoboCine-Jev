@@ -1,0 +1,972 @@
+{
+  "schema": "jev_wbc_readiness_audit/v1",
+  "created_utc": "2026-10-20T06:24:40.475798+00:00",
+  "audit_complete": true,
+  "audit_errors": [],
+  "robots": [
+    {
+      "robot": "G1",
+      "directory": "Robot_G1",
+      "audit_errors": [],
+      "historical_motion_evidence": {
+        "path": "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/results/acceptance_01/summary.json",
+        "sha256_expected": "a57a418580b7492f1e5f4a0d91b777e95bc3890ab55be3b33f11067153d71ba1",
+        "sha256_actual": "a57a418580b7492f1e5f4a0d91b777e95bc3890ab55be3b33f11067153d71ba1",
+        "scope": "historical_controller_only_not_recommended_backend_acceptance"
+      },
+      "gates": {
+        "backend_runtime_ready": true,
+        "continuous_camera_tracking_verified": false,
+        "environment_constraints_verified": false,
+        "representation_ingress_verified": false,
+        "sensors_avoidance_verified": false
+      },
+      "evidence_files": {
+        "wbc_backend.py": {
+          "expected": "63ba7a87cfe074f9dd2f7ce037172109a4015c1d50f5f4122a336f1dcbc8abd4",
+          "actual": "63ba7a87cfe074f9dd2f7ce037172109a4015c1d50f5f4122a336f1dcbc8abd4"
+        },
+        "scripts/validate_pink_wbc.py": {
+          "expected": "8ee740ed290826858b12d5bae91144231275c403097483c370c845a66755f6e2",
+          "actual": "8ee740ed290826858b12d5bae91144231275c403097483c370c845a66755f6e2"
+        },
+        "scripts/preflight_wbc.py": {
+          "expected": "9c9230066b3c01c24daf04bb185a2aabe69cee9c9b51a67be03d33d7bf03c749",
+          "actual": "9c9230066b3c01c24daf04bb185a2aabe69cee9c9b51a67be03d33d7bf03c749"
+        },
+        "run_wbc.sh": {
+          "expected": "b8fbf53264c33d9f4eaf147cbe0b59bc29a8d08d4974d4f6497fe7c3f76d822e",
+          "actual": "b8fbf53264c33d9f4eaf147cbe0b59bc29a8d08d4974d4f6497fe7c3f76d822e"
+        },
+        "config/height_policy_io.yaml": {
+          "expected": "52266ad2706498c5e1d4265eee2ba9a06895ef9baaadb1c3b4ffb7f76563d518",
+          "actual": "52266ad2706498c5e1d4265eee2ba9a06895ef9baaadb1c3b4ffb7f76563d518"
+        },
+        "kinematics/g1_29dof.urdf": {
+          "expected": "e1dc89366bf96aa33ba4ef211884f6d81320ddd2ac6f8b1ad82986e64008be31",
+          "actual": "e1dc89366bf96aa33ba4ef211884f6d81320ddd2ac6f8b1ad82986e64008be31"
+        },
+        "kinematics/SOURCE.json": {
+          "expected": "aa77d95e88f33b720b2a04f4a07d6747782143b3e7acd491fa9f270af0ae2716",
+          "actual": "aa77d95e88f33b720b2a04f4a07d6747782143b3e7acd491fa9f270af0ae2716"
+        },
+        "kinematics/LICENSE": {
+          "expected": "84aac59fd3246e3ddc49d1387644e8fcf43b0def4f0b9fe687f372e90446df2d",
+          "actual": "84aac59fd3246e3ddc49d1387644e8fcf43b0def4f0b9fe687f372e90446df2d"
+        },
+        "policies/unitree_g1_velocity_height_recurrent_student.pt": {
+          "expected": "a0151975a757a33f0f5ed236d5616e2a98643abe2b36e50ac9ad01b6dd1f6d7e",
+          "actual": "a0151975a757a33f0f5ed236d5616e2a98643abe2b36e50ac9ad01b6dd1f6d7e"
+        },
+        "results/wbc_cpu_preflight_01.json": {
+          "expected": "6b8e2ebcc15afa01ed7417ab73b916c1a75856d76deb082e55370607bac5591b",
+          "actual": "6b8e2ebcc15afa01ed7417ab73b916c1a75856d76deb082e55370607bac5591b"
+        },
+        "results/wbc_pink_forward_01/summary.json": {
+          "expected": "63b22fe7e9a4bb4ae45f85ecce442e9034eaa1ffefa73c90f959768b6b790619",
+          "actual": "63b22fe7e9a4bb4ae45f85ecce442e9034eaa1ffefa73c90f959768b6b790619"
+        },
+        "results/wbc_pink_forward_01/measured.jsonl": {
+          "expected": "a516a3e3f20e587a811a5cca1816a9b22de2f014befb5f76c1bb3810217de4d9",
+          "actual": "a516a3e3f20e587a811a5cca1816a9b22de2f014befb5f76c1bb3810217de4d9"
+        },
+        "results/wbc_pink_forward_01/provenance.json": {
+          "expected": "87bf2d1fe284d451b3e4c123b15488defda79f561178b0a273942c7bcb35cbb0",
+          "actual": "87bf2d1fe284d451b3e4c123b15488defda79f561178b0a273942c7bcb35cbb0"
+        },
+        "results/wbc_pink_forward_01/sensor_mounts.json": {
+          "expected": "96b3e8c72c5212a65b753c0e8b9373509ad3a7d7bbb35bd310557935826bc292",
+          "actual": "96b3e8c72c5212a65b753c0e8b9373509ad3a7d7bbb35bd310557935826bc292"
+        },
+        "results/wbc_pink_forward_01/camera_render_check.json": {
+          "expected": "8d0233b375c87983d312632f64aebc5f1d992a76e1aefb31278f1d7ad6aa05e1",
+          "actual": "8d0233b375c87983d312632f64aebc5f1d992a76e1aefb31278f1d7ad6aa05e1"
+        },
+        "results/wbc_pink_forward_01/camera_rgb.png": {
+          "expected": "f74aefdc96e3fb09d796d2179eaffb62439844afa789c8c087537f49cc7d65e6",
+          "actual": "f74aefdc96e3fb09d796d2179eaffb62439844afa789c8c087537f49cc7d65e6"
+        },
+        "results/wbc_pink_forward_01/camera_direction_probe.png": {
+          "expected": "85fc3f48cd6ff99bb80132fceb2232d84b19179f81a12d56fa67b53cdd933e00",
+          "actual": "85fc3f48cd6ff99bb80132fceb2232d84b19179f81a12d56fa67b53cdd933e00"
+        },
+        "results/wbc_pink_forward_01/sources/wbc_backend.py": {
+          "expected": "63ba7a87cfe074f9dd2f7ce037172109a4015c1d50f5f4122a336f1dcbc8abd4",
+          "actual": "63ba7a87cfe074f9dd2f7ce037172109a4015c1d50f5f4122a336f1dcbc8abd4"
+        },
+        "results/wbc_pink_forward_01/sources/validate_pink_wbc.py": {
+          "expected": "8ee740ed290826858b12d5bae91144231275c403097483c370c845a66755f6e2",
+          "actual": "8ee740ed290826858b12d5bae91144231275c403097483c370c845a66755f6e2"
+        },
+        "results/wbc_pink_forward_01/sources/robot_sensor_rig.py": {
+          "expected": "cd4a54be61841758dd1d597c2a5c764387dff7d2d778a754625cd3a9088f2588",
+          "actual": "cd4a54be61841758dd1d597c2a5c764387dff7d2d778a754625cd3a9088f2588"
+        },
+        "results/wbc_pink_smoke_02/summary.json": {
+          "expected": "81191eb42058707f3d2c11e145ef55201ca0e406c696ed74382c692e65349d73",
+          "actual": "81191eb42058707f3d2c11e145ef55201ca0e406c696ed74382c692e65349d73"
+        },
+        "results/wbc_pink_smoke_03/summary.json": {
+          "expected": "432d79264fe1654f104e00936bd29af8f043c5f18a4ed1b8266ebfb5965fd763",
+          "actual": "432d79264fe1654f104e00936bd29af8f043c5f18a4ed1b8266ebfb5965fd763"
+        },
+        "../jev_agent_wbc/robot_sensor_rig.py": {
+          "expected": "cd4a54be61841758dd1d597c2a5c764387dff7d2d778a754625cd3a9088f2588",
+          "actual": "cd4a54be61841758dd1d597c2a5c764387dff7d2d778a754625cd3a9088f2588"
+        },
+        "../config/robot_sensor_mounts.json": {
+          "expected": "053c532bfcbfab8b5ac6f0b309383fd48e85502c822e045ea326ce0ac0f961dc",
+          "actual": "053c532bfcbfab8b5ac6f0b309383fd48e85502c822e045ea326ce0ac0f961dc"
+        },
+        "../test/test_wbc_legged_backends.py": {
+          "expected": "871b9a5099b1044b51fe45e22c41f28dc3f23cbdae3bb81bff219a05ace49d08",
+          "actual": "871b9a5099b1044b51fe45e22c41f28dc3f23cbdae3bb81bff219a05ace49d08"
+        },
+        "../validation/wbc_g1_camera_probe_audit_20261020.json": {
+          "expected": "411ba2a6fbbf7ee37ca2999594e7e3166140849855706b645d2f44ab503658f0",
+          "actual": "411ba2a6fbbf7ee37ca2999594e7e3166140849855706b645d2f44ab503658f0"
+        },
+        "WBC.md": {
+          "expected": "b9d68d8f6e95bfa5d3b24d89f99aa7822a0122f58e27a674fc098c3bc0e4114c",
+          "actual": "b9d68d8f6e95bfa5d3b24d89f99aa7822a0122f58e27a674fc098c3bc0e4114c"
+        },
+        "upstream/WBC-AGILE/agile/rl_env/assets/robots/unitree_g1.py": {
+          "expected": "1a5f162caf6f15f89012d62692f86c87dac34cf7196bf91601198277880eac54",
+          "actual": "1a5f162caf6f15f89012d62692f86c87dac34cf7196bf91601198277880eac54"
+        },
+        "README.md": {
+          "expected": "0abd3d381774493a2b6df152fc51ab3c6a87ecd719f939c5aac2ad8e5acf0e69",
+          "actual": "0abd3d381774493a2b6df152fc51ab3c6a87ecd719f939c5aac2ad8e5acf0e69"
+        }
+      },
+      "recommended_backend": "AGILE velocity-height recurrent student + genuine isolated Pink upper-body FrameTask",
+      "blockers": [
+        "New height locomotion not fully validated in all directions or over changing-height tasks; commanded vx .05 produced only ~.0379m active forward displacement",
+        "Only local 1cm/.02rad world-camera tasks tested; no continuous full-workspace or all-posture certification",
+        "Pink has joint/velocity/command limits but no environment collision, selfcollision/contact or terrain constraints",
+        "Public TimedTask/Request and measured Observation are not connected to this physical loop",
+        "Inherited four-LiDAR rig and finite RGB/rollout evidence do not certify final scanner-count plan or avoidance coverage"
+      ],
+      "unverified_gates": [
+        "continuous_camera_tracking_verified",
+        "environment_constraints_verified",
+        "representation_ingress_verified",
+        "sensors_avoidance_verified"
+      ],
+      "avoidance_agent_ready": false
+    },
+    {
+      "robot": "Go2 + Piper",
+      "directory": "Robot_Go2",
+      "audit_errors": [],
+      "historical_motion_evidence": {
+        "path": "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/results/validation_03/summary.json",
+        "sha256_expected": "10c54437ec469d0bbf9d2fd4644dade0d9974844dcc58024404bd896e1403734",
+        "sha256_actual": "10c54437ec469d0bbf9d2fd4644dade0d9974844dcc58024404bd896e1403734",
+        "scope": "historical_controller_only_not_recommended_backend_acceptance"
+      },
+      "gates": {
+        "backend_runtime_ready": true,
+        "continuous_camera_tracking_verified": false,
+        "environment_constraints_verified": false,
+        "representation_ingress_verified": false,
+        "sensors_avoidance_verified": false
+      },
+      "evidence_files": {
+        "wbc_backend.py": {
+          "expected": "82841072402804a4d2da57783486d68bc00e89ff135716739c29d9d778f44a32",
+          "actual": "82841072402804a4d2da57783486d68bc00e89ff135716739c29d9d778f44a32"
+        },
+        "scripts/validate_wbc.py": {
+          "expected": "9269b322916f642656aa715f0707f8c43dce49f928633704ded9bf6c09e8d531",
+          "actual": "9269b322916f642656aa715f0707f8c43dce49f928633704ded9bf6c09e8d531"
+        },
+        "scripts/preflight_wbc.py": {
+          "expected": "a552d25adff935bdcf54be9aefb30dacd78e4afb4cfe5b2179f1c3f1a4189bd3",
+          "actual": "a552d25adff935bdcf54be9aefb30dacd78e4afb4cfe5b2179f1c3f1a4189bd3"
+        },
+        "scripts/audit_camera_domain.py": {
+          "expected": "b0ed4188dd0ac2df2d56760ad5f438de53636348180c36b16e03db75657a41a5",
+          "actual": "b0ed4188dd0ac2df2d56760ad5f438de53636348180c36b16e03db75657a41a5"
+        },
+        "run.sh": {
+          "expected": "e36faf9ffe55b303c5e0166ff469514298e8830377b7b6b116410e952521fd76",
+          "actual": "e36faf9ffe55b303c5e0166ff469514298e8830377b7b6b116410e952521fd76"
+        },
+        "scripts/launch.py": {
+          "expected": "82a4938eaaa38be5fb43c29b3b556aad1dde44e83b449feb2d30d1504f651bae",
+          "actual": "82a4938eaaa38be5fb43c29b3b556aad1dde44e83b449feb2d30d1504f651bae"
+        },
+        "SOURCES.json": {
+          "expected": "3f964272b207cc5d72b34c868c1b36f1349ed88d7650970e9ab66077306bd1b2",
+          "actual": "3f964272b207cc5d72b34c868c1b36f1349ed88d7650970e9ab66077306bd1b2"
+        },
+        "vendor/LeggedManip_Lab/mujoco/deploy/policy/go2_piper/wbc/policy.pt": {
+          "expected": "c5f57c79bc01d8b8f2c0846163b149e3f53de39291770a1ccb230ef3be6b800e",
+          "actual": "c5f57c79bc01d8b8f2c0846163b149e3f53de39291770a1ccb230ef3be6b800e"
+        },
+        "results/wbc_cpu_preflight_02.json": {
+          "expected": "89892faad626fef519668d4e8f1bdc00be5f1b58b9fce6d7d360199818df0e62",
+          "actual": "89892faad626fef519668d4e8f1bdc00be5f1b58b9fce6d7d360199818df0e62"
+        },
+        "results/wbc_camera_probe_01/summary.json": {
+          "expected": "ef81dfd1cc27bfc5454f4f3c8971f8b4cf762e6d3e5ddde2540c0cc4e4398d09",
+          "actual": "ef81dfd1cc27bfc5454f4f3c8971f8b4cf762e6d3e5ddde2540c0cc4e4398d09"
+        },
+        "results/wbc_camera_coordinated_01/summary.json": {
+          "expected": "758c1dbb06a4777940e4a90e383e16f76dc7a607209c5113c7a0852930e5cc82",
+          "actual": "758c1dbb06a4777940e4a90e383e16f76dc7a607209c5113c7a0852930e5cc82"
+        },
+        "results/wbc_camera_coordinated_01/measurements.jsonl": {
+          "expected": "a85186381c49eecada266b784cc5a4eade58d65669937fff636ec6e291366937",
+          "actual": "a85186381c49eecada266b784cc5a4eade58d65669937fff636ec6e291366937"
+        },
+        "results/wbc_camera_coordinated_01/domain_audit.json": {
+          "expected": "31dac979f76bb3a7316b130c0c1a677b5cda62dafd1f032459babefd863ac10f",
+          "actual": "31dac979f76bb3a7316b130c0c1a677b5cda62dafd1f032459babefd863ac10f"
+        },
+        "results/wbc_camera_coordinated_01/sensor_mounts.json": {
+          "expected": "3fca6203462fde2dc73f12b9cb2bd0ae8d1f1b8a159a9d870b7aa647d7242ce5",
+          "actual": "3fca6203462fde2dc73f12b9cb2bd0ae8d1f1b8a159a9d870b7aa647d7242ce5"
+        },
+        "results/wbc_camera_coordinated_01/camera_render_check.json": {
+          "expected": "42ef01debfc07d7f3588c88b9904f05e6b4dc2791cc718b56b66fa73337d290a",
+          "actual": "42ef01debfc07d7f3588c88b9904f05e6b4dc2791cc718b56b66fa73337d290a"
+        },
+        "results/wbc_camera_coordinated_01/camera_rgb.png": {
+          "expected": "46d41612e5f3d0793146fc47aebf24aaa713839a6b00f1238d65a595b6a91652",
+          "actual": "46d41612e5f3d0793146fc47aebf24aaa713839a6b00f1238d65a595b6a91652"
+        },
+        "results/wbc_camera_coordinated_01/camera_direction_probe.png": {
+          "expected": "d845411fbf090e4a3918e34007f6e9c841a66389cdbd8ac2eaadf4bbcddec9bd",
+          "actual": "d845411fbf090e4a3918e34007f6e9c841a66389cdbd8ac2eaadf4bbcddec9bd"
+        },
+        "results/wbc_camera_coordinated_01/sensor_audit.json": {
+          "expected": "4fc65b079da0f6c8383e9118df2e2c3ae66c8999559fdfe5e314f8b514d505bc",
+          "actual": "4fc65b079da0f6c8383e9118df2e2c3ae66c8999559fdfe5e314f8b514d505bc"
+        },
+        "results/wbc_camera_coordinated_01/wbc_backend_source.py": {
+          "expected": "ad5c39820585d22537940c0d5e70596468127daa153401ad6ba2d53ffb05d206",
+          "actual": "ad5c39820585d22537940c0d5e70596468127daa153401ad6ba2d53ffb05d206"
+        },
+        "results/wbc_camera_coordinated_01/validator_source.py": {
+          "expected": "9269b322916f642656aa715f0707f8c43dce49f928633704ded9bf6c09e8d531",
+          "actual": "9269b322916f642656aa715f0707f8c43dce49f928633704ded9bf6c09e8d531"
+        },
+        "results/wbc_camera_coordinated_01/robot_sensor_rig_source.py": {
+          "expected": "cd4a54be61841758dd1d597c2a5c764387dff7d2d778a754625cd3a9088f2588",
+          "actual": "cd4a54be61841758dd1d597c2a5c764387dff7d2d778a754625cd3a9088f2588"
+        },
+        "results/wbc_camera_coordinated_01/policy.pt": {
+          "expected": "c5f57c79bc01d8b8f2c0846163b149e3f53de39291770a1ccb230ef3be6b800e",
+          "actual": "c5f57c79bc01d8b8f2c0846163b149e3f53de39291770a1ccb230ef3be6b800e"
+        },
+        "vendor/LeggedManip_Lab/source/LeggedManip_Lab/LeggedManip_Lab/tasks/manager_based/leggedmanip_lab/config/go2_piper/wbc_env_cfg.py": {
+          "expected": "5399b7432bb3ec1679a1329bccb11c9b4007989a0ab5072a3cf7ed525717dce2",
+          "actual": "5399b7432bb3ec1679a1329bccb11c9b4007989a0ab5072a3cf7ed525717dce2"
+        },
+        "vendor/LeggedManip_Lab/source/LeggedManip_Lab/LeggedManip_Lab/tasks/manager_based/leggedmanip_lab/mdp/pose_command_wbc.py": {
+          "expected": "9266a53093084c437edcc88a3ab166be69fbc9535a5678cb2a4182d028d20249",
+          "actual": "9266a53093084c437edcc88a3ab166be69fbc9535a5678cb2a4182d028d20249"
+        },
+        "../jev_agent_wbc/robot_sensor_rig.py": {
+          "expected": "cd4a54be61841758dd1d597c2a5c764387dff7d2d778a754625cd3a9088f2588",
+          "actual": "cd4a54be61841758dd1d597c2a5c764387dff7d2d778a754625cd3a9088f2588"
+        },
+        "../config/robot_sensor_mounts.json": {
+          "expected": "053c532bfcbfab8b5ac6f0b309383fd48e85502c822e045ea326ce0ac0f961dc",
+          "actual": "053c532bfcbfab8b5ac6f0b309383fd48e85502c822e045ea326ce0ac0f961dc"
+        },
+        "../test/test_wbc_legged_backends.py": {
+          "expected": "871b9a5099b1044b51fe45e22c41f28dc3f23cbdae3bb81bff219a05ace49d08",
+          "actual": "871b9a5099b1044b51fe45e22c41f28dc3f23cbdae3bb81bff219a05ace49d08"
+        },
+        "../validation/wbc_go2_camera_probe_audit_20261020.json": {
+          "expected": "3b4802c0330801f55f57ab34028e6be295b4f81938be3eeec3459a30497db6f4",
+          "actual": "3b4802c0330801f55f57ab34028e6be295b4f81938be3eeec3459a30497db6f4"
+        },
+        "../validation/wbc_go2_coordinated_probe_audit_20261020.json": {
+          "expected": "d6ad951a2571d0805ffe37edab5c88deb95321aee5eb83a5fa85de0072739c35",
+          "actual": "d6ad951a2571d0805ffe37edab5c88deb95321aee5eb83a5fa85de0072739c35"
+        },
+        "WBC.md": {
+          "expected": "7f9128bf2c3481423ad39a6fd340e318201740a312b31d653e285a7012be5106",
+          "actual": "7f9128bf2c3481423ad39a6fd340e318201740a312b31d653e285a7012be5106"
+        },
+        "README.md": {
+          "expected": "7666f746e5845c9607c21e64038f94565667a1a293b256a04d6e0702d1c4c7c1",
+          "actual": "7666f746e5845c9607c21e64038f94565667a1a293b256a04d6e0702d1c4c7c1"
+        }
+      },
+      "recommended_backend": "LeggedManip_Lab GO2-PIPER-WBC 210/18 policy + full optical extrinsic/mixed-frame adapter + upstream outer-domain preflight",
+      "blockers": [
+        "Moving-base WORLD camera task fails position threshold and yaw direction; standing task pass is local only",
+        "Native commands leave upstream configured outer domain (156/200 active commands); checkpoint exact training coverage unknown",
+        "Native EE and base-velocity interface does not expose arbitrary independent body pose/height or collision/contact constraints",
+        "Public TimedTask/Request and measured Observation are not connected to this physical loop",
+        "Inherited three-LiDAR rig and finite scan samples do not certify final scanner-count plan or avoidance coverage",
+        "D1 and ARX5 are different robots/policies and remain unvalidated here"
+      ],
+      "unverified_gates": [
+        "continuous_camera_tracking_verified",
+        "environment_constraints_verified",
+        "representation_ingress_verified",
+        "sensors_avoidance_verified"
+      ],
+      "avoidance_agent_ready": false
+    },
+    {
+      "robot": "Ridgeback + UR5",
+      "directory": "Robot_Ridgeback_UR5",
+      "audit_errors": [],
+      "historical_motion_evidence": {
+        "path": "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/results/acceptance_03/acceptance.json",
+        "sha256_expected": "99b96307bc6635fb4e637c9e58428572d69402b6c76acbb42c3c73ed611d31a1",
+        "sha256_actual": "99b96307bc6635fb4e637c9e58428572d69402b6c76acbb42c3c73ed611d31a1",
+        "scope": "historical_controller_only_not_recommended_backend_acceptance"
+      },
+      "gates": {
+        "backend_runtime_ready": false,
+        "continuous_camera_tracking_verified": false,
+        "environment_constraints_verified": false,
+        "representation_ingress_verified": false,
+        "sensors_avoidance_verified": false
+      },
+      "evidence_files": {
+        "ocs2/OCS2_LICENSE.txt": {
+          "expected": "1b1f6f7a259c88252b87aa03cf8115c35767ffc40043569e7cefe657d02054d3",
+          "actual": "1b1f6f7a259c88252b87aa03cf8115c35767ffc40043569e7cefe657d02054d3"
+        },
+        "ocs2/model.json": {
+          "expected": "126077a9c787e0131a195c21d947cb9a451205927f5b855199d23e5ca402ea06",
+          "actual": "126077a9c787e0131a195c21d947cb9a451205927f5b855199d23e5ca402ea06"
+        },
+        "ocs2/CMakeLists.txt": {
+          "expected": "bff2990e740d7ee12ca078ee45b8e73714945cd52b4163ec05ca11835a887da9",
+          "actual": "bff2990e740d7ee12ca078ee45b8e73714945cd52b4163ec05ca11835a887da9"
+        },
+        "ocs2/backend.json": {
+          "expected": "b7fa4f5625173e215c0617780b911aaf6a8c6353235cb6c7b743e4e287b98447",
+          "actual": "b7fa4f5625173e215c0617780b911aaf6a8c6353235cb6c7b743e4e287b98447"
+        },
+        "ocs2/UPSTREAM_MANIFEST.json": {
+          "expected": "82453b3ce92ef1c130e515095871550a8420c16f26ec5de3b1c59880ffc6970b",
+          "actual": "82453b3ce92ef1c130e515095871550a8420c16f26ec5de3b1c59880ffc6970b"
+        },
+        "ocs2/adapter.py": {
+          "expected": "7f5e2bdbee39d7812245481cbf98030cf5cee38d2f447f718525e2d5a1122b10",
+          "actual": "7f5e2bdbee39d7812245481cbf98030cf5cee38d2f447f718525e2d5a1122b10"
+        },
+        "ocs2/include/WheeledDynamics.h": {
+          "expected": "3c2db64ea22eea2c7e6d9d4080e7c1a7dd8e7aedd0653c7259565c55b6646ade",
+          "actual": "3c2db64ea22eea2c7e6d9d4080e7c1a7dd8e7aedd0653c7259565c55b6646ade"
+        },
+        "ocs2/evidence/initial_mpc_psd_failure.log": {
+          "expected": "2b4670709d6ff1e89911e63d9d5523a33ac20b1fe13d399a647c7fe25d0fa81c",
+          "actual": "2b4670709d6ff1e89911e63d9d5523a33ac20b1fe13d399a647c7fe25d0fa81c"
+        },
+        "ocs2/evidence/dynamics_check.json": {
+          "expected": "3160d30dab9c61798ec8ef4526f64600a172f1d30c1d436ba7ab3ee36ea3a026",
+          "actual": "3160d30dab9c61798ec8ef4526f64600a172f1d30c1d436ba7ab3ee36ea3a026"
+        },
+        "ocs2/evidence/unreachable_camera_result.json": {
+          "expected": "93ac96f397f0ab054b3850de6a5203a129887deee4ba26e381d5fb3f1beeefa6",
+          "actual": "93ac96f397f0ab054b3850de6a5203a129887deee4ba26e381d5fb3f1beeefa6"
+        },
+        "ocs2/evidence/camera_mpc_probe.json": {
+          "expected": "4d78bcd152e7d2151d49828c5091fb1030a2c83e1a0b6e357d35db87d57b6b22",
+          "actual": "4d78bcd152e7d2151d49828c5091fb1030a2c83e1a0b6e357d35db87d57b6b22"
+        },
+        "ocs2/evidence/camera_mpc_probe.stderr.log": {
+          "expected": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "actual": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "ocs2/evidence/native_build.log": {
+          "expected": "8c520bdd5363fb1fa1799975d3b2023334f87c63699551bad5e9fc78ead64ca7",
+          "actual": "8c520bdd5363fb1fa1799975d3b2023334f87c63699551bad5e9fc78ead64ca7"
+        },
+        "ocs2/evidence/unreachable_camera_request.json": {
+          "expected": "fba2f90bfa0b3c5320b62db78c476831a07d3c3910c6e2c6a0317940226ec096",
+          "actual": "fba2f90bfa0b3c5320b62db78c476831a07d3c3910c6e2c6a0317940226ec096"
+        },
+        "ocs2/evidence/build_provenance.json": {
+          "expected": "11d36834a9e381e115e6b1fcce5c8e5daecc8f9a06facb84b645a703c54f4904",
+          "actual": "11d36834a9e381e115e6b1fcce5c8e5daecc8f9a06facb84b645a703c54f4904"
+        },
+        "ocs2/evidence/tests.json": {
+          "expected": "fdf75473672b93f2868a1d4cd900110093e9c314bc1af78e68f8480380069e3f",
+          "actual": "fdf75473672b93f2868a1d4cd900110093e9c314bc1af78e68f8480380069e3f"
+        },
+        "ocs2/evidence/fixed_camera_request.json": {
+          "expected": "f54fcc387684c94daa764f74eb8d92cfaab1a707870599a0283fd2725af3ad26",
+          "actual": "f54fcc387684c94daa764f74eb8d92cfaab1a707870599a0283fd2725af3ad26"
+        },
+        "ocs2/evidence/repro_dynamics_build.log": {
+          "expected": "efc05ea0a219b30a9bbcd73675d18b7abeed49e4dba7710ed7d343dbbfdb2c57",
+          "actual": "efc05ea0a219b30a9bbcd73675d18b7abeed49e4dba7710ed7d343dbbfdb2c57"
+        },
+        "ocs2/evidence/native_policy.json": {
+          "expected": "f5e6a38d5d249e4b18aca6102573ef4b38b980802aae7287bdc5957a0eb94859",
+          "actual": "f5e6a38d5d249e4b18aca6102573ef4b38b980802aae7287bdc5957a0eb94859"
+        },
+        "ocs2/evidence/framework_build/manual_ocs2_ddp.log": {
+          "expected": "0eb392b05422ab2b941501d8a134bd457f6257b21e051fe9380623e846ee7cba",
+          "actual": "0eb392b05422ab2b941501d8a134bd457f6257b21e051fe9380623e846ee7cba"
+        },
+        "ocs2/evidence/framework_build/manual_ocs2_mpc.log": {
+          "expected": "78929fdcc85edbfedd47af7ac58e0c99b4875f85aa2770cec26b68a5aefe618c",
+          "actual": "78929fdcc85edbfedd47af7ac58e0c99b4875f85aa2770cec26b68a5aefe618c"
+        },
+        "ocs2/evidence/framework_build/failure_notes.txt": {
+          "expected": "894e4bf37f52c24dd772f4b321c6c066df922a8d3887f661c7f0d0bb26a323e2",
+          "actual": "894e4bf37f52c24dd772f4b321c6c066df922a8d3887f661c7f0d0bb26a323e2"
+        },
+        "ocs2/evidence/framework_build/manual_ocs2_qp_solver.log": {
+          "expected": "8a33af0e0040b3dac5438cfa2555545799b92098a3bcd6d2d81b0414f873e06f",
+          "actual": "8a33af0e0040b3dac5438cfa2555545799b92098a3bcd6d2d81b0414f873e06f"
+        },
+        "ocs2/evidence/framework_build/manual_thirdparty.log": {
+          "expected": "6b29345de40d98cc192766b3561df053e568466d199ecff21f6f84111b9a644a",
+          "actual": "6b29345de40d98cc192766b3561df053e568466d199ecff21f6f84111b9a644a"
+        },
+        "ocs2/evidence/framework_build/initial_colcon.log": {
+          "expected": "67bcdc9a938165a9c56009daad44133040298ed064fedd269caa6cc126c5bb3c",
+          "actual": "67bcdc9a938165a9c56009daad44133040298ed064fedd269caa6cc126c5bb3c"
+        },
+        "ocs2/evidence/framework_build/manual_ocs2_oc.log": {
+          "expected": "4a8ee6e6c186a7614cdeff04ce74f6a4677a871d3e1bc356b6aa51f82b05ef6f",
+          "actual": "4a8ee6e6c186a7614cdeff04ce74f6a4677a871d3e1bc356b6aa51f82b05ef6f"
+        },
+        "ocs2/evidence/framework_build/manual_core.log": {
+          "expected": "15ba8d414711eaddcea673e1cc62cedbbb8d62241722aea7e3839ff11c9ed846",
+          "actual": "15ba8d414711eaddcea673e1cc62cedbbb8d62241722aea7e3839ff11c9ed846"
+        },
+        "ocs2/src/dynamics_check.cpp": {
+          "expected": "42500a5a8fe6e725310ac9f99e6a9c320faaab25af31f541277914ecb93cf9d7",
+          "actual": "42500a5a8fe6e725310ac9f99e6a9c320faaab25af31f541277914ecb93cf9d7"
+        },
+        "ocs2/src/camera_mpc_probe.cpp": {
+          "expected": "b868ae04280aca9090416a3412aeb7bbf97887a01837bebab7bd70dda466c898",
+          "actual": "b868ae04280aca9090416a3412aeb7bbf97887a01837bebab7bd70dda466c898"
+        },
+        "ocs2/scripts/build_native.sh": {
+          "expected": "5760d352da8f64e7f7839128dbabbca90d30ddb33abf2302fbdd7f999f235d1e",
+          "actual": "5760d352da8f64e7f7839128dbabbca90d30ddb33abf2302fbdd7f999f235d1e"
+        },
+        "ocs2/scripts/run_native.sh": {
+          "expected": "acc03e31480e1801642a45acd6d25196a381883ed745b4275cedde2b79ec1253",
+          "actual": "acc03e31480e1801642a45acd6d25196a381883ed745b4275cedde2b79ec1253"
+        },
+        "ocs2/scripts/export_model.py": {
+          "expected": "6122e3ad8945b6ee427de8f378c5cc60c391d5703e317cd601f1804ede00a95e",
+          "actual": "6122e3ad8945b6ee427de8f378c5cc60c391d5703e317cd601f1804ede00a95e"
+        },
+        "WBC.md": {
+          "expected": "6776e0c1e87423103cbf6a158a9d4a66f37bd8bedf6ee9fada246a43d6f77d8e",
+          "actual": "6776e0c1e87423103cbf6a158a9d4a66f37bd8bedf6ee9fada246a43d6f77d8e"
+        },
+        "../test/test_wbc_wheeled_backends.py": {
+          "expected": "b0597318b9cf94880895735855e81d7bf996fa60f48b200c87787b76c986b2a4",
+          "actual": "b0597318b9cf94880895735855e81d7bf996fa60f48b200c87787b76c986b2a4"
+        }
+      },
+      "recommended_backend": "OCS2 GaussNewtonDDP_MPC/SLQ",
+      "blockers": [
+        "native OCS2 policy is not connected to the measured Isaac Sim loop",
+        "continuous physical 6D optical-camera tracking and stopping not verified for OCS2",
+        "joint/velocity constraints use relaxed soft barriers; knot checks are not continuous guarantees",
+        "prediction does not model acceleration, braking, actuator delay, torques or slip",
+        "self/environment collision constraints and body geometry tasks are not integrated",
+        "common TimedTask/Request ingress and measured Observation feedback are not integrated",
+        "LiDAR occlusions/missed targets remain; sensor-driven avoidance not verified",
+        "stock USD uses planar joints, fixed wheel geometry and constrained z/roll/pitch; real omni wheel-ground dynamics absent"
+      ],
+      "unverified_gates": [
+        "backend_runtime_ready",
+        "continuous_camera_tracking_verified",
+        "environment_constraints_verified",
+        "representation_ingress_verified",
+        "sensors_avoidance_verified"
+      ],
+      "avoidance_agent_ready": false
+    },
+    {
+      "robot": "Husky A200 + UR5",
+      "directory": "Robot_Husky_UR5",
+      "audit_errors": [],
+      "historical_motion_evidence": {
+        "path": "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/results/acceptance_05/acceptance.json",
+        "sha256_expected": "756aaf141e5aef2678db9a5ba5d78435c03dfbb05230b2bd208b800cacee4e97",
+        "sha256_actual": "756aaf141e5aef2678db9a5ba5d78435c03dfbb05230b2bd208b800cacee4e97",
+        "scope": "historical_controller_only_not_recommended_backend_acceptance"
+      },
+      "gates": {
+        "backend_runtime_ready": false,
+        "continuous_camera_tracking_verified": false,
+        "environment_constraints_verified": false,
+        "representation_ingress_verified": false,
+        "sensors_avoidance_verified": false
+      },
+      "evidence_files": {
+        "ocs2/OCS2_LICENSE.txt": {
+          "expected": "1b1f6f7a259c88252b87aa03cf8115c35767ffc40043569e7cefe657d02054d3",
+          "actual": "1b1f6f7a259c88252b87aa03cf8115c35767ffc40043569e7cefe657d02054d3"
+        },
+        "ocs2/model.json": {
+          "expected": "8de210306d22e863b8f61cbc7552ba7714ee8fa8d7a778f937ebf46e0a8af265",
+          "actual": "8de210306d22e863b8f61cbc7552ba7714ee8fa8d7a778f937ebf46e0a8af265"
+        },
+        "ocs2/CMakeLists.txt": {
+          "expected": "831685baf6bf94ed1ac93ec088f017a1c4044b1740f1c567b8141f1bc3bd458d",
+          "actual": "831685baf6bf94ed1ac93ec088f017a1c4044b1740f1c567b8141f1bc3bd458d"
+        },
+        "ocs2/backend.json": {
+          "expected": "79905a878f03e9fa9bc0d40075b0f2bf8bac39684e298f1616246faa2f4219e2",
+          "actual": "79905a878f03e9fa9bc0d40075b0f2bf8bac39684e298f1616246faa2f4219e2"
+        },
+        "ocs2/UPSTREAM_MANIFEST.json": {
+          "expected": "82453b3ce92ef1c130e515095871550a8420c16f26ec5de3b1c59880ffc6970b",
+          "actual": "82453b3ce92ef1c130e515095871550a8420c16f26ec5de3b1c59880ffc6970b"
+        },
+        "ocs2/adapter.py": {
+          "expected": "7f5e2bdbee39d7812245481cbf98030cf5cee38d2f447f718525e2d5a1122b10",
+          "actual": "7f5e2bdbee39d7812245481cbf98030cf5cee38d2f447f718525e2d5a1122b10"
+        },
+        "ocs2/include/WheeledDynamics.h": {
+          "expected": "3c2db64ea22eea2c7e6d9d4080e7c1a7dd8e7aedd0653c7259565c55b6646ade",
+          "actual": "3c2db64ea22eea2c7e6d9d4080e7c1a7dd8e7aedd0653c7259565c55b6646ade"
+        },
+        "ocs2/evidence/initial_mpc_psd_failure.log": {
+          "expected": "2b4670709d6ff1e89911e63d9d5523a33ac20b1fe13d399a647c7fe25d0fa81c",
+          "actual": "2b4670709d6ff1e89911e63d9d5523a33ac20b1fe13d399a647c7fe25d0fa81c"
+        },
+        "ocs2/evidence/dynamics_check.json": {
+          "expected": "427a9970e1839a8025abd2bebaa245d4d252a3633d35db09551a1686f69ed5b7",
+          "actual": "427a9970e1839a8025abd2bebaa245d4d252a3633d35db09551a1686f69ed5b7"
+        },
+        "ocs2/evidence/unreachable_camera_result.json": {
+          "expected": "26076597b9a21f27b58c391f025561921f5de9a33fff7b7d60abab8342b67e25",
+          "actual": "26076597b9a21f27b58c391f025561921f5de9a33fff7b7d60abab8342b67e25"
+        },
+        "ocs2/evidence/camera_mpc_probe.json": {
+          "expected": "1e046e6c6c2ed1d4e341329448280805d6bc698e2f1032b21e69ccf74e32d498",
+          "actual": "1e046e6c6c2ed1d4e341329448280805d6bc698e2f1032b21e69ccf74e32d498"
+        },
+        "ocs2/evidence/camera_mpc_probe.stderr.log": {
+          "expected": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "actual": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "ocs2/evidence/native_build.log": {
+          "expected": "892b82b7b537b4ead046b54804f908308c3cd2f7d227ba8759bd62ad5b5126b1",
+          "actual": "892b82b7b537b4ead046b54804f908308c3cd2f7d227ba8759bd62ad5b5126b1"
+        },
+        "ocs2/evidence/unreachable_camera_request.json": {
+          "expected": "0becf6fe0361f070a218d51a5c99bb971dc70277b38af8f049ade9feab9bab56",
+          "actual": "0becf6fe0361f070a218d51a5c99bb971dc70277b38af8f049ade9feab9bab56"
+        },
+        "ocs2/evidence/build_provenance.json": {
+          "expected": "11d36834a9e381e115e6b1fcce5c8e5daecc8f9a06facb84b645a703c54f4904",
+          "actual": "11d36834a9e381e115e6b1fcce5c8e5daecc8f9a06facb84b645a703c54f4904"
+        },
+        "ocs2/evidence/tests.json": {
+          "expected": "fdf75473672b93f2868a1d4cd900110093e9c314bc1af78e68f8480380069e3f",
+          "actual": "fdf75473672b93f2868a1d4cd900110093e9c314bc1af78e68f8480380069e3f"
+        },
+        "ocs2/evidence/fixed_camera_request.json": {
+          "expected": "a367b99c42383c61f0b0e6a4507025cc632f2a88ba782b51561a1aeac15e667f",
+          "actual": "a367b99c42383c61f0b0e6a4507025cc632f2a88ba782b51561a1aeac15e667f"
+        },
+        "ocs2/evidence/repro_dynamics_build.log": {
+          "expected": "f5dc3557c99efd6612facbea8eed4d1ddf62d7ef8d837b722baf66d6c368b64f",
+          "actual": "f5dc3557c99efd6612facbea8eed4d1ddf62d7ef8d837b722baf66d6c368b64f"
+        },
+        "ocs2/evidence/native_policy.json": {
+          "expected": "9bfbaad29fcf414a85880c02c04655b9a172328240c7fdabb526936094687b9a",
+          "actual": "9bfbaad29fcf414a85880c02c04655b9a172328240c7fdabb526936094687b9a"
+        },
+        "ocs2/evidence/framework_build/manual_ocs2_ddp.log": {
+          "expected": "0eb392b05422ab2b941501d8a134bd457f6257b21e051fe9380623e846ee7cba",
+          "actual": "0eb392b05422ab2b941501d8a134bd457f6257b21e051fe9380623e846ee7cba"
+        },
+        "ocs2/evidence/framework_build/manual_ocs2_mpc.log": {
+          "expected": "78929fdcc85edbfedd47af7ac58e0c99b4875f85aa2770cec26b68a5aefe618c",
+          "actual": "78929fdcc85edbfedd47af7ac58e0c99b4875f85aa2770cec26b68a5aefe618c"
+        },
+        "ocs2/evidence/framework_build/failure_notes.txt": {
+          "expected": "894e4bf37f52c24dd772f4b321c6c066df922a8d3887f661c7f0d0bb26a323e2",
+          "actual": "894e4bf37f52c24dd772f4b321c6c066df922a8d3887f661c7f0d0bb26a323e2"
+        },
+        "ocs2/evidence/framework_build/manual_ocs2_qp_solver.log": {
+          "expected": "8a33af0e0040b3dac5438cfa2555545799b92098a3bcd6d2d81b0414f873e06f",
+          "actual": "8a33af0e0040b3dac5438cfa2555545799b92098a3bcd6d2d81b0414f873e06f"
+        },
+        "ocs2/evidence/framework_build/manual_thirdparty.log": {
+          "expected": "6b29345de40d98cc192766b3561df053e568466d199ecff21f6f84111b9a644a",
+          "actual": "6b29345de40d98cc192766b3561df053e568466d199ecff21f6f84111b9a644a"
+        },
+        "ocs2/evidence/framework_build/initial_colcon.log": {
+          "expected": "67bcdc9a938165a9c56009daad44133040298ed064fedd269caa6cc126c5bb3c",
+          "actual": "67bcdc9a938165a9c56009daad44133040298ed064fedd269caa6cc126c5bb3c"
+        },
+        "ocs2/evidence/framework_build/manual_ocs2_oc.log": {
+          "expected": "4a8ee6e6c186a7614cdeff04ce74f6a4677a871d3e1bc356b6aa51f82b05ef6f",
+          "actual": "4a8ee6e6c186a7614cdeff04ce74f6a4677a871d3e1bc356b6aa51f82b05ef6f"
+        },
+        "ocs2/evidence/framework_build/manual_core.log": {
+          "expected": "15ba8d414711eaddcea673e1cc62cedbbb8d62241722aea7e3839ff11c9ed846",
+          "actual": "15ba8d414711eaddcea673e1cc62cedbbb8d62241722aea7e3839ff11c9ed846"
+        },
+        "ocs2/src/dynamics_check.cpp": {
+          "expected": "42500a5a8fe6e725310ac9f99e6a9c320faaab25af31f541277914ecb93cf9d7",
+          "actual": "42500a5a8fe6e725310ac9f99e6a9c320faaab25af31f541277914ecb93cf9d7"
+        },
+        "ocs2/src/camera_mpc_probe.cpp": {
+          "expected": "b868ae04280aca9090416a3412aeb7bbf97887a01837bebab7bd70dda466c898",
+          "actual": "b868ae04280aca9090416a3412aeb7bbf97887a01837bebab7bd70dda466c898"
+        },
+        "ocs2/scripts/build_native.sh": {
+          "expected": "5760d352da8f64e7f7839128dbabbca90d30ddb33abf2302fbdd7f999f235d1e",
+          "actual": "5760d352da8f64e7f7839128dbabbca90d30ddb33abf2302fbdd7f999f235d1e"
+        },
+        "ocs2/scripts/run_native.sh": {
+          "expected": "acc03e31480e1801642a45acd6d25196a381883ed745b4275cedde2b79ec1253",
+          "actual": "acc03e31480e1801642a45acd6d25196a381883ed745b4275cedde2b79ec1253"
+        },
+        "ocs2/scripts/export_model.py": {
+          "expected": "6122e3ad8945b6ee427de8f378c5cc60c391d5703e317cd601f1804ede00a95e",
+          "actual": "6122e3ad8945b6ee427de8f378c5cc60c391d5703e317cd601f1804ede00a95e"
+        },
+        "WBC.md": {
+          "expected": "343b7197ac2d9c84d31ebe935bd24a33b5d723e3ab73ec18c7c4222041d44aa0",
+          "actual": "343b7197ac2d9c84d31ebe935bd24a33b5d723e3ab73ec18c7c4222041d44aa0"
+        },
+        "../test/test_wbc_wheeled_backends.py": {
+          "expected": "b0597318b9cf94880895735855e81d7bf996fa60f48b200c87787b76c986b2a4",
+          "actual": "b0597318b9cf94880895735855e81d7bf996fa60f48b200c87787b76c986b2a4"
+        }
+      },
+      "recommended_backend": "OCS2 GaussNewtonDDP_MPC/SLQ",
+      "blockers": [
+        "native OCS2 policy is not connected to the measured Isaac Sim loop",
+        "continuous physical 6D optical-camera tracking and stopping not verified for OCS2",
+        "joint/velocity constraints use relaxed soft barriers; knot checks are not continuous guarantees",
+        "prediction does not model acceleration, braking, actuator delay, torques or slip",
+        "self/environment collision constraints and body geometry tasks are not integrated",
+        "common TimedTask/Request ingress and measured Observation feedback are not integrated",
+        "LiDAR occlusions/missed targets remain; sensor-driven avoidance not verified"
+      ],
+      "unverified_gates": [
+        "backend_runtime_ready",
+        "continuous_camera_tracking_verified",
+        "environment_constraints_verified",
+        "representation_ingress_verified",
+        "sensors_avoidance_verified"
+      ],
+      "avoidance_agent_ready": false
+    },
+    {
+      "robot": "TIAGo single-arm differential",
+      "directory": "Robot_TIAGo",
+      "audit_errors": [],
+      "historical_motion_evidence": {
+        "path": "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/results/acceptance_final/acceptance.json",
+        "sha256_expected": "af129187ce80f1a4315d4e6f363df20bb06981511a8b2421ad4238aabbab9eeb",
+        "sha256_actual": "af129187ce80f1a4315d4e6f363df20bb06981511a8b2421ad4238aabbab9eeb",
+        "scope": "historical_controller_only_not_recommended_backend_acceptance"
+      },
+      "gates": {
+        "backend_runtime_ready": false,
+        "continuous_camera_tracking_verified": false,
+        "environment_constraints_verified": false,
+        "representation_ingress_verified": false,
+        "sensors_avoidance_verified": false
+      },
+      "evidence_files": {
+        "wbc_backend.py": {
+          "expected": "629f810bd2d253f01e57c9180ff54bebbd301cccd42a57a8ab902e9a7dc71b1c",
+          "actual": "629f810bd2d253f01e57c9180ff54bebbd301cccd42a57a8ab902e9a7dc71b1c"
+        },
+        "wbc/kinematics.py": {
+          "expected": "76df5f65dc3e875bf2df30991aa780cb9ffab798005bf1637fa02013798c10e7",
+          "actual": "76df5f65dc3e875bf2df30991aa780cb9ffab798005bf1637fa02013798c10e7"
+        },
+        "wbc/core_task_smoke.py": {
+          "expected": "2b2bed5a7080ee1d96a4378a05282038110d0d9955b9492d8c274e2eb2bc17b5",
+          "actual": "2b2bed5a7080ee1d96a4378a05282038110d0d9955b9492d8c274e2eb2bc17b5"
+        },
+        "wbc/preflight.py": {
+          "expected": "e072c97463e41c72be7adbd8a59523b3645f396e5fd7c759cedb62e85f9ba2b3",
+          "actual": "e072c97463e41c72be7adbd8a59523b3645f396e5fd7c759cedb62e85f9ba2b3"
+        },
+        "wbc/fetch_sources.py": {
+          "expected": "d93ef58c73148a2a1f489bbed430c9cb497fceb6f44bc282c30a0cbbae88323f",
+          "actual": "d93ef58c73148a2a1f489bbed430c9cb497fceb6f44bc282c30a0cbbae88323f"
+        },
+        "wbc/bootstrap.sh": {
+          "expected": "0bdc1f21f4c12066c0d04dc31affe849e973832043545eeb18e315d27b13b123",
+          "actual": "0bdc1f21f4c12066c0d04dc31affe849e973832043545eeb18e315d27b13b123"
+        },
+        "wbc/FRAMEWORK_SOURCE_LOCK.json": {
+          "expected": "cf90cdb6f1b7d803aa765f92040aec36200239f2fd27b985dca599e3e3058ea3",
+          "actual": "cf90cdb6f1b7d803aa765f92040aec36200239f2fd27b985dca599e3e3058ea3"
+        },
+        "wbc/requirements.lock.txt": {
+          "expected": "e1af6015ccc85dbccb7b23ca07d54a9cceb623f1ed0d679e84096f7f0cbff286",
+          "actual": "e1af6015ccc85dbccb7b23ca07d54a9cceb623f1ed0d679e84096f7f0cbff286"
+        },
+        "wbc/results/core_04/summary.json": {
+          "expected": "78cb0ae9e3ef29f3cf60a1c4303b8156526ecc6a8bfeab0551c6f4a169125488",
+          "actual": "78cb0ae9e3ef29f3cf60a1c4303b8156526ecc6a8bfeab0551c6f4a169125488"
+        },
+        "wbc/results/core_04/arm_only_trace.json": {
+          "expected": "0f2dbc4959ce6815e98a77f9e14ee08b6d119cc87a3286afc926241f9570b16b",
+          "actual": "0f2dbc4959ce6815e98a77f9e14ee08b6d119cc87a3286afc926241f9570b16b"
+        },
+        "wbc/results/core_04/coordinated_trace.json": {
+          "expected": "814748ba063144dedd1916565befea6660c50f77efbbc1f419eb4019a56ba6de",
+          "actual": "814748ba063144dedd1916565befea6660c50f77efbbc1f419eb4019a56ba6de"
+        },
+        "wbc/results/core_04/arm_only_reference.json": {
+          "expected": "79c475e257c454a4f254ca5296f5d35d2db84d89796c25a5c89fd60b6d1e0c2c",
+          "actual": "79c475e257c454a4f254ca5296f5d35d2db84d89796c25a5c89fd60b6d1e0c2c"
+        },
+        "wbc/results/core_04/coordinated_reference.json": {
+          "expected": "79c475e257c454a4f254ca5296f5d35d2db84d89796c25a5c89fd60b6d1e0c2c",
+          "actual": "79c475e257c454a4f254ca5296f5d35d2db84d89796c25a5c89fd60b6d1e0c2c"
+        },
+        "wbc/results/preflight_02.json": {
+          "expected": "daa79c782f98cd75340b8c6776976c1f709f66c5145aa00b9c0af8e1e2bca968",
+          "actual": "daa79c782f98cd75340b8c6776976c1f709f66c5145aa00b9c0af8e1e2bca968"
+        },
+        "wbc/results/tests_01.json": {
+          "expected": "59bbccfdba4ad5981b8c412a7401bb45a3bc639114df751c52eeee4256aedd55",
+          "actual": "59bbccfdba4ad5981b8c412a7401bb45a3bc639114df751c52eeee4256aedd55"
+        },
+        "wbc/results/tests_01.xml": {
+          "expected": "5e40555151387504debff17fed45601a575dc631c12a73be0d5cd5a20000f966",
+          "actual": "5e40555151387504debff17fed45601a575dc631c12a73be0d5cd5a20000f966"
+        },
+        "wbc/results/dependency_check_01.json": {
+          "expected": "0f2c10dc14c3785290da2a7cac061754a4aedc814abc6057df35e3a0e534e698",
+          "actual": "0f2c10dc14c3785290da2a7cac061754a4aedc814abc6057df35e3a0e534e698"
+        },
+        "../test/test_wbc_tiago_backend.py": {
+          "expected": "f07665c9cf4c500874089c91977775ce6dc5ffc5f60ae4b9090783ace376850a",
+          "actual": "f07665c9cf4c500874089c91977775ce6dc5ffc5f60ae4b9090783ace376850a"
+        },
+        "robot.json": {
+          "expected": "a5f0bfc1b0af4d500d43a0a3f4fd931639c75d8c520b864b38a6f6da42d924ba",
+          "actual": "a5f0bfc1b0af4d500d43a0a3f4fd931639c75d8c520b864b38a6f6da42d924ba"
+        },
+        "sensors.json": {
+          "expected": "d5aa2f9abfeeb0d0051f3c848417b7b11b43922906b988d7bce4cae8e9e71fea",
+          "actual": "d5aa2f9abfeeb0d0051f3c848417b7b11b43922906b988d7bce4cae8e9e71fea"
+        },
+        "urdf/tiago_physics.urdf": {
+          "expected": "e7cd8a278157087dd8c162844c2e6123ca8260a4e1beb26a5dbc931178d3e756",
+          "actual": "e7cd8a278157087dd8c162844c2e6123ca8260a4e1beb26a5dbc931178d3e756"
+        },
+        "WBC.md": {
+          "expected": "0f002963aebd89856ff2e17da55e094ada083b19fbb9a4f8141238febf27d5bd",
+          "actual": "0f002963aebd89856ff2e17da55e094ada083b19fbb9a4f8141238febf27d5bd"
+        }
+      },
+      "recommended_backend": "Giskard current cram2 core (upstream QPSolverPIQP component implemented; full World/Executor not connected)",
+      "blockers": [
+        {
+          "code": "full_world_dependency_closure_missing",
+          "detail": "Actual current-core World/Goal import fails with ModuleNotFoundError: probabilistic_model. Isolated component dependencies pass pip check; full upstream World closure is not claimed."
+        },
+        {
+          "code": "physical_giskard_executor_bridge_missing",
+          "detail": "No 100Hz Isaac measured-state/command bridge. Stock world localization 6DoF and passive joints must be locked; native Executor high-order command semantics need mapping and physical validation."
+        },
+        {
+          "code": "continuous_physical_camera_tracking_unverified",
+          "detail": "Authored-time SE3 reference and genuine solver kinematic fixture verified; no physical Giskard continuous tracking/limit-pressure/stop trial."
+        },
+        {
+          "code": "representation_ingress_not_connected",
+          "detail": "Public TimedTask/Request and measured Observation have not entered an actual physical Giskard loop. No interface-ready pass."
+        },
+        {
+          "code": "environment_constraints_not_connected",
+          "detail": "No fresh timestamped environment/self collision geometry integration or obstacle trial; environment ingestion explicitly rejects unsupported data."
+        },
+        {
+          "code": "sensor_avoidance_incomplete",
+          "detail": "Historical coverage retains robot self-shadow LiDAR misses and feasible posture camera obstruction. Full sensors and avoidance gates remain false."
+        },
+        {
+          "code": "legacy_ros2_wrapper_mismatch",
+          "detail": "Official ROS2 wrapper targets Ubuntu24.04/Jazzy with dual-arm TIAGo example; current host Ubuntu22.04/Humble and single-arm hardware differ. Legacy wrapper source only audited."
+        }
+      ],
+      "unverified_gates": [
+        "backend_runtime_ready",
+        "continuous_camera_tracking_verified",
+        "environment_constraints_verified",
+        "representation_ingress_verified",
+        "sensors_avoidance_verified"
+      ],
+      "avoidance_agent_ready": false
+    }
+  ],
+  "all_recommended_backends_ready": false,
+  "all_avoidance_agent_gates_passed": false,
+  "sources_sha256": {
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/ROBOT_DEPLOYMENT.json": "bc05c2850aea8617f5cbe8bd374cab13b556b6f62107b3bff442e6a52b7859eb",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/WBC_READINESS.json": "068d2feace65e0ed187e41e97cd4b0e68dfa05e5f261e651d5e7ce42a6e37ef8",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/wbc_backend.py": "63ba7a87cfe074f9dd2f7ce037172109a4015c1d50f5f4122a336f1dcbc8abd4",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/scripts/validate_pink_wbc.py": "8ee740ed290826858b12d5bae91144231275c403097483c370c845a66755f6e2",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/scripts/preflight_wbc.py": "9c9230066b3c01c24daf04bb185a2aabe69cee9c9b51a67be03d33d7bf03c749",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/run_wbc.sh": "b8fbf53264c33d9f4eaf147cbe0b59bc29a8d08d4974d4f6497fe7c3f76d822e",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/config/height_policy_io.yaml": "52266ad2706498c5e1d4265eee2ba9a06895ef9baaadb1c3b4ffb7f76563d518",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/kinematics/g1_29dof.urdf": "e1dc89366bf96aa33ba4ef211884f6d81320ddd2ac6f8b1ad82986e64008be31",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/kinematics/SOURCE.json": "aa77d95e88f33b720b2a04f4a07d6747782143b3e7acd491fa9f270af0ae2716",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/kinematics/LICENSE": "84aac59fd3246e3ddc49d1387644e8fcf43b0def4f0b9fe687f372e90446df2d",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/policies/unitree_g1_velocity_height_recurrent_student.pt": "a0151975a757a33f0f5ed236d5616e2a98643abe2b36e50ac9ad01b6dd1f6d7e",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/results/wbc_cpu_preflight_01.json": "6b8e2ebcc15afa01ed7417ab73b916c1a75856d76deb082e55370607bac5591b",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/results/wbc_pink_forward_01/summary.json": "63b22fe7e9a4bb4ae45f85ecce442e9034eaa1ffefa73c90f959768b6b790619",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/results/wbc_pink_forward_01/measured.jsonl": "a516a3e3f20e587a811a5cca1816a9b22de2f014befb5f76c1bb3810217de4d9",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/results/wbc_pink_forward_01/provenance.json": "87bf2d1fe284d451b3e4c123b15488defda79f561178b0a273942c7bcb35cbb0",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/results/wbc_pink_forward_01/sensor_mounts.json": "96b3e8c72c5212a65b753c0e8b9373509ad3a7d7bbb35bd310557935826bc292",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/results/wbc_pink_forward_01/camera_render_check.json": "8d0233b375c87983d312632f64aebc5f1d992a76e1aefb31278f1d7ad6aa05e1",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/results/wbc_pink_forward_01/camera_rgb.png": "f74aefdc96e3fb09d796d2179eaffb62439844afa789c8c087537f49cc7d65e6",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/results/wbc_pink_forward_01/camera_direction_probe.png": "85fc3f48cd6ff99bb80132fceb2232d84b19179f81a12d56fa67b53cdd933e00",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/results/wbc_pink_forward_01/sources/wbc_backend.py": "63ba7a87cfe074f9dd2f7ce037172109a4015c1d50f5f4122a336f1dcbc8abd4",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/results/wbc_pink_forward_01/sources/validate_pink_wbc.py": "8ee740ed290826858b12d5bae91144231275c403097483c370c845a66755f6e2",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/results/wbc_pink_forward_01/sources/robot_sensor_rig.py": "cd4a54be61841758dd1d597c2a5c764387dff7d2d778a754625cd3a9088f2588",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/results/wbc_pink_smoke_02/summary.json": "81191eb42058707f3d2c11e145ef55201ca0e406c696ed74382c692e65349d73",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/results/wbc_pink_smoke_03/summary.json": "432d79264fe1654f104e00936bd29af8f043c5f18a4ed1b8266ebfb5965fd763",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/jev_agent_wbc/robot_sensor_rig.py": "cd4a54be61841758dd1d597c2a5c764387dff7d2d778a754625cd3a9088f2588",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/config/robot_sensor_mounts.json": "053c532bfcbfab8b5ac6f0b309383fd48e85502c822e045ea326ce0ac0f961dc",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/test/test_wbc_legged_backends.py": "871b9a5099b1044b51fe45e22c41f28dc3f23cbdae3bb81bff219a05ace49d08",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/validation/wbc_g1_camera_probe_audit_20261020.json": "411ba2a6fbbf7ee37ca2999594e7e3166140849855706b645d2f44ab503658f0",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/WBC.md": "b9d68d8f6e95bfa5d3b24d89f99aa7822a0122f58e27a674fc098c3bc0e4114c",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/upstream/WBC-AGILE/agile/rl_env/assets/robots/unitree_g1.py": "1a5f162caf6f15f89012d62692f86c87dac34cf7196bf91601198277880eac54",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/README.md": "0abd3d381774493a2b6df152fc51ab3c6a87ecd719f939c5aac2ad8e5acf0e69",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/WBC_READINESS.json": "67cb67615f3eec25e1d9e8be51f0a882b61350bce8147645cf73264876da9316",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/wbc_backend.py": "82841072402804a4d2da57783486d68bc00e89ff135716739c29d9d778f44a32",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/scripts/validate_wbc.py": "9269b322916f642656aa715f0707f8c43dce49f928633704ded9bf6c09e8d531",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/scripts/preflight_wbc.py": "a552d25adff935bdcf54be9aefb30dacd78e4afb4cfe5b2179f1c3f1a4189bd3",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/scripts/audit_camera_domain.py": "b0ed4188dd0ac2df2d56760ad5f438de53636348180c36b16e03db75657a41a5",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/run.sh": "e36faf9ffe55b303c5e0166ff469514298e8830377b7b6b116410e952521fd76",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/scripts/launch.py": "82a4938eaaa38be5fb43c29b3b556aad1dde44e83b449feb2d30d1504f651bae",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/SOURCES.json": "3f964272b207cc5d72b34c868c1b36f1349ed88d7650970e9ab66077306bd1b2",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/vendor/LeggedManip_Lab/mujoco/deploy/policy/go2_piper/wbc/policy.pt": "c5f57c79bc01d8b8f2c0846163b149e3f53de39291770a1ccb230ef3be6b800e",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/results/wbc_cpu_preflight_02.json": "89892faad626fef519668d4e8f1bdc00be5f1b58b9fce6d7d360199818df0e62",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/results/wbc_camera_probe_01/summary.json": "ef81dfd1cc27bfc5454f4f3c8971f8b4cf762e6d3e5ddde2540c0cc4e4398d09",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/results/wbc_camera_coordinated_01/summary.json": "758c1dbb06a4777940e4a90e383e16f76dc7a607209c5113c7a0852930e5cc82",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/results/wbc_camera_coordinated_01/measurements.jsonl": "a85186381c49eecada266b784cc5a4eade58d65669937fff636ec6e291366937",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/results/wbc_camera_coordinated_01/domain_audit.json": "31dac979f76bb3a7316b130c0c1a677b5cda62dafd1f032459babefd863ac10f",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/results/wbc_camera_coordinated_01/sensor_mounts.json": "3fca6203462fde2dc73f12b9cb2bd0ae8d1f1b8a159a9d870b7aa647d7242ce5",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/results/wbc_camera_coordinated_01/camera_render_check.json": "42ef01debfc07d7f3588c88b9904f05e6b4dc2791cc718b56b66fa73337d290a",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/results/wbc_camera_coordinated_01/camera_rgb.png": "46d41612e5f3d0793146fc47aebf24aaa713839a6b00f1238d65a595b6a91652",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/results/wbc_camera_coordinated_01/camera_direction_probe.png": "d845411fbf090e4a3918e34007f6e9c841a66389cdbd8ac2eaadf4bbcddec9bd",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/results/wbc_camera_coordinated_01/sensor_audit.json": "4fc65b079da0f6c8383e9118df2e2c3ae66c8999559fdfe5e314f8b514d505bc",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/results/wbc_camera_coordinated_01/wbc_backend_source.py": "ad5c39820585d22537940c0d5e70596468127daa153401ad6ba2d53ffb05d206",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/results/wbc_camera_coordinated_01/validator_source.py": "9269b322916f642656aa715f0707f8c43dce49f928633704ded9bf6c09e8d531",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/results/wbc_camera_coordinated_01/robot_sensor_rig_source.py": "cd4a54be61841758dd1d597c2a5c764387dff7d2d778a754625cd3a9088f2588",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/results/wbc_camera_coordinated_01/policy.pt": "c5f57c79bc01d8b8f2c0846163b149e3f53de39291770a1ccb230ef3be6b800e",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/vendor/LeggedManip_Lab/source/LeggedManip_Lab/LeggedManip_Lab/tasks/manager_based/leggedmanip_lab/config/go2_piper/wbc_env_cfg.py": "5399b7432bb3ec1679a1329bccb11c9b4007989a0ab5072a3cf7ed525717dce2",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/vendor/LeggedManip_Lab/source/LeggedManip_Lab/LeggedManip_Lab/tasks/manager_based/leggedmanip_lab/mdp/pose_command_wbc.py": "9266a53093084c437edcc88a3ab166be69fbc9535a5678cb2a4182d028d20249",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/validation/wbc_go2_camera_probe_audit_20261020.json": "3b4802c0330801f55f57ab34028e6be295b4f81938be3eeec3459a30497db6f4",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/validation/wbc_go2_coordinated_probe_audit_20261020.json": "d6ad951a2571d0805ffe37edab5c88deb95321aee5eb83a5fa85de0072739c35",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/WBC.md": "7f9128bf2c3481423ad39a6fd340e318201740a312b31d653e285a7012be5106",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/README.md": "7666f746e5845c9607c21e64038f94565667a1a293b256a04d6e0702d1c4c7c1",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/WBC_READINESS.json": "57ee75dd785184392185dd29712ba83ce0aac692cdce504180644a23d549bece",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/OCS2_LICENSE.txt": "1b1f6f7a259c88252b87aa03cf8115c35767ffc40043569e7cefe657d02054d3",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/model.json": "126077a9c787e0131a195c21d947cb9a451205927f5b855199d23e5ca402ea06",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/CMakeLists.txt": "bff2990e740d7ee12ca078ee45b8e73714945cd52b4163ec05ca11835a887da9",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/backend.json": "b7fa4f5625173e215c0617780b911aaf6a8c6353235cb6c7b743e4e287b98447",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/UPSTREAM_MANIFEST.json": "82453b3ce92ef1c130e515095871550a8420c16f26ec5de3b1c59880ffc6970b",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/adapter.py": "7f5e2bdbee39d7812245481cbf98030cf5cee38d2f447f718525e2d5a1122b10",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/include/WheeledDynamics.h": "3c2db64ea22eea2c7e6d9d4080e7c1a7dd8e7aedd0653c7259565c55b6646ade",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/evidence/initial_mpc_psd_failure.log": "2b4670709d6ff1e89911e63d9d5523a33ac20b1fe13d399a647c7fe25d0fa81c",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/evidence/dynamics_check.json": "3160d30dab9c61798ec8ef4526f64600a172f1d30c1d436ba7ab3ee36ea3a026",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/evidence/unreachable_camera_result.json": "93ac96f397f0ab054b3850de6a5203a129887deee4ba26e381d5fb3f1beeefa6",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/evidence/camera_mpc_probe.json": "4d78bcd152e7d2151d49828c5091fb1030a2c83e1a0b6e357d35db87d57b6b22",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/evidence/camera_mpc_probe.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/evidence/native_build.log": "8c520bdd5363fb1fa1799975d3b2023334f87c63699551bad5e9fc78ead64ca7",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/evidence/unreachable_camera_request.json": "fba2f90bfa0b3c5320b62db78c476831a07d3c3910c6e2c6a0317940226ec096",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/evidence/build_provenance.json": "11d36834a9e381e115e6b1fcce5c8e5daecc8f9a06facb84b645a703c54f4904",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/evidence/tests.json": "fdf75473672b93f2868a1d4cd900110093e9c314bc1af78e68f8480380069e3f",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/evidence/fixed_camera_request.json": "f54fcc387684c94daa764f74eb8d92cfaab1a707870599a0283fd2725af3ad26",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/evidence/repro_dynamics_build.log": "efc05ea0a219b30a9bbcd73675d18b7abeed49e4dba7710ed7d343dbbfdb2c57",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/evidence/native_policy.json": "f5e6a38d5d249e4b18aca6102573ef4b38b980802aae7287bdc5957a0eb94859",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/evidence/framework_build/manual_ocs2_ddp.log": "0eb392b05422ab2b941501d8a134bd457f6257b21e051fe9380623e846ee7cba",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/evidence/framework_build/manual_ocs2_mpc.log": "78929fdcc85edbfedd47af7ac58e0c99b4875f85aa2770cec26b68a5aefe618c",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/evidence/framework_build/failure_notes.txt": "894e4bf37f52c24dd772f4b321c6c066df922a8d3887f661c7f0d0bb26a323e2",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/evidence/framework_build/manual_ocs2_qp_solver.log": "8a33af0e0040b3dac5438cfa2555545799b92098a3bcd6d2d81b0414f873e06f",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/evidence/framework_build/manual_thirdparty.log": "6b29345de40d98cc192766b3561df053e568466d199ecff21f6f84111b9a644a",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/evidence/framework_build/initial_colcon.log": "67bcdc9a938165a9c56009daad44133040298ed064fedd269caa6cc126c5bb3c",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/evidence/framework_build/manual_ocs2_oc.log": "4a8ee6e6c186a7614cdeff04ce74f6a4677a871d3e1bc356b6aa51f82b05ef6f",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/evidence/framework_build/manual_core.log": "15ba8d414711eaddcea673e1cc62cedbbb8d62241722aea7e3839ff11c9ed846",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/src/dynamics_check.cpp": "42500a5a8fe6e725310ac9f99e6a9c320faaab25af31f541277914ecb93cf9d7",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/src/camera_mpc_probe.cpp": "b868ae04280aca9090416a3412aeb7bbf97887a01837bebab7bd70dda466c898",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/scripts/build_native.sh": "5760d352da8f64e7f7839128dbabbca90d30ddb33abf2302fbdd7f999f235d1e",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/scripts/run_native.sh": "acc03e31480e1801642a45acd6d25196a381883ed745b4275cedde2b79ec1253",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/ocs2/scripts/export_model.py": "6122e3ad8945b6ee427de8f378c5cc60c391d5703e317cd601f1804ede00a95e",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/WBC.md": "6776e0c1e87423103cbf6a158a9d4a66f37bd8bedf6ee9fada246a43d6f77d8e",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/test/test_wbc_wheeled_backends.py": "b0597318b9cf94880895735855e81d7bf996fa60f48b200c87787b76c986b2a4",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/WBC_READINESS.json": "07f40e80a7fdbedc395a4672b61c54290834f0165b63fbede443cf8a288bdaba",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/OCS2_LICENSE.txt": "1b1f6f7a259c88252b87aa03cf8115c35767ffc40043569e7cefe657d02054d3",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/model.json": "8de210306d22e863b8f61cbc7552ba7714ee8fa8d7a778f937ebf46e0a8af265",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/CMakeLists.txt": "831685baf6bf94ed1ac93ec088f017a1c4044b1740f1c567b8141f1bc3bd458d",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/backend.json": "79905a878f03e9fa9bc0d40075b0f2bf8bac39684e298f1616246faa2f4219e2",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/UPSTREAM_MANIFEST.json": "82453b3ce92ef1c130e515095871550a8420c16f26ec5de3b1c59880ffc6970b",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/adapter.py": "7f5e2bdbee39d7812245481cbf98030cf5cee38d2f447f718525e2d5a1122b10",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/include/WheeledDynamics.h": "3c2db64ea22eea2c7e6d9d4080e7c1a7dd8e7aedd0653c7259565c55b6646ade",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/evidence/initial_mpc_psd_failure.log": "2b4670709d6ff1e89911e63d9d5523a33ac20b1fe13d399a647c7fe25d0fa81c",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/evidence/dynamics_check.json": "427a9970e1839a8025abd2bebaa245d4d252a3633d35db09551a1686f69ed5b7",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/evidence/unreachable_camera_result.json": "26076597b9a21f27b58c391f025561921f5de9a33fff7b7d60abab8342b67e25",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/evidence/camera_mpc_probe.json": "1e046e6c6c2ed1d4e341329448280805d6bc698e2f1032b21e69ccf74e32d498",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/evidence/camera_mpc_probe.stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/evidence/native_build.log": "892b82b7b537b4ead046b54804f908308c3cd2f7d227ba8759bd62ad5b5126b1",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/evidence/unreachable_camera_request.json": "0becf6fe0361f070a218d51a5c99bb971dc70277b38af8f049ade9feab9bab56",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/evidence/build_provenance.json": "11d36834a9e381e115e6b1fcce5c8e5daecc8f9a06facb84b645a703c54f4904",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/evidence/tests.json": "fdf75473672b93f2868a1d4cd900110093e9c314bc1af78e68f8480380069e3f",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/evidence/fixed_camera_request.json": "a367b99c42383c61f0b0e6a4507025cc632f2a88ba782b51561a1aeac15e667f",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/evidence/repro_dynamics_build.log": "f5dc3557c99efd6612facbea8eed4d1ddf62d7ef8d837b722baf66d6c368b64f",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/evidence/native_policy.json": "9bfbaad29fcf414a85880c02c04655b9a172328240c7fdabb526936094687b9a",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/evidence/framework_build/manual_ocs2_ddp.log": "0eb392b05422ab2b941501d8a134bd457f6257b21e051fe9380623e846ee7cba",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/evidence/framework_build/manual_ocs2_mpc.log": "78929fdcc85edbfedd47af7ac58e0c99b4875f85aa2770cec26b68a5aefe618c",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/evidence/framework_build/failure_notes.txt": "894e4bf37f52c24dd772f4b321c6c066df922a8d3887f661c7f0d0bb26a323e2",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/evidence/framework_build/manual_ocs2_qp_solver.log": "8a33af0e0040b3dac5438cfa2555545799b92098a3bcd6d2d81b0414f873e06f",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/evidence/framework_build/manual_thirdparty.log": "6b29345de40d98cc192766b3561df053e568466d199ecff21f6f84111b9a644a",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/evidence/framework_build/initial_colcon.log": "67bcdc9a938165a9c56009daad44133040298ed064fedd269caa6cc126c5bb3c",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/evidence/framework_build/manual_ocs2_oc.log": "4a8ee6e6c186a7614cdeff04ce74f6a4677a871d3e1bc356b6aa51f82b05ef6f",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/evidence/framework_build/manual_core.log": "15ba8d414711eaddcea673e1cc62cedbbb8d62241722aea7e3839ff11c9ed846",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/src/dynamics_check.cpp": "42500a5a8fe6e725310ac9f99e6a9c320faaab25af31f541277914ecb93cf9d7",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/src/camera_mpc_probe.cpp": "b868ae04280aca9090416a3412aeb7bbf97887a01837bebab7bd70dda466c898",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/scripts/build_native.sh": "5760d352da8f64e7f7839128dbabbca90d30ddb33abf2302fbdd7f999f235d1e",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/scripts/run_native.sh": "acc03e31480e1801642a45acd6d25196a381883ed745b4275cedde2b79ec1253",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/ocs2/scripts/export_model.py": "6122e3ad8945b6ee427de8f378c5cc60c391d5703e317cd601f1804ede00a95e",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/WBC.md": "343b7197ac2d9c84d31ebe935bd24a33b5d723e3ab73ec18c7c4222041d44aa0",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/WBC_READINESS.json": "260c7a6210f2ed1bd1afcd1f9f3eb53499d4e465ad79c0c5b556c9198ef5138e",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/wbc_backend.py": "629f810bd2d253f01e57c9180ff54bebbd301cccd42a57a8ab902e9a7dc71b1c",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/wbc/kinematics.py": "76df5f65dc3e875bf2df30991aa780cb9ffab798005bf1637fa02013798c10e7",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/wbc/core_task_smoke.py": "2b2bed5a7080ee1d96a4378a05282038110d0d9955b9492d8c274e2eb2bc17b5",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/wbc/preflight.py": "e072c97463e41c72be7adbd8a59523b3645f396e5fd7c759cedb62e85f9ba2b3",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/wbc/fetch_sources.py": "d93ef58c73148a2a1f489bbed430c9cb497fceb6f44bc282c30a0cbbae88323f",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/wbc/bootstrap.sh": "0bdc1f21f4c12066c0d04dc31affe849e973832043545eeb18e315d27b13b123",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/wbc/FRAMEWORK_SOURCE_LOCK.json": "cf90cdb6f1b7d803aa765f92040aec36200239f2fd27b985dca599e3e3058ea3",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/wbc/requirements.lock.txt": "e1af6015ccc85dbccb7b23ca07d54a9cceb623f1ed0d679e84096f7f0cbff286",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/wbc/results/core_04/summary.json": "78cb0ae9e3ef29f3cf60a1c4303b8156526ecc6a8bfeab0551c6f4a169125488",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/wbc/results/core_04/arm_only_trace.json": "0f2dbc4959ce6815e98a77f9e14ee08b6d119cc87a3286afc926241f9570b16b",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/wbc/results/core_04/coordinated_trace.json": "814748ba063144dedd1916565befea6660c50f77efbbc1f419eb4019a56ba6de",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/wbc/results/core_04/arm_only_reference.json": "79c475e257c454a4f254ca5296f5d35d2db84d89796c25a5c89fd60b6d1e0c2c",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/wbc/results/core_04/coordinated_reference.json": "79c475e257c454a4f254ca5296f5d35d2db84d89796c25a5c89fd60b6d1e0c2c",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/wbc/results/preflight_02.json": "daa79c782f98cd75340b8c6776976c1f709f66c5145aa00b9c0af8e1e2bca968",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/wbc/results/tests_01.json": "59bbccfdba4ad5981b8c412a7401bb45a3bc639114df751c52eeee4256aedd55",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/wbc/results/tests_01.xml": "5e40555151387504debff17fed45601a575dc631c12a73be0d5cd5a20000f966",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/wbc/results/dependency_check_01.json": "0f2c10dc14c3785290da2a7cac061754a4aedc814abc6057df35e3a0e534e698",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/test/test_wbc_tiago_backend.py": "f07665c9cf4c500874089c91977775ce6dc5ffc5f60ae4b9090783ace376850a",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/robot.json": "a5f0bfc1b0af4d500d43a0a3f4fd931639c75d8c520b864b38a6f6da42d924ba",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/sensors.json": "d5aa2f9abfeeb0d0051f3c848417b7b11b43922906b988d7bce4cae8e9e71fea",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/urdf/tiago_physics.urdf": "e7cd8a278157087dd8c162844c2e6123ca8260a4e1beb26a5dbc931178d3e756",
+    "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/WBC.md": "0f002963aebd89856ff2e17da55e094ada083b19fbb9a4f8141238febf27d5bd"
+  },
+  "interpretation": "inspection completion is separate from controller and avoidance readiness; bound files detect changes; a manifest is an attestation, not a replacement for independent physical acceptance"
+}

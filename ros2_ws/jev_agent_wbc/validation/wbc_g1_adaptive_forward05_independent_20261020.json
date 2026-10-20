@@ -1,0 +1,82 @@
+{
+  "schema": "independent_wbc_physical_audit/v1",
+  "folder": "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/results/adaptive_forward_05",
+  "audit_errors": [],
+  "audit_passed": true,
+  "run_complete": true,
+  "measured_samples": 600,
+  "feedback_samples": 500,
+  "measured_interval_s": 0.020000000000000018,
+  "timing_pass": true,
+  "tasks": [
+    {
+      "task_id": "g1_forward_100",
+      "measured_samples": 500,
+      "moving_samples": 250,
+      "position_rmse_m": 0.02275811072217787,
+      "orientation_rmse_rad": 0.11204674676086741,
+      "final_error": [
+        0.012432609033608046,
+        0.05033237685752978
+      ],
+      "task_tolerances": [
+        0.05,
+        0.15
+      ],
+      "camera_tracking_pass": true,
+      "strict_stop": {
+        "measured_window_s": 0.5,
+        "base_position_span_m": 0.000769507437628027,
+        "camera_position_span_m": 3.130158921461766e-05,
+        "base_rotation_span_rad": 0.002021013130174221,
+        "camera_rotation_span_rad": 0.00011055169291134865,
+        "joint_span": [
+          0.001156538724899292,
+          0.001963108777999878,
+          0.0010139420628547668,
+          8.718669414520264e-05,
+          0.0003124065697193146,
+          5.8769830502569675e-05,
+          0.001378767192363739,
+          0.0012676119804382324,
+          3.4771859645843506e-05,
+          0.005717754364013672,
+          0.006415963172912598,
+          3.697117790579796e-05,
+          0.002883538603782654,
+          0.003040701150894165,
+          0.002880573272705078,
+          1.6586680430918932e-05,
+          0.00021585635840892792,
+          0.00010397844016551971,
+          0.00010221730917692184,
+          2.1048414055258036e-05,
+          0.00022859126329421997,
+          1.9582919776439667e-05,
+          0.0006485842168331146,
+          9.152845450444147e-07,
+          0.00011218991130590439,
+          3.948807716369629e-06,
+          0.004991825670003891,
+          1.029652776196599e-05,
+          0.00023872777819633484
+        ],
+        "final_linear_speed_mps": 0.016090004514658248,
+        "final_angular_speed_radps": 0.027776425505126448,
+        "passed": true
+      },
+      "passed": true
+    }
+  ],
+  "all_tasks_pass": true,
+  "physical_acceptance_pass": true,
+  "sources_sha256": {
+    "auditor": "c18d5aa28d27bbdede39621522842ba58dc04c9342831b5427d5bc49736702c5",
+    "summary.json": "436dce5d4aac79111a5316ade9aabb5c8f159a17b6890437b2c9a112beb18ced",
+    "provenance.json": "f6e192cdf9efaad9acbdad0340779074190783436ece9b816213e286e88880b4",
+    "timed_tasks.json": "07fcc49c2093e7cd3dcf3bacfcd488d94bfb6329e856bd04de799feb74c78748",
+    "measurements.jsonl": "5ef57f18174afbb4bd98e2097069d64142175029820843dadc09a112ae22aa3f",
+    "actuator_audit.json": "1929a52b295bfc6a719351437263a76f7c1ae717aee6a562e17fc90ff7b99085"
+  },
+  "scope": "immutable timed camera tasks, measured SE3, all joint stopping, freshness and pace; direction coverage, contacts, rendering, sensing and avoidance require separate evidence"
+}

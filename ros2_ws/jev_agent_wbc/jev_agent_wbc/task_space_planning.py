@@ -84,7 +84,14 @@ class MeasuredCameraPrediction:
 
     def sample(self,t):
         p,r=self.pose(t)
-        return p,r,self.path.sample(t)[2]
+        u=float(np.clip((t-self.t)/self.lead,0.,1.))
+        residual=1.-(10*u**3-15*u**4+6*u**5)
+        rate=-(30*u**2-60*u**3+30*u**4)/self.lead
+        twist=np.asarray(self.path.sample(t)[2]).copy()
+        twist[:3]+=rate*self.offset
+        correction=Rotation.from_rotvec(residual*self.rotation_error).as_matrix()
+        twist[3:]=correction@twist[3:]+rate*self.rotation_error
+        return p,r,twist
 
     def positions_at(self,times):
         from .intent_paths import positions_at
@@ -108,6 +115,10 @@ def camera_scene(scene,t,end):
     stamp=float(scene['observation_stamp'])
     rates=np.where(tracks>0,float(scene.get('motion_uncertainty_rate_m_s',.035)),0.)
     radii=radii+rates*ages
+    extra_rates=np.asarray(scene.get('surfel_radius_rates',np.zeros(len(centers))),float)
+    if extra_rates.shape!=radii.shape or not np.isfinite(extra_rates).all() or np.any(extra_rates<0):
+        raise ValueError('invalid observed occupancy radius rates')
+    rates=rates+extra_rates
     return dict(valid=bool(len(centers)) and -1e-8<=t-stamp<=.6,observation_stamp=stamp,
         centers=centers,radius_rates=rates,velocities=np.asarray(scene.get('surfel_velocities',np.zeros_like(centers))),radii=radii,
         subject_model=scene.get('subject_model'),intrinsics=scene.get('intrinsics'))
@@ -236,6 +247,8 @@ def build(original,active,strategy,scene,state,previous,t,base_z,limits,
     configure_combo_samples(search,original)
     spec=IntentSpec(original,observed.get('subject_model'),observed.get('intrinsics'))
     def project(path):
+        if path.program.get('curve_family')=='whole_body_phase_clock':
+            return dict(path=path,summary=dict(reason='observed_whole_body_clock_seed_requires_full_gate'))
         if path.program.get('curve_family')=='global_endpoint_polynomial':
             from .joint_curve_optimizer import refine
             fitted,diagnostics=refine(path,search,
@@ -290,7 +303,7 @@ def build(original,active,strategy,scene,state,previous,t,base_z,limits,
         if initial_boundary:
             candidate.consequences['initial_verification_snapshot']=verification_snapshot(
                 scene,state,previous,t,base_z,limits,measured_control,commanded_q,base_rotation)
-    result.update(wall_s=time.monotonic()-start,snapshot_time_s=t,kinematic_prior=search.prior(),search_config=search_config,
+    result.update(construction_diagnostics=getattr(search,'body_timing_diagnostics',None),wall_s=time.monotonic()-start,snapshot_time_s=t,kinematic_prior=search.prior(),search_config=search_config,
                   activation_s=0. if initial_boundary else t+budget.activation_lead_s)
     return result
 

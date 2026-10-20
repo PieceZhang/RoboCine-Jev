@@ -66,3 +66,11 @@ rerunning Agent decisions. Label such video as measured-state replay, validate
 every rendered link pose and its timestamp, retain source hashes, then use the
 Representation-enabled render_physx_demos.py pipeline. A replay image is not a
 new sensor observation and must never be fed back to an earlier Agent decision.
+
+User preference, updated 2026-10-20: transient decision/module failures should
+use bounded waiting, retries and resumable checkpoints instead of immediately
+failing the task. This supersedes the earlier blanket latch-on-timeout/backlog
+preference. Keep PhysX advancing at pace=1, require fresh observations and fresh
+commands before resuming, and retain independent physical safety validation.
+The requested comparison covers all twelve authored demos against CPU closed
+loop; report incomplete/failed quality checks separately from runtime recovery.

@@ -75,7 +75,9 @@ class LidarCollisionMap:
         self.bad_scan = None
 
     def integrate(self, points, rotation, translation, state, base_z, base_rotation, stamp, sensor,
-                  minimum_range=.1, maximum_range=30.):
+                  minimum_range=.1, maximum_range=30., self_filter_margin_m=.06):
+        if not np.isfinite(self_filter_margin_m) or self_filter_margin_m<0:
+            raise ValueError('self filter margin must be finite and nonnegative')
         points = np.asarray(points, dtype=float).reshape(-1, 3)
         # Zero/range-invalid returns must never become occupied voxels at the sensor.
         distance = np.linalg.norm(points, axis=1)
@@ -92,7 +94,7 @@ class LidarCollisionMap:
             # The rear profile specifies 2 cm range accuracy. Keep a 6 cm
             # self-return band before voxelization; otherwise rare noisy body
             # returns produce inflated occupied cells intersecting the robot.
-            keep = np.min(distances, axis=1) > .06
+            keep = np.min(distances, axis=1) > self_filter_margin_m
             # Sensor housings are visuals absent from CollisionGeometry.
             local = (world - np.r_[state[:2], base_z]) @ base_rotation
             for center, radius in (([-.085, 0., .235], .065), ([.190, 0., .274], .065)):

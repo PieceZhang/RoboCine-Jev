@@ -7,6 +7,8 @@ There is no numerical ranking, alternate seed or retry on a planning failure.
 import numpy as np
 
 FAMILIES = {
+    'body_timing': 'Keep the current spatial camera path and every ordered phase boundary; optimize one smooth monotone clock using observed full-body occupancy. Prefer for transient crossing actors that can be passed earlier or later without a spatial detour. Requires an independently verified full-body execution trajectory.',
+    'configuration': 'Preserve the current camera path and clock exactly; prepare a different whole-body allocation. Prefer this when the CAMERA corridor is already clear and a chassis or arm obstacle needs redundant-body motion. The complete body trajectory still requires numerical feasibility and collision certification.',
     'joint_curve': 'One broad horizontal detour, jointly optimize camera and both robot parts. Planar displacement can be supplied by the mobile platform without spending the manipulator vertical workspace. Prefer this for an open lateral or radial bypass.',
     'joint_vertical': 'One vertical detour, jointly optimize camera and both robot parts. Use when planar bypass space is obstructed and vertical displacement is justified despite the limited manipulator height and wrist reserve.',
     'timed_curve': 'One fixed line/arch with a monotone obstacle-aware clock. Choose when the spatial route is reachable and passing time is the main problem.',
@@ -64,8 +66,9 @@ def construction_evidence(original, active, scene, t, activation,mount_height_m=
             if name!='adaptive' and len(centers):
                 probes[name].append(float(np.min(np.linalg.norm(centers-(p+.25*direction),axis=1)-radii)))
                 broad_probes[name].append(float(np.min(np.linalg.norm(centers-(p+.5*direction),axis=1)-radii)))
-    if any(row['nearest_surface_clearance_m'] is not None and row['nearest_surface_clearance_m']<.14 for row in rows):
-        allowed=[name for name in allowed if name!='adaptive']
+    # A zero spatial detour may still change passage time or redundant body
+    # allocation. A spatial point probe cannot rule those constructions out;
+    # their complete trajectories must pass the ordinary numerical gates.
     workspace={}
     if mount_height_m is not None:
         from .jvs_kinematics import JOINT_ORIGINS,CAMERA_OFFSET
@@ -95,22 +98,42 @@ def construction_evidence(original, active, scene, t, activation,mount_height_m=
 def options(family,combo=False):
     if family not in FAMILIES:
         raise ValueError('unknown directed generator')
-    directions = (('adaptive','left','right','outer') if family=='joint_curve' else
+    directions = (('adaptive',) if family in ('configuration','body_timing') else ('adaptive','left','right','outer') if family=='joint_curve' else
                   ('above','below') if family=='joint_vertical' else ('left','right','above','below','adaptive'))
     return {name: dict(family=family,direction=name,amplitude_m=0. if name=='adaptive' else (.3 if family.startswith('joint_') else .2),
                       plane_tolerance_m=.025 if family.startswith('joint_') else 0.,
                       # Delay the middle of the motion enough to preserve
                       # acceleration reserve while the redundant posture opens.
-                      tempo=1. if combo else 4.,allocation='anticipatory',search_config='base') for name in directions}
+                      tempo=1. if combo or family in ('configuration','body_timing') else 4.,allocation='anticipatory',search_config='base') for name in directions}
 
 
-def generate(original, active, scene, activation, model, intrinsics, budget, plan,initial_boundary=None):
+def generate(original, active, scene, activation, model, intrinsics, budget, plan,initial_boundary=None,kinematic_search=None):
     from .combo import is_combo,combo_curves
     family=plan['family'];direction=plan['direction']
     allowed=options(family,combo=is_combo(original))
     if direction not in allowed or plan != allowed[direction]:
         raise ValueError('construction contract outside typed choices')
     d=axes(original,active,activation)[direction]
+    if family=='body_timing':
+        if initial_boundary is not None:return []
+        from .body_timing import construct
+        return construct(original,active,scene,activation,model,intrinsics,kinematic_search,plan)
+    if family=='configuration':
+        if initial_boundary is not None:
+            raise ValueError('fixed-camera configuration requires the actual active path')
+        from .intent_paths import IntentPath,positions_at
+        times=np.unique(np.r_[np.linspace(activation,active.duration,101),
+            [p['start_s'] for p in original.task['shot_phase'] if activation<p['start_s']<active.duration]])
+        eps=.001
+        program=dict(route='timing',amplitude_m=0.,extension_s=0.,regular_curve=True,
+            curve_family='global_endpoint_polynomial',curve_tempo=1.,fixed_camera_path=True,
+            endpoint_offset_m=[0.,0.,0.],shape_coefficients=[0.]*6,
+            construction_contract=dict(plan),search_role='redundant_configuration')
+        geometry=dict(times=times.tolist(),positions=positions_at(active,times).tolist(),
+            shape_basis=np.zeros((len(times),3)).tolist(),
+            start_velocity=active.sample(activation)[2][:3].tolist(),
+            start_acceleration=((active.sample(activation+eps)[2][:3]-active.sample(activation-eps)[2][:3])/(2*eps)).tolist())
+        return [IntentPath(original,active,activation,program,model,intrinsics,geometry=geometry)]
     if is_combo(original):
         if family not in ('joint_curve','joint_vertical'):
             raise ValueError('combo currently requires phase-preserving joint construction')

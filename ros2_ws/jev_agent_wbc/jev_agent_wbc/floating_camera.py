@@ -168,7 +168,7 @@ def camera_candidates(original, active, strategy, scene, t, budget, radius, hist
     if construction_plan is not None:
         from .directed_search import generate
         paths=generate(original,active,scene,0. if initial_boundary is not None else t+budget.activation_lead_s,
-                       spec.model,spec.intrinsics,budget,construction_plan,initial_boundary=initial_boundary)
+                       spec.model,spec.intrinsics,budget,construction_plan,initial_boundary=initial_boundary,kinematic_search=kinematic_search)
     elif numerical_gate is not None:
         from .regular_curve_search import bounded_paths
         paths=bounded_paths(original,active,scene,t+budget.activation_lead_s,spec.model,spec.intrinsics,budget)
@@ -325,6 +325,7 @@ def camera_candidates(original, active, strategy, scene, t, budget, radius, hist
             break
     candidates = [c for _,c in sorted(ranked,key=lambda pair:pair[0])[:budget.max_rollouts]]
     return dict(candidates=candidates,evaluations=evaluations,wall_s=time.monotonic()-start,seed_wall_s=seed_wall_s,
+                construction_diagnostics=getattr(kinematic_search,'body_timing_diagnostics',None),
                 construction_plan=construction_plan,generated_proposals=len(paths),
                 search_exhausted=len(evaluations)==len(attempts), untested_proposals=max(0,len(attempts)-len(evaluations)),
                 error='' if candidates else 'no_verified_executable_candidate')

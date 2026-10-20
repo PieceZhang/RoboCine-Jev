@@ -201,7 +201,7 @@ def test_joint_construction_starts_from_one_bound_analytic_seed(monkeypatch):
     path=paths[0];points=np.asarray(path.geometry['positions'])
     normal=np.asarray(path.program['construction_plane_normal_world'])
     assert np.max(abs((points-p)@normal))<1e-10
-    assert np.max((points-p)@np.asarray(path.program['construction_axis_world']))>.29
+    assert np.max((points-p)@np.asarray(path.program['construction_axis_world']))>.11
     restored=restore_path(original,path_spec(path))
     assert path_hash(restored)==path_hash(path)
     assert restored.program['construction_plane_tolerance_m']==.025

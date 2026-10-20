@@ -1,0 +1,48 @@
+{
+  "schema": "wbc_integration_delivery/v1",
+  "created_utc": "2026-10-20T06:27:46.525807+00:00",
+  "execution_scope": "five-robot WBC audit and first integration components; physical and CPU results kept distinct",
+  "main_environment_upgraded": false,
+  "avoidance_agent_started": false,
+  "main_regression": {
+    "passed": 213,
+    "skipped": 4
+  },
+  "isolated_giskard_regression": {
+    "passed": 14,
+    "skipped": 0
+  },
+  "strict_fleet_startup_gate_expected_exit_code": 2,
+  "files_sha256": {
+    "WBC_INTEGRATION.md": "dfb453d65f11f85d26678adff392c5452703e915ca6a188ffc8147cd623dbc87",
+    "ROBOT_DEPLOYMENT.json": "bc05c2850aea8617f5cbe8bd374cab13b556b6f62107b3bff442e6a52b7859eb",
+    "ROBOT_DEPLOYMENT.md": "9cf92ea6818bac3f29cf7fe179df193cf0273cd0cf5e6332a1aadb865b3fe829",
+    "jev_agent_wbc/wbc_protocol.py": "c6a3ac2d12e1e2585298ad0ba2156d93b336a84ce4333caa385b1921ea2433be",
+    "jev_agent_wbc/wbc_evidence.py": "8bef7e6515da88c44da21431f1fec2d4760637fc9067869e6ef5267a8abf23a0",
+    "scripts/check_wbc_readiness.py": "736c3ad9c5c93c2a686aed15e8dd7bbd0efd0f60b6037c57fd3e6fee6de37e84",
+    "scripts/wbc_task_gateway.py": "65d915a67b48d209da64082f5e421110c3ad449fef3ec56b9ccba8c496d9e422",
+    "scripts/audit_legged_camera_probe.py": "50635a2908c512f354379e80be66aa691bcdf0462b5af2b3497523ef1d875b52",
+    "test/test_wbc_protocol.py": "ee77449f090be092d7e11c49ed46a1dd40f310172af752f535cd18b276d124eb",
+    "test/test_wbc_readiness.py": "bcb0040d569f2a185e27014fcacae9b37b48447000149e45d4a4f35c7a5ae703",
+    "test/test_wbc_probe_audit.py": "2cc5bd3f189905bfee32649a0e35425e9a26143af318cd029c38c63adf28c412",
+    "validation/wbc_readiness_20261020.json": "030ef536a3d717ed47a3ce7adc1ac026325721d2de9fc34fc2dfdb68165d28d8",
+    "validation/wbc_regression_final_20261020.xml": "cba7bf5d01d9b46cdbf38d873468112fef4b9b931918aef94baa065854300e0e",
+    "validation/wbc_giskard_isolated_final_20261020.xml": "98c229362e7337d34066457eb60d1607bfaad66b5db9ffffcacbd39b44fced44",
+    "validation/wbc_g1_camera_probe_audit_final_20261020.json": "f4b74d9cbeb315ede340ade29026f633d4b20fa3a48ab1bcc94bcb23ed584de9",
+    "validation/wbc_go2_camera_probe_audit_final_20261020.json": "25b8a099118a1a89c23aa0c20703f511bbc29d80ed7276a8ec3304d49f85c8ed",
+    "validation/wbc_go2_coordinated_probe_audit_final_20261020.json": "a3c2743b52d62bf6a0eb4a3dbedc3a5dcf3a5321b531c1be3779d8f080e2d894",
+    "Robot_G1/WBC_READINESS.json": "068d2feace65e0ed187e41e97cd4b0e68dfa05e5f261e651d5e7ce42a6e37ef8",
+    "Robot_G1/WBC.md": "b9d68d8f6e95bfa5d3b24d89f99aa7822a0122f58e27a674fc098c3bc0e4114c",
+    "Robot_Go2/WBC_READINESS.json": "67cb67615f3eec25e1d9e8be51f0a882b61350bce8147645cf73264876da9316",
+    "Robot_Go2/WBC.md": "7f9128bf2c3481423ad39a6fd340e318201740a312b31d653e285a7012be5106",
+    "Robot_Husky_UR5/WBC_READINESS.json": "07f40e80a7fdbedc395a4672b61c54290834f0165b63fbede443cf8a288bdaba",
+    "Robot_Husky_UR5/WBC.md": "343b7197ac2d9c84d31ebe935bd24a33b5d723e3ab73ec18c7c4222041d44aa0",
+    "Robot_TIAGo/WBC_READINESS.json": "260c7a6210f2ed1bd1afcd1f9f3eb53499d4e465ad79c0c5b556c9198ef5138e",
+    "Robot_TIAGo/WBC.md": "0f002963aebd89856ff2e17da55e094ada083b19fbb9a4f8141238febf27d5bd",
+    "Robot_Ridgeback_UR5/WBC_READINESS.json": "57ee75dd785184392185dd29712ba83ce0aac692cdce504180644a23d549bece",
+    "Robot_Ridgeback_UR5/WBC.md": "6776e0c1e87423103cbf6a158a9d4a66f37bd8bedf6ee9fada246a43d6f77d8e",
+    "validation/wbc_go2_camera_probe_audit_final_20261020_source.py": "50635a2908c512f354379e80be66aa691bcdf0462b5af2b3497523ef1d875b52",
+    "validation/wbc_go2_coordinated_probe_audit_final_20261020_source.py": "50635a2908c512f354379e80be66aa691bcdf0462b5af2b3497523ef1d875b52",
+    "validation/wbc_g1_camera_probe_audit_final_20261020_source.py": "50635a2908c512f354379e80be66aa691bcdf0462b5af2b3497523ef1d875b52"
+  }
+}

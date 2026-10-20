@@ -70,6 +70,25 @@ def refine(path,search,seconds=5.,max_iterations=12,knots=33,step_tolerance=1e-4
             states[k,:2]=target[k,:2]-rot@offset;states[k,2]=yaw[k]
             states[k,3]=np.clip(search.state[3]-a,JOINT_LOWER[0]+.025,JOINT_UPPER[0]-.025)
     size=9*n+9
+    seed_info=None
+    if path.program.get('construction_contract'):
+        # The camera curve fixes the semantic choice. Lift that same curve
+        # once to obtain a continuous redundant posture seed instead of a
+        # nearly rigid arm translated with the chassis. This obstacle-free
+        # seed is NOT a certificate: the joint SQP and independent fine
+        # swept collision/actuator validation below remain mandatory.
+        from copy import copy
+        from dataclasses import replace
+        seed_search=copy(search);seed_search.collision=None
+        seed_search.policy=replace(search.policy,step_s=.1,
+            max_samples=max(search.policy.max_samples,int(np.ceil((end-search.t)/.1))+2))
+        seed_report=seed_search._lift(path,end,path.program['construction_contract']['allocation'])
+        seed_info=dict(feasible=seed_report['feasible'],reason=seed_report['reason'],
+            scope='obstacle-free allocation seed only; no safety approval')
+        if seed_report['feasible'] and seed_report['trace']:
+            trace=seed_report['trace'];seed_times=np.array([row['t'] for row in trace])
+            seed_states=np.array([row['state'] for row in trace])
+            states=np.column_stack([np.interp(ts,seed_times,seed_states[:,j]) for j in range(9)])
     collisions=[]
     camera_observed=None
     directed=bool(path.program.get('construction_contract'))
@@ -158,11 +177,15 @@ def refine(path,search,seconds=5.,max_iterations=12,knots=33,step_tolerance=1e-4
                     idx=np.argmin(d,axis=0);dist=d[idx,np.arange(d.shape[1])];grad=g[idx,np.arange(d.shape[1])]
                     J=np.zeros((sum(mask),size));J[:,9*k:9*k+9]=grad[mask]
                     residual(J,dist[mask]-col.margin-.04,180.)
+                    if directed:
+                        constraint(J,col.margin+.02-dist[mask],np.inf)
                 dist=search.self_collision.distances(x);mask=dist<search.self_collision.margin+.012
                 if np.any(mask):
                     dist,grad=search.self_collision.terms(x)
                     J=np.zeros((sum(mask),size));J[:,9*k:9*k+9]=grad[mask]
                     residual(J,dist[mask]-search.self_collision.margin-.012,120.)
+                    if directed:
+                        constraint(J,search.self_collision.margin+.004-dist[mask],np.inf)
         controls=[];control_j=[]
         for k in range(n-1):
             x,y=states[k:k+2];ang=(x[2]+y[2])/2;f=np.array([np.cos(ang),np.sin(ang)]);normal=np.array([-f[1],f[0]])
@@ -255,6 +278,9 @@ def refine(path,search,seconds=5.,max_iterations=12,knots=33,step_tolerance=1e-4
                 C=np.zeros((len(ids)-1,size));C[:,-9:]=np.diff(derivatives,axis=0)
                 constraint(C,-np.diff(feature_values)-1e-8,np.inf)
         # Low-dimensional curve regularity and continuous endpoint freedom.
+        # The authored direction/plane and independent swept validators bound
+        # admissible curves. A chord-scaled coefficient cap excludes legitimate
+        # broad bypasses, including paths already certified by the FK lift.
         if path.program.get('construction_axis_world') is not None:
             selected_axis=np.asarray(path.program['construction_axis_world'])
             normals=np.asarray(path.program['construction_plane_normal_world'])[None]
@@ -306,7 +332,7 @@ def refine(path,search,seconds=5.,max_iterations=12,knots=33,step_tolerance=1e-4
         last=dict(reason='coarse_sqp_seed',iteration=iteration+1,max_step=float(abs(step).max()),objective=float(e@e),qp_status=result.info.status,qp_residual=float(result.info.prim_res),linearization_position_m=max_position_error,linearization_orientation_rad=max_orientation_error)
         best=(states.copy(),xcurve.copy())
         if np.max(np.abs(step))<step_tolerance:break
-    if best is None:return None,dict(last,wall_s=time.monotonic()-start)
+    if best is None:return None,dict(last,kinematic_seed=seed_info,wall_s=time.monotonic()-start)
     states,xcurve=best
     times=np.asarray(path.geometry['times']);u=(times-activation)/span;s=10*u**3-15*u**4+6*u**5;b=64*u**3*(1-u)**3
     fine_basis=np.asarray(path.geometry.get('shape_basis',np.column_stack([b,b*(2*u-1),s])))
@@ -341,4 +367,4 @@ def refine(path,search,seconds=5.,max_iterations=12,knots=33,step_tolerance=1e-4
     last['coarse_max_orientation_error_rad']=max(row[1] for row in residuals)
     quality=curve_quality(fitted)
     if not quality['direction_pass'] or not quality['regular_curve_pass']:return None,dict(last,reason='joint_curve_shape',quality=quality,wall_s=time.monotonic()-start)
-    return fitted,dict(last,wall_s=time.monotonic()-start,quality=quality)
+    return fitted,dict(last,kinematic_seed=seed_info,wall_s=time.monotonic()-start,quality=quality)

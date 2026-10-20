@@ -96,7 +96,10 @@ class RuntimeScene:
     def __init__(self, path):
         self.document = deepcopy(path) if isinstance(path, dict) else json.loads(Path(path).read_text())
         self.curves = {}
+        self.collision_covers = {}
         for obj in self.document['obstacles']:
+            from .runtime_obstacles import local_cover
+            self.collision_covers[obj['id']]=local_cover(obj)
             frames = obj['keyframes']
             self.curves[obj['id']] = CubicHermiteSpline([k['t'] for k in frames],
                 np.array([k['position'] for k in frames]), np.array([k['velocity'] for k in frames]))
@@ -113,15 +116,21 @@ class RuntimeScene:
                 # This is observed past motion, not future truth given to WBC.
                 velocity = curve(curve.x[0], 1)
                 center = curve(curve.x[0])+velocity*(t-curve.x[0])
-            result.append(dict(id=obj['id'], center=center, radius=obj['radius'], velocity=velocity))
+            result.append(dict(id=obj['id'], center=center, radius=obj['radius'], velocity=velocity,
+                shape=obj.get('shape','sphere'),**({key:obj[key] for key in ('size','yaw_rad') if key in obj})))
         return result
 
     def truth_collision(self, t):
         """Independent auditing only. Never passed to Jev, its planner or the WBC."""
         obstacles = self.obstacles(t)
+        centers=[];radii=[];velocities=[];ids=[]
+        for index,obstacle in enumerate(obstacles):
+            offsets,sizes=self.collision_covers[obstacle['id']]
+            centers.extend(obstacle['center']+offsets);radii.extend(sizes)
+            velocities.extend(np.tile(obstacle['velocity'],(len(offsets),1)));ids.extend([index+1]*len(offsets))
         return dict(format='jvs_lidar_surfels/v1',
-            surfel_centers=np.array([o['center'] for o in obstacles]).reshape(-1, 3),
-            surfel_radius=max((o['radius'] for o in obstacles), default=.025),
-            surfel_radii=np.array([o['radius'] for o in obstacles]), minimum_clearance_m=.025,
-            surfel_velocities=np.array([o['velocity'] for o in obstacles]).reshape(-1, 3),
-            surfel_track_ids=np.arange(1, len(obstacles)+1), observation_stamp=t)
+            surfel_centers=np.array(centers).reshape(-1,3),surfel_radius=max(radii,default=.025),
+            surfel_radii=np.array(radii),minimum_clearance_m=.025,
+            surfel_velocities=np.array(velocities).reshape(-1,3),
+            surfel_track_ids=np.array(ids),observation_stamp=t,
+            truth_geometry='exact spheres; conservative full-volume cuboid ball covers')

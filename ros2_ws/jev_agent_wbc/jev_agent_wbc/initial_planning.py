@@ -2,7 +2,8 @@
 
 Arbitrary measured initial camera error is a boundary condition, not an
 instruction to retrace the authored start. The original task and deadline are
-immutable. Startup failure stops the trial; it never selects another candidate.
+immutable. Physical sessions may resume successful preparation stages for the
+same measured input; each rejected construction still needs a new Jev choice.
 """
 from dataclasses import asdict
 import time
@@ -23,6 +24,16 @@ def prepare(engine, state, scene, base_z):
     started=time.monotonic()
     original=engine.original
     scene=dict(scene,subject_model=engine.subject_model,intrinsics=engine.intrinsics)
+    resumable=getattr(engine,'resumable_preparation',False)
+    key=digest(dict(task=original.sha256,state=np.asarray(state).tolist(),scene=scene,base_z=float(base_z)))
+    if not resumable or getattr(engine,'preparation_checkpoint_key',None)!=key:
+        engine.preparation_checkpoint={}
+        engine.preparation_checkpoint_key=key
+    checkpoint=engine.preparation_checkpoint
+    def stage(name,compute):
+        if not resumable or name not in checkpoint:checkpoint[name]=compute()
+        else:engine._write('preparation_checkpoint_resumed',0.,stage=name,input_sha256=key)
+        return checkpoint[name]
     observation=engine.geometry_backend.observe(state,0.,base_z=base_z)
     diagnostic=task_space_planning.diagnose(original,scene,state,np.zeros(8),0.,base_z,engine.planning_limits,
         budget=engine.budget,measured_control=np.zeros(8))
@@ -33,29 +44,39 @@ def prepare(engine, state, scene, base_z):
         construction=dict(construction_evidence(original,original,scene,0.,0.,
             mount_height_m=observation.to_dict()['world_from_mount']['translation_m'][2]),measured_initial_boundary=True))
     evidence=dict(context,stage='strategy')
+    if getattr(engine,'preparation_feedback',None):
+        context['previous_preparation_failures']=engine.preparation_feedback
+        evidence=dict(context,stage='strategy')
     engine._write('strategy_requested',0.,evidence=evidence,startup=True)
-    first=engine.jev.decider.decide(evidence)
+    first=stage('strategy',lambda:engine.jev.decider.decide(evidence))
     engine._write('search_strategy',0.,**first)
     evidence=dict(context,stage='configuration',search_options=offers(first['strategy'],None))
     engine._write('search_configuration_requested',0.,evidence=evidence,startup=True)
-    second=engine.jev.decider.decide(evidence)
+    second=stage('configuration',lambda:engine.jev.decider.decide(evidence))
     engine._write('search_configuration',0.,**second)
-    result=task_space_planning.build(original,original,first['strategy'],scene,state,np.zeros(8),0.,base_z,engine.planning_limits,
+    result=stage('candidate',lambda:task_space_planning.build(original,original,first['strategy'],scene,state,np.zeros(8),0.,base_z,engine.planning_limits,
         budget=engine.budget,measured_control=np.zeros(8),commanded_q=state[3:],
         intrinsics=engine.intrinsics,search_config=second['search_config'],construction_plan=second['construction_plan'],
         initial_boundary=True,representation_boxes=engine.geometry_backend.box_budget,
-        geometry_preferences=engine.geometry_preferences)
+        geometry_preferences=engine.geometry_preferences))
     candidates=result.get('candidates',[])
     engine._write('candidate_set',0.,cards=[c.card() for c in candidates],evaluations=result.get('evaluations',[]),
         planner_wall_s=result['wall_s'],seed_wall_s=result.get('seed_wall_s'),generated_proposals=result.get('generated_proposals'),
         construction_plan=second['construction_plan'],startup=True)
     if result.get('error') or len(candidates)!=1 or len(result.get('evaluations',[]))!=1:
-        raise RuntimeError('initial_single_candidate_rejected:'+result.get('error','invalid_count'))
+        # A geometric rejection invalidates the generating decisions too.
+        # Retaining the family can force every retry into the same infeasible
+        # construction. Transport failures above still retain completed work.
+        checkpoint.clear()
+        engine.preparation_feedback=[dict(reason=result.get('error'),
+            rejected_construction=second['construction_plan'],evaluations=result.get('evaluations'))]
+        raise RuntimeError('initial_single_candidate_rejected:'+(result.get('error') or 'invalid_count'))
     candidate=candidates[0]
     evidence=dict(context,stage='selection',candidates=[candidate.card()])
     engine._write('selection_requested',0.,evidence=evidence,startup=True)
-    selected=engine.jev.decider.decide(evidence)
+    selected=stage('selection',lambda:engine.jev.decider.decide(evidence))
     if selected['candidate_id']!=candidate.id:
+        checkpoint.pop('selection',None)
         raise RuntimeError('initial_choice_binding_mismatch')
     approval=Approval(candidate.id,digest(candidate.card()),path_hash(original),original.sha256,
         selected['selected_probability'],0)
@@ -65,7 +86,9 @@ def prepare(engine, state, scene, base_z):
         intrinsics=engine.intrinsics)
     error=verified.get('error') or installation_guard(verified,original,scene,state,0.,engine.budget,
         measured_control=np.zeros(8),previous=np.zeros(8),commanded_q=state[3:],base_z=base_z)
-    if error:raise RuntimeError('initial_installation_rejected:'+error)
+    if error:
+        checkpoint.clear()
+        raise RuntimeError('initial_installation_rejected:'+error)
     engine.active=candidate.path;engine.active_candidate=candidate
     engine.wbc.set_trajectory(engine.active)
     engine.wbc.kinematic_reference=verified['kinematics']

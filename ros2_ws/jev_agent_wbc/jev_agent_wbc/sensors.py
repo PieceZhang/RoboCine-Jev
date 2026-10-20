@@ -17,15 +17,13 @@ RAYS = directions()
 
 
 def sphere_raycast(origin, rays, spheres, maximum=4.5):
+    # Historical public name; cuboids use their exact oriented surfaces.
+    from .runtime_obstacles import ray_distances
     distances = np.full(len(rays), maximum)
     hit = np.zeros(len(rays), bool)
     for sphere in spheres:
-        relative = np.asarray(origin)-sphere['center']
-        along = rays@relative
-        disc = along**2-(relative@relative-sphere['radius']**2)
-        valid = disc >= 0
-        distance = -along-np.sqrt(np.maximum(disc, 0.))
-        valid &= (distance > .05) & (distance < distances)
+        distance=ray_distances(origin,rays,sphere,maximum)
+        valid = (distance > .05) & (distance < distances)
         distances[valid], hit[valid] = distance[valid], True
     return origin+rays[hit]*distances[hit, None]
 
@@ -39,11 +37,17 @@ class RuntimeLidar:
         self.last = -float('inf')
         self.subject_observation = None
 
-    def integrate(self, state, base_z, t, world_points_by_sensor, origins):
+    def integrate(self, state, base_z, t, world_points_by_sensor, origins, *, acquisition_duration_s=None,exact_ray_geometry=False):
         scans = [dict(points=points-origin, rotation=np.eye(3), translation=origin,
                       state=np.asarray(state).copy(), base_z=base_z,
                       base_rotation=Rotation.from_euler('z', state[2]).as_matrix(), stamp=t+1., sensor=name)
                  for name, points, origin in zip(('rear', 'front'), world_points_by_sensor, origins)]
+        if acquisition_duration_s is not None:
+            if not np.isfinite(acquisition_duration_s) or acquisition_duration_s<0:
+                raise ValueError('scan acquisition duration must be finite and nonnegative')
+            for scan in scans:scan['acquisition_duration_s']=float(acquisition_duration_s)
+        if exact_ray_geometry:
+            for scan in scans:scan['exact_ray_geometry']=True
         self.mapping.integrate_scans(scans)
         snapshot = self.mapping.snapshot()
         # Mapping requires positive initial timestamps; convert to the shared shot clock.
@@ -65,7 +69,14 @@ class RuntimeLidar:
         # Sparse distant wall supports the map when the mover is temporarily unseen.
         wall = np.array([[3.5, y, z] for y in np.linspace(-1.5, 1.5, 41) for z in np.arange(.1, .8, .075)])
         points = [np.vstack([p, wall]) for p in points]
-        return self.integrate(state, base_z, t, points, origins)
+        # All CPU rays are sampled at this one instant. Historical robot poses
+        # cannot explain a return acquired after the robot has left that space.
+        # This harness has exact poses and noiseless mathematical ray hits.
+        # The physical scanners' 6/10 cm self-return uncertainty bands would
+        # otherwise erase genuine nearby obstacle returns. Physical/unknown
+        # packets retain their existing bands, and robot ray shadows are still
+        # rejected geometrically in the mapper.
+        return self.integrate(state, base_z, t, points, origins,acquisition_duration_s=0.,exact_ray_geometry=True)
 
 
 def estimate_subject_from_points(points, initial_center, previous=None, stamp=0., symmetric=False):

@@ -1,0 +1,2754 @@
+{
+  "schema": "wbc_geometry_static_audit/v1",
+  "scope": "authored geometry containment only; real dynamic pose feedback is validated in each physics loop",
+  "all_passed": true,
+  "robots": [
+    {
+      "robot": "Robot_Husky_UR5",
+      "asset": "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Husky_UR5/assets/husky_ur5_v2.usda",
+      "asset_sha256": "2c8819f77d938e1aa2f1926b5763d4a7ea3f585c2dc376ce87df5b3956c115ce",
+      "shape_count": 26,
+      "measured_body_count": 25,
+      "all_authored_collision_bounds_contained": true,
+      "manipulator_bodies": [
+        "left_inner_finger",
+        "left_inner_finger_pad",
+        "left_inner_knuckle",
+        "left_outer_finger",
+        "left_outer_knuckle",
+        "right_inner_finger",
+        "right_inner_finger_pad",
+        "right_inner_knuckle",
+        "right_outer_finger",
+        "right_outer_knuckle",
+        "robotiq_arg2f_base_link",
+        "ur5_flange",
+        "ur5_forearm_link",
+        "ur5_ft_frame",
+        "ur5_shoulder_link",
+        "ur5_tool0",
+        "ur5_upper_arm_link",
+        "ur5_wrist_1_link",
+        "ur5_wrist_2_link",
+        "ur5_wrist_3_link"
+      ],
+      "representation_parts": [
+        "mobile_platform",
+        "camera_manipulator"
+      ],
+      "observation": {
+        "schema": "jev_geometry/v1",
+        "kind": "observation",
+        "stamp_s": 0.0,
+        "source": "measured_fk",
+        "units": "m_s_rad",
+        "axes": "right_handed_camera_x_forward_y_left_z_up",
+        "world_from_mount": {
+          "translation_m": [
+            0.0,
+            0.0,
+            0.1857205585799965
+          ],
+          "quaternion_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        "mount_from_camera": {
+          "translation_m": [
+            1.1884500169753978,
+            0.5314500445127492,
+            0.23950901977231662
+          ],
+          "quaternion_xyzw": [
+            0.7071067811865418,
+            0.707106781186552,
+            3.0908617547668855e-08,
+            3.090861786168735e-08
+          ]
+        },
+        "occupancy_frame": "mount",
+        "occupancy": {
+          "mobile_platform": [
+            {
+              "center_m": [
+                -0.11880017467093584,
+                0.00023888221837181645,
+                0.5
+              ],
+              "half_extents_m": [
+                0.17131548516619965,
+                0.275814251810391,
+                0.25500099523162845
+              ]
+            },
+            {
+              "center_m": [
+                0.0,
+                -0.28540000319480896,
+                0.03282000124454501
+              ],
+              "half_extents_m": [
+                0.4211010055074692,
+                0.057151215862780824,
+                0.16510106846999756
+              ]
+            },
+            {
+              "center_m": [
+                0.0,
+                0.02377511608530583,
+                0.06686011671018781
+              ],
+              "half_extents_m": [
+                0.4937009976634979,
+                0.318776102972284,
+                0.19914118393564034
+              ]
+            }
+          ],
+          "camera_manipulator": [
+            {
+              "center_m": [
+                0.5437763399929294,
+                0.13754868031787668,
+                0.33436527568609253
+              ],
+              "half_extents_m": [
+                0.2723235043449497,
+                0.06689972184389745,
+                0.0596872011341717
+              ]
+            },
+            {
+              "center_m": [
+                0.7296377070704668,
+                0.005632199375570551,
+                0.3357887789607048
+              ],
+              "half_extents_m": [
+                0.4578427427011199,
+                0.06537958242604477,
+                0.0668309198150635
+              ]
+            },
+            {
+              "center_m": [
+                1.1484499701803446,
+                0.2158700646514698,
+                0.23950901167742922
+              ],
+              "half_extents_m": [
+                0.03889074100457868,
+                0.16390911268329028,
+                0.1727014293614333
+              ]
+            }
+          ]
+        },
+        "geometry_scope": "conservative_proxy_of_backend_collision_model_not_safety_certificate"
+      },
+      "geometry": {
+        "schema": "measured_collider_geometry/v1",
+        "shapes": [
+          {
+            "name": "/husky_ur5/husky_base_link/VerifiedChassisCollision0",
+            "body": "husky_base_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              0.061874999999999986
+            ],
+            "half_extents_body": [
+              0.4937009976634979,
+              0.2854510114917755,
+              0.06187600059604645
+            ]
+          },
+          {
+            "name": "/husky_ur5/husky_base_link/VerifiedChassisCollision1",
+            "body": "husky_base_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              0.175625
+            ],
+            "half_extents_body": [
+              0.39496098620986936,
+              0.2854510114917755,
+              0.05187599895691872
+            ]
+          },
+          {
+            "name": "/husky_ur5/husky_front_left_wheel/collisions",
+            "body": "husky_front_left_wheel",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents_body": [
+              0.16510099334812164,
+              0.05715121586278085,
+              0.16510106846999756
+            ]
+          },
+          {
+            "name": "/husky_ur5/husky_front_right_wheel/collisions",
+            "body": "husky_front_right_wheel",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents_body": [
+              0.16510099334812164,
+              0.05715121586278085,
+              0.16510106846999756
+            ]
+          },
+          {
+            "name": "/husky_ur5/husky_rear_left_wheel/collisions",
+            "body": "husky_rear_left_wheel",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents_body": [
+              0.16510099334812164,
+              0.05715121586278085,
+              0.16510106846999756
+            ]
+          },
+          {
+            "name": "/husky_ur5/husky_rear_right_wheel/collisions",
+            "body": "husky_rear_right_wheel",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents_body": [
+              0.16510099334812164,
+              0.05715121586278085,
+              0.16510106846999756
+            ]
+          },
+          {
+            "name": "/husky_ur5/husky_top_plate_link/collisions",
+            "body": "husky_top_plate_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              0.003174999980814719
+            ],
+            "half_extents_body": [
+              0.36500100953674314,
+              0.2950009868869781,
+              0.003175999942444301
+            ]
+          },
+          {
+            "name": "/husky_ur5/husky_sensor_arch_mount_link/collisions",
+            "body": "husky_sensor_arch_mount_link",
+            "part": "mobile_platform",
+            "center_body": [
+              -0.1500000059604645,
+              0.0,
+              -0.2549999952316284
+            ],
+            "half_extents_body": [
+              0.17087688722778555,
+              0.2755424715721887,
+              0.2550009952316284
+            ]
+          },
+          {
+            "name": "/husky_ur5/ur5_base_link_inertia/collisions",
+            "body": "ur5_base_link_inertia",
+            "part": "mobile_platform",
+            "center_body": [
+              -2.692054091940621e-05,
+              0.018224343655140224,
+              0.00899894826579839
+            ],
+            "half_extents_body": [
+              0.07360738104829354,
+              0.09177678680978497,
+              0.012002347611658274
+            ]
+          },
+          {
+            "name": "/husky_ur5/ur5_shoulder_link/collisions",
+            "body": "ur5_shoulder_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -4.8070675898171517e-05,
+              -0.005377467725903157,
+              0.001629762351512909
+            ],
+            "half_extents_body": [
+              0.05945310376700594,
+              0.06512484558302468,
+              0.06683091981506348
+            ]
+          },
+          {
+            "name": "/husky_ur5/ur5_upper_arm_link/collisions",
+            "body": "ur5_upper_arm_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.21257634839385406,
+              0.00020625907690045853,
+              0.1375486617338621
+            ],
+            "half_extents_body": [
+              0.2723234984963932,
+              0.05968720113417144,
+              0.0668996980366207
+            ]
+          },
+          {
+            "name": "/husky_ur5/ur5_forearm_link/collisions",
+            "body": "ur5_forearm_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.18664694200866103,
+              -0.0003108754563469415,
+              0.015167282915798035
+            ],
+            "half_extents_body": [
+              0.2446334886619273,
+              0.058224143983915476,
+              0.055844424027402695
+            ]
+          },
+          {
+            "name": "/husky_ur5/ur5_wrist_1_link/collisions",
+            "body": "ur5_wrist_1_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.00014484487473969895,
+              0.004838081721468268,
+              -0.0030001642389109184
+            ],
+            "half_extents_body": [
+              0.0387459394715855,
+              0.05233903350664894,
+              0.04250144673447867
+            ]
+          },
+          {
+            "name": "/husky_ur5/ur5_wrist_2_link/collisions",
+            "body": "ur5_wrist_2_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -9.766779839980033e-05,
+              -0.004844062030315389,
+              -0.003733798861503601
+            ],
+            "half_extents_body": [
+              0.038793021411488965,
+              0.05234505704100931,
+              0.04211735887622834
+            ]
+          },
+          {
+            "name": "/husky_ur5/ur5_wrist_3_link/collisions",
+            "body": "ur5_wrist_3_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              7.450580489370973e-09,
+              -0.002742162321970415,
+              -0.017225099821371596
+            ],
+            "half_extents_body": [
+              0.037516718078206945,
+              0.04025883359738953,
+              0.017251157408026657
+            ]
+          },
+          {
+            "name": "/husky_ur5/robotiq_arg2f_base_link/collisions",
+            "body": "robotiq_arg2f_base_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -4.85722573273506e-17,
+              0.0,
+              0.043630113010294735
+            ],
+            "half_extents_body": [
+              0.037501008645532054,
+              0.04244435627949448,
+              0.046370890565984826
+            ]
+          },
+          {
+            "name": "/husky_ur5/left_outer_knuckle/collisions",
+            "body": "left_outer_knuckle",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.00019999966025348315,
+              0.00640939362347125,
+              0.005471817217767242
+            ],
+            "half_extents_body": [
+              0.012001008221327906,
+              0.05233691885039454,
+              0.05234078630714299
+            ]
+          },
+          {
+            "name": "/husky_ur5/left_outer_finger/collisions",
+            "body": "left_outer_finger",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.00022499542683359665,
+              0.04089756635949014,
+              -0.014130038674920808
+            ],
+            "half_extents_body": [
+              0.01352600946622013,
+              0.06670099177116828,
+              0.06650593748270454
+            ]
+          },
+          {
+            "name": "/husky_ur5/left_inner_finger/collisions",
+            "body": "left_inner_finger",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.00019999826326967023,
+              0.019263785332441292,
+              -0.008960007689893267
+            ],
+            "half_extents_body": [
+              0.007501002816911038,
+              0.025252703255312526,
+              0.01494214062736157
+            ]
+          },
+          {
+            "name": "/husky_ur5/left_inner_finger_pad/collisions",
+            "body": "left_inner_finger_pad",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents_body": [
+              0.00045099998462503775,
+              0.0024510000242143706,
+              2.912536666986498e-05
+            ]
+          },
+          {
+            "name": "/husky_ur5/left_inner_knuckle/collisions",
+            "body": "left_inner_knuckle",
+            "part": "camera_manipulator",
+            "center_body": [
+              -5.000084638596622e-05,
+              0.049987694714218406,
+              -0.0011092629283666888
+            ],
+            "half_extents_body": [
+              0.019501009420943117,
+              0.06304321332889931,
+              0.06268703736035625
+            ]
+          },
+          {
+            "name": "/husky_ur5/right_inner_knuckle/collisions",
+            "body": "right_inner_knuckle",
+            "part": "camera_manipulator",
+            "center_body": [
+              -5.000084638597489e-05,
+              0.049987694714218364,
+              -0.0011092629283666992
+            ],
+            "half_extents_body": [
+              0.019501016842595913,
+              0.06304321807909007,
+              0.06268705951932722
+            ]
+          },
+          {
+            "name": "/husky_ur5/right_outer_knuckle/collisions",
+            "body": "right_outer_knuckle",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.00019999966025342503,
+              0.0064093936234712184,
+              0.0054718172177671935
+            ],
+            "half_extents_body": [
+              0.0120010021991216,
+              0.052336926849715824,
+              0.05234079395431898
+            ]
+          },
+          {
+            "name": "/husky_ur5/right_outer_finger/collisions",
+            "body": "right_outer_finger",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.00022499542683357323,
+              0.040897566359490184,
+              -0.014130038674920752
+            ],
+            "half_extents_body": [
+              0.013526001992808597,
+              0.06670099733320621,
+              0.06650595223159617
+            ]
+          },
+          {
+            "name": "/husky_ur5/right_inner_finger/collisions",
+            "body": "right_inner_finger",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.00019999826326965635,
+              0.019263785332441365,
+              -0.008960007689893306
+            ],
+            "half_extents_body": [
+              0.0075031688779901426,
+              0.025293915618696976,
+              0.015012875013694662
+            ]
+          },
+          {
+            "name": "/husky_ur5/right_inner_finger_pad/collisions",
+            "body": "right_inner_finger_pad",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents_body": [
+              0.00045100454178441596,
+              0.0024510776888753204,
+              3.594807929252012e-05
+            ]
+          }
+        ],
+        "body_names": [
+          "husky_base_link",
+          "husky_front_left_wheel",
+          "husky_front_right_wheel",
+          "husky_rear_left_wheel",
+          "husky_rear_right_wheel",
+          "husky_sensor_arch_mount_link",
+          "husky_top_plate_link",
+          "left_inner_finger",
+          "left_inner_finger_pad",
+          "left_inner_knuckle",
+          "left_outer_finger",
+          "left_outer_knuckle",
+          "right_inner_finger",
+          "right_inner_finger_pad",
+          "right_inner_knuckle",
+          "right_outer_finger",
+          "right_outer_knuckle",
+          "robotiq_arg2f_base_link",
+          "ur5_base_link_inertia",
+          "ur5_forearm_link",
+          "ur5_shoulder_link",
+          "ur5_upper_arm_link",
+          "ur5_wrist_1_link",
+          "ur5_wrist_2_link",
+          "ur5_wrist_3_link"
+        ],
+        "runtime_transform_source": "measured_physx_bodies",
+        "geometry_scope": "conservative_collision_aabbs_not_exact_contact_certificate"
+      }
+    },
+    {
+      "robot": "Robot_Ridgeback_UR5",
+      "asset": "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Ridgeback_UR5/assets/Isaac/Robots/Clearpath/RidgebackUr/ridgeback_ur5.usd",
+      "asset_sha256": "ee5701cbc4bdd07e59c63424bd751e4e6cad0585a2f9111a2a38642862780e64",
+      "shape_count": 13,
+      "measured_body_count": 7,
+      "all_authored_collision_bounds_contained": true,
+      "manipulator_bodies": [
+        "ur_arm_forearm_link",
+        "ur_arm_shoulder_link",
+        "ur_arm_upper_arm_link",
+        "ur_arm_wrist_1_link",
+        "ur_arm_wrist_2_link",
+        "ur_arm_wrist_3_link"
+      ],
+      "representation_parts": [
+        "mobile_platform",
+        "camera_manipulator"
+      ],
+      "observation": {
+        "schema": "jev_geometry/v1",
+        "kind": "observation",
+        "stamp_s": 0.0,
+        "source": "measured_fk",
+        "units": "m_s_rad",
+        "axes": "right_handed_camera_x_forward_y_left_z_up",
+        "world_from_mount": {
+          "translation_m": [
+            -0.0044084214605391026,
+            -0.00020073523046448827,
+            0.0
+          ],
+          "quaternion_xyzw": [
+            5.485278894555344e-12,
+            -1.5168474162496894e-08,
+            3.4212076231229246e-05,
+            0.9999999994147668
+          ]
+        },
+        "mount_from_camera": {
+          "translation_m": [
+            0.6671248557816244,
+            0.1091430570780575,
+            0.6751446247800659
+          ],
+          "quaternion_xyzw": [
+            6.398725743911817e-08,
+            0.007915185970476572,
+            -3.959833284449628e-06,
+            0.9999686744170381
+          ]
+        },
+        "occupancy_frame": "mount",
+        "occupancy": {
+          "mobile_platform": [
+            {
+              "center_m": [
+                0.0,
+                -5.551115123125783e-17,
+                0.12705003878846433
+              ],
+              "half_extents_m": [
+                0.4663629214281223,
+                0.39512362356096464,
+                0.15295104875294607
+              ]
+            },
+            {
+              "center_m": [
+                2.691894769668579e-05,
+                -0.018224343657493564,
+                0.2889989494578914
+              ],
+              "half_extents_m": [
+                0.07363247866648184,
+                0.09179691517172969,
+                0.012002356548858728
+              ]
+            },
+            {
+              "center_m": [
+                0.3190000057220459,
+                2.7755575615628914e-17,
+                0.05000000074505806
+              ],
+              "half_extents_m": [
+                0.039521785478773414,
+                0.35141181801422094,
+                0.07590101070953983
+              ]
+            }
+          ],
+          "camera_manipulator": [
+            {
+              "center_m": [
+                4.8130559321804545e-05,
+                0.005377467195330055,
+                0.37078874558066854
+              ],
+              "half_extents_m": [
+                0.05946874654647416,
+                0.06513912432575504,
+                0.06683092162298232
+              ]
+            },
+            {
+              "center_m": [
+                0.05689397889642844,
+                0.13754798077594815,
+                0.5739808082843213
+              ],
+              "half_extents_m": [
+                0.274665021825725,
+                0.0669492242158524,
+                0.34594091876117883
+              ]
+            },
+            {
+              "center_m": [
+                0.3211558071726214,
+                0.05395773528217951,
+                0.7389834625267744
+              ],
+              "half_extents_m": [
+                0.26789126325619217,
+                0.094697559129302,
+                0.1061347788805424
+              ]
+            }
+          ]
+        },
+        "geometry_scope": "conservative_proxy_of_backend_collision_model_not_safety_certificate"
+      },
+      "geometry": {
+        "schema": "measured_collider_geometry/v1",
+        "shapes": [
+          {
+            "name": "/ridgeback/base_link/collisions/mesh_0",
+            "body": "base_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              -2.7755575615628914e-17,
+              0.13965854048728946
+            ],
+            "half_extents_body": [
+              0.46630884991929583,
+              0.3950598099822053,
+              0.135868057727403
+            ]
+          },
+          {
+            "name": "/ridgeback/base_link/collisions/mesh_1",
+            "body": "base_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.3190000057220459,
+              0.27549999952316284,
+              0.050000000745058046
+            ],
+            "half_extents_body": [
+              0.03951139320985775,
+              0.07590641142206499,
+              0.07590100831040657
+            ]
+          },
+          {
+            "name": "/ridgeback/base_link/collisions/mesh_2",
+            "body": "base_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.3190000057220459,
+              -0.27549999952316284,
+              0.05000000074505807
+            ],
+            "half_extents_body": [
+              0.03951139320985775,
+              0.07590641142206499,
+              0.07590100831040657
+            ]
+          },
+          {
+            "name": "/ridgeback/base_link/collisions/mesh_3",
+            "body": "base_link",
+            "part": "mobile_platform",
+            "center_body": [
+              -0.31900000572204595,
+              0.27549999952316284,
+              0.050000000745058046
+            ],
+            "half_extents_body": [
+              0.039511393209857776,
+              0.075906411422065,
+              0.07590100831040657
+            ]
+          },
+          {
+            "name": "/ridgeback/base_link/collisions/mesh_4",
+            "body": "base_link",
+            "part": "mobile_platform",
+            "center_body": [
+              -0.31900000572204595,
+              -0.27549999952316284,
+              0.050000000745058074
+            ],
+            "half_extents_body": [
+              0.039511393209857776,
+              0.07590641142206499,
+              0.07590100831040657
+            ]
+          },
+          {
+            "name": "/ridgeback/base_link/collisions/mesh_5",
+            "body": "base_link",
+            "part": "mobile_platform",
+            "center_body": [
+              2.7755575615628914e-17,
+              0.0,
+              0.27682502567768097
+            ],
+            "half_extents_body": [
+              0.46586228386969636,
+              0.39505974886831347,
+              0.0031760335885608884
+            ]
+          },
+          {
+            "name": "/ridgeback/base_link/collisions/mesh_6",
+            "body": "base_link",
+            "part": "mobile_platform",
+            "center_body": [
+              2.691894769668579e-05,
+              -0.018224343657493577,
+              0.28899894945789134
+            ],
+            "half_extents_body": [
+              0.07361991706476452,
+              0.09178684041061187,
+              0.012002352079846982
+            ]
+          },
+          {
+            "name": "/ridgeback/ur_arm_shoulder_link/collisions",
+            "body": "ur_arm_shoulder_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -4.80706758981958e-05,
+              -0.005377467725903164,
+              0.001629762351512909
+            ],
+            "half_extents_body": [
+              0.05946055579136126,
+              0.06513164859983217,
+              0.06683091981717787
+            ]
+          },
+          {
+            "name": "/ridgeback/ur_arm_upper_arm_link/collisions",
+            "body": "ur_arm_upper_arm_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.21257634839385414,
+              0.000206259076900292,
+              0.13754866173386207
+            ],
+            "half_extents_body": [
+              0.30320726541856236,
+              0.20059461069465487,
+              0.06691467402790455
+            ]
+          },
+          {
+            "name": "/ridgeback/ur_arm_forearm_link/collisions",
+            "body": "ur_arm_forearm_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.18664694200866094,
+              -0.0003108754563469415,
+              0.015167282915798025
+            ],
+            "half_extents_body": [
+              0.2464781163223063,
+              0.06594782159690463,
+              0.05587255003130483
+            ]
+          },
+          {
+            "name": "/ridgeback/ur_arm_wrist_1_link/collisions",
+            "body": "ur_arm_wrist_1_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.00014484487473969895,
+              0.004838081721468313,
+              -0.003000164238910929
+            ],
+            "half_extents_body": [
+              0.04040758842108155,
+              0.05356559384896209,
+              0.042505979579303715
+            ]
+          },
+          {
+            "name": "/ridgeback/ur_arm_wrist_2_link/collisions",
+            "body": "ur_arm_wrist_2_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -9.766779839992176e-05,
+              -0.00484406203031542,
+              -0.003733798861503674
+            ],
+            "half_extents_body": [
+              0.03879943741008458,
+              0.053682973363035034,
+              0.04377441901797477
+            ]
+          },
+          {
+            "name": "/ridgeback/ur_arm_wrist_3_link/collisions",
+            "body": "ur_arm_wrist_3_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              7.450580593454381e-09,
+              -0.002742162321970283,
+              -0.0172250998213715
+            ],
+            "half_extents_body": [
+              0.03751887532587127,
+              0.04080496508643731,
+              0.01853008725809202
+            ]
+          }
+        ],
+        "body_names": [
+          "base_link",
+          "ur_arm_forearm_link",
+          "ur_arm_shoulder_link",
+          "ur_arm_upper_arm_link",
+          "ur_arm_wrist_1_link",
+          "ur_arm_wrist_2_link",
+          "ur_arm_wrist_3_link"
+        ],
+        "runtime_transform_source": "measured_physx_bodies",
+        "geometry_scope": "conservative_collision_aabbs_not_exact_contact_certificate"
+      }
+    },
+    {
+      "robot": "Robot_TIAGo",
+      "asset": "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_TIAGo/assets/usd/tiago.usd",
+      "asset_sha256": "8cd75c78bb2c16eb8d0e41b317ef6352d174c0ae6e115df733e7211bfdad9ed9",
+      "shape_count": 28,
+      "measured_body_count": 25,
+      "all_authored_collision_bounds_contained": true,
+      "manipulator_bodies": [
+        "arm_1_link",
+        "arm_2_link",
+        "arm_3_link",
+        "arm_4_link",
+        "arm_5_link",
+        "arm_6_link",
+        "arm_7_link",
+        "arm_tool_link",
+        "gripper_grasping_frame",
+        "gripper_left_finger_link",
+        "gripper_link",
+        "gripper_right_finger_link",
+        "head_1_link",
+        "head_2_link",
+        "torso_lift_link"
+      ],
+      "representation_parts": [
+        "mobile_platform",
+        "camera_manipulator"
+      ],
+      "observation": {
+        "schema": "jev_geometry/v1",
+        "kind": "observation",
+        "stamp_s": 0.0,
+        "source": "measured_fk",
+        "units": "m_s_rad",
+        "axes": "right_handed_camera_x_forward_y_left_z_up",
+        "world_from_mount": {
+          "translation_m": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quaternion_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        "mount_from_camera": {
+          "translation_m": [
+            0.15105008721354682,
+            -1.0359998083114406,
+            0.44800005674362764
+          ],
+          "quaternion_xyzw": [
+            0.7071069076270662,
+            -0.7071066547459736,
+            4.2146878656669606e-08,
+            2.1073421397879693e-07
+          ]
+        },
+        "occupancy_frame": "mount",
+        "occupancy": {
+          "mobile_platform": [
+            {
+              "center_m": [
+                -0.20100000500679016,
+                0.0,
+                0.2799999937415123
+              ],
+              "half_extents_m": [
+                0.005000999888241292,
+                0.11120100202208758,
+                0.0850010008940697
+              ]
+            },
+            {
+              "center_m": [
+                0.004875002652406701,
+                0.0,
+                0.3907250037878752
+              ],
+              "half_extents_m": [
+                0.09812600163912774,
+                0.035113496209144696,
+                0.1785260005036593
+              ]
+            },
+            {
+              "center_m": [
+                0.009000006568385288,
+                0.0,
+                0.0514999978446946
+              ],
+              "half_extents_m": [
+                0.25900100656838526,
+                0.2497757391462326,
+                0.15000100072479394
+              ]
+            }
+          ],
+          "camera_manipulator": [
+            {
+              "center_m": [
+                -0.08488200232386589,
+                0.0002629980444908142,
+                0.5565320439454808
+              ],
+              "half_extents_m": [
+                0.1398889997432232,
+                0.1672950030694008,
+                0.23349702891175894
+              ]
+            },
+            {
+              "center_m": [
+                0.10890330106831847,
+                -0.4535357343886435,
+                0.6038985457271338
+              ],
+              "half_extents_m": [
+                0.07160670205069838,
+                0.5235150311453879,
+                0.07310251122510436
+              ]
+            },
+            {
+              "center_m": [
+                0.12524215131998062,
+                4.4493554102353894e-05,
+                0.8406585223638927
+              ],
+              "half_extents_m": [
+                0.10775885148143768,
+                0.12993850865765164,
+                0.17234250242447008
+              ]
+            }
+          ]
+        },
+        "geometry_scope": "conservative_proxy_of_backend_collision_model_not_safety_certificate"
+      },
+      "geometry": {
+        "schema": "measured_collider_geometry/v1",
+        "shapes": [
+          {
+            "name": "/tiago/base_link/collisions/base_collision/node_STL_BINARY_/mesh",
+            "body": "base_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              0.06399999931454659
+            ],
+            "half_extents_body": [
+              0.250001,
+              0.2497757391462326,
+              0.13750099925494194
+            ]
+          },
+          {
+            "name": "/tiago/base_antenna_left_link/collisions/mesh_0/cylinder",
+            "body": "base_antenna_left_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              0.08500000089406967
+            ],
+            "half_extents_body": [
+              0.005000999888241291,
+              0.005000999888241291,
+              0.08500100089406967
+            ]
+          },
+          {
+            "name": "/tiago/base_antenna_right_link/collisions/mesh_0/cylinder",
+            "body": "base_antenna_right_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              0.08500000089406967
+            ],
+            "half_extents_body": [
+              0.005000999888241291,
+              0.005000999888241291,
+              0.08500100089406967
+            ]
+          },
+          {
+            "name": "/tiago/base_dock_link/collisions/base_dock_link/node_STL_BINARY_/mesh",
+            "body": "base_dock_link",
+            "part": "mobile_platform",
+            "center_body": [
+              -0.007249999820487574,
+              0.0,
+              0.0
+            ],
+            "half_extents_body": [
+              0.0077509998442362995,
+              0.02750099985098839,
+              0.032500998807907105
+            ]
+          },
+          {
+            "name": "/tiago/caster_back_left_2_link/collisions/mesh_0/sphere",
+            "body": "caster_back_left_2_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents_body": [
+              0.02500100037252903,
+              0.025001002083956152,
+              0.025001002083956128
+            ]
+          },
+          {
+            "name": "/tiago/caster_back_right_2_link/collisions/mesh_0/sphere",
+            "body": "caster_back_right_2_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents_body": [
+              0.02500100037252903,
+              0.025001002083956152,
+              0.025001002083956128
+            ]
+          },
+          {
+            "name": "/tiago/caster_front_left_2_link/collisions/mesh_0/sphere",
+            "body": "caster_front_left_2_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents_body": [
+              0.02500100037252903,
+              0.025001002083956152,
+              0.025001002083956128
+            ]
+          },
+          {
+            "name": "/tiago/caster_front_right_2_link/collisions/mesh_0/sphere",
+            "body": "caster_front_right_2_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents_body": [
+              0.02500100037252903,
+              0.025001002083956152,
+              0.025001002083956128
+            ]
+          },
+          {
+            "name": "/tiago/wheel_left_link/collisions/mesh_0/cylinder",
+            "body": "wheel_left_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents_body": [
+              0.09850099845027924,
+              0.0985009998194209,
+              0.02000100629598775
+            ]
+          },
+          {
+            "name": "/tiago/wheel_right_link/collisions/mesh_0/cylinder",
+            "body": "wheel_right_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "half_extents_body": [
+              0.09850099845027924,
+              0.0985009998194209,
+              0.02000100629598775
+            ]
+          },
+          {
+            "name": "/tiago/torso_fixed_column_link/collisions/mesh_0/box",
+            "body": "torso_fixed_column_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              0.2750000059604645
+            ],
+            "half_extents_body": [
+              0.026912998451232933,
+              0.035113496209144696,
+              0.10125099463558204
+            ]
+          },
+          {
+            "name": "/tiago/torso_fixed_link/collisions/mesh_0/box",
+            "body": "torso_fixed_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.08500000089406967,
+              0.0,
+              0.019999999552965164
+            ],
+            "half_extents_body": [
+              0.08000100238418581,
+              0.031251,
+              0.0008009999642372136
+            ]
+          },
+          {
+            "name": "/tiago/torso_fixed_link/collisions/mesh_1/box",
+            "body": "torso_fixed_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              0.05000000074505806
+            ],
+            "half_extents_body": [
+              0.031251,
+              0.031251,
+              0.005001000149011613
+            ]
+          },
+          {
+            "name": "/tiago/torso_lift_link/collisions/torso_lift_collision_core/node_/mesh",
+            "body": "torso_lift_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.02288200333714485,
+              0.0002629980444908142,
+              -0.23346797751219128
+            ],
+            "half_extents_body": [
+              0.1398889997432232,
+              0.1672950030694008,
+              0.2334970289117589
+            ]
+          },
+          {
+            "name": "/tiago/torso_lift_link/collisions/torso_lift_collision_shoulder/node_/mesh",
+            "body": "torso_lift_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.15413879603147507,
+              0.014340847730636597,
+              -0.21169649064540863
+            ],
+            "half_extents_body": [
+              0.05484219802713394,
+              0.05563844902610779,
+              0.04750749631023407
+            ]
+          },
+          {
+            "name": "/tiago/torso_lift_link/collisions/torso_lift_collision_neck/node_/mesh",
+            "body": "torso_lift_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.15950865298509598,
+              -7.914751768112183e-05,
+              -0.060845050959187574
+            ],
+            "half_extents_body": [
+              0.080025354159832,
+              0.06543655110692978,
+              0.06083895055906194
+            ]
+          },
+          {
+            "name": "/tiago/arm_1_link/collisions/arm_1_collision/node_STL_BINARY_/mesh",
+            "body": "arm_1_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.062296498566865935,
+              0.01797949895262717,
+              -0.022441299632191658
+            ],
+            "half_extents_body": [
+              0.11379750338283447,
+              0.0694805068024082,
+              0.06044229841029644
+            ]
+          },
+          {
+            "name": "/tiago/arm_2_link/collisions/arm_2_collision/node_STL_BINARY_/mesh",
+            "body": "arm_2_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.014763850718736662,
+              -8.67992639541626e-05,
+              0.0054712481796741555
+            ],
+            "half_extents_body": [
+              0.066737158932086,
+              0.051871009197918816,
+              0.053816459945293396
+            ]
+          },
+          {
+            "name": "/tiago/arm_3_link/collisions/arm_3_collision/node_STL_BINARY_/mesh",
+            "body": "arm_3_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.011715000495314508,
+              0.004374900832772307,
+              -0.1324830120429397
+            ],
+            "half_extents_body": [
+              0.06026313184389378,
+              0.05401133203226052,
+              0.1414840205053931
+            ]
+          },
+          {
+            "name": "/tiago/arm_4_link/collisions/arm_4_collision/node_STL_BINARY_/mesh",
+            "body": "arm_4_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.06977874599397191,
+              0.009178200736641828,
+              0.02279084920883179
+            ],
+            "half_extents_body": [
+              0.12172227453583542,
+              0.060484741589379845,
+              0.05412559247230361
+            ]
+          },
+          {
+            "name": "/tiago/arm_5_link/collisions/arm_5_collision_wrist_2017/node_STL_BINARY_/mesh",
+            "body": "arm_5_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.005538599565625191,
+              0.00044214725494384766,
+              0.09063799679279326
+            ],
+            "half_extents_body": [
+              0.06118649965322018,
+              0.06600026091162484,
+              0.10244306761383153
+            ]
+          },
+          {
+            "name": "/tiago/arm_6_link/collisions/arm_6_collision_wrist_2017/node_STL_BINARY_/mesh",
+            "body": "arm_6_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.013495650142431356,
+              -2.5000423192981375e-05,
+              -0.0001121005043387413
+            ],
+            "half_extents_body": [
+              0.05470751016852504,
+              0.042068977827599746,
+              0.020829000269830228
+            ]
+          },
+          {
+            "name": "/tiago/arm_tool_link/collisions/mesh_0/cylinder",
+            "body": "arm_tool_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.0010000000474975036,
+              5.204170427930421e-18,
+              3.686287386450715e-17
+            ],
+            "half_extents_body": [
+              0.0025010088869166823,
+              0.005001005117005778,
+              0.005001000816750731
+            ]
+          },
+          {
+            "name": "/tiago/gripper_link/collisions/gripper_link_collision/node_STL_BINARY_/mesh",
+            "body": "gripper_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -7.28583859910259e-17,
+              -6.938893903907228e-18,
+              -0.04992762813344592
+            ],
+            "half_extents_body": [
+              0.05165085788278585,
+              0.03900106701154516,
+              0.058131792453004066
+            ]
+          },
+          {
+            "name": "/tiago/gripper_left_finger_link/collisions/mesh_0/box",
+            "body": "gripper_left_finger_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.004999999888241315,
+              4.445228907190568e-18,
+              -0.16500000655651093
+            ],
+            "half_extents_body": [
+              5.112014661180241e-05,
+              0.0012510089921099522,
+              0.006051000864350105
+            ]
+          },
+          {
+            "name": "/tiago/gripper_right_finger_link/collisions/mesh_0/box",
+            "body": "gripper_right_finger_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.004999999888241302,
+              3.469446951953614e-18,
+              -0.16500000655651093
+            ],
+            "half_extents_body": [
+              5.112014661180241e-05,
+              0.0012510089921099522,
+              0.006051000864350119
+            ]
+          },
+          {
+            "name": "/tiago/head_1_link/collisions/head_1_collision/node_/mesh",
+            "body": "head_1_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.009988252073526382,
+              0.0,
+              0.0884655003901571
+            ],
+            "half_extents_body": [
+              0.07993835000491142,
+              0.0430010014603138,
+              0.0844665002001673
+            ]
+          },
+          {
+            "name": "/tiago/head_2_link/collisions/head_2_collision/node_/mesh",
+            "body": "head_2_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.012000001966953278,
+              0.03836629912257199,
+              -4.4494867324815224e-05
+            ],
+            "half_extents_body": [
+              0.09600100083446503,
+              0.08663470977257047,
+              0.12993850569227192
+            ]
+          }
+        ],
+        "body_names": [
+          "arm_1_link",
+          "arm_2_link",
+          "arm_3_link",
+          "arm_4_link",
+          "arm_5_link",
+          "arm_6_link",
+          "arm_tool_link",
+          "base_antenna_left_link",
+          "base_antenna_right_link",
+          "base_dock_link",
+          "base_link",
+          "caster_back_left_2_link",
+          "caster_back_right_2_link",
+          "caster_front_left_2_link",
+          "caster_front_right_2_link",
+          "gripper_left_finger_link",
+          "gripper_link",
+          "gripper_right_finger_link",
+          "head_1_link",
+          "head_2_link",
+          "torso_fixed_column_link",
+          "torso_fixed_link",
+          "torso_lift_link",
+          "wheel_left_link",
+          "wheel_right_link"
+        ],
+        "runtime_transform_source": "measured_physx_bodies",
+        "geometry_scope": "conservative_collision_aabbs_not_exact_contact_certificate"
+      }
+    },
+    {
+      "robot": "Robot_G1",
+      "asset": "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_G1/assets/G1/g1.usd",
+      "asset_sha256": "448e37857ce9bec3bf29c41c88dd81932cd9b0ad2a107bb307353168b33a7266",
+      "shape_count": 31,
+      "measured_body_count": 24,
+      "all_authored_collision_bounds_contained": true,
+      "manipulator_bodies": [
+        "left_elbow_link",
+        "left_hand_index_0_link",
+        "left_hand_index_1_link",
+        "left_hand_middle_0_link",
+        "left_hand_middle_1_link",
+        "left_hand_palm_link",
+        "left_hand_thumb_0_link",
+        "left_hand_thumb_1_link",
+        "left_hand_thumb_2_link",
+        "left_shoulder_pitch_link",
+        "left_shoulder_roll_link",
+        "left_shoulder_yaw_link",
+        "left_wrist_pitch_link",
+        "left_wrist_roll_link",
+        "left_wrist_yaw_link",
+        "right_elbow_link",
+        "right_hand_index_0_link",
+        "right_hand_index_1_link",
+        "right_hand_middle_0_link",
+        "right_hand_middle_1_link",
+        "right_hand_palm_link",
+        "right_hand_thumb_0_link",
+        "right_hand_thumb_1_link",
+        "right_hand_thumb_2_link",
+        "right_shoulder_pitch_link",
+        "right_shoulder_roll_link",
+        "right_shoulder_yaw_link",
+        "right_wrist_pitch_link",
+        "right_wrist_roll_link",
+        "right_wrist_yaw_link",
+        "torso_link",
+        "waist_roll_link",
+        "waist_yaw_link"
+      ],
+      "representation_parts": [
+        "mobile_platform",
+        "camera_manipulator"
+      ],
+      "observation": {
+        "schema": "jev_geometry/v1",
+        "kind": "observation",
+        "stamp_s": 0.0,
+        "source": "measured_fk",
+        "units": "m_s_rad",
+        "axes": "right_handed_camera_x_forward_y_left_z_up",
+        "world_from_mount": {
+          "translation_m": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quaternion_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        "mount_from_camera": {
+          "translation_m": [
+            0.39977429509162904,
+            -0.10865170419216155,
+            0.20523282945156096
+          ],
+          "quaternion_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        "occupancy_frame": "mount",
+        "occupancy": {
+          "mobile_platform": [
+            {
+              "center_m": [
+                0.0016515962779521942,
+                7.826834917068481e-06,
+                -0.08988468907773495
+              ],
+              "half_extents_m": [
+                0.05978064773774147,
+                0.06776956258511543,
+                0.06212178966200352
+              ]
+            },
+            {
+              "center_m": [
+                0.012009184807538986,
+                -2.3655593395233154e-07,
+                -0.5768074728548527
+              ],
+              "half_extents_m": [
+                0.05190910561180115,
+                0.15441482862627506,
+                0.1775620111653805
+              ]
+            },
+            {
+              "center_m": [
+                0.04999767169356345,
+                1.3877787807814457e-17,
+                -0.7878637132644654
+              ],
+              "half_extents_m": [
+                0.07500100193826134,
+                0.14950745616616312,
+                0.005001000187710436
+              ]
+            }
+          ],
+          "camera_manipulator": [
+            {
+              "center_m": [
+                0.0045286607928574085,
+                6.370246410369873e-07,
+                0.28283194871619344
+              ],
+              "half_extents_m": [
+                0.07513592181897163,
+                0.10771475522017479,
+                0.24774164449593428
+              ]
+            },
+            {
+              "center_m": [
+                0.26607275570505273,
+                4.983780240191971e-06,
+                0.09249188451826923
+              ],
+              "half_extents_m": [
+                0.010810690041489879,
+                0.1516401074855187,
+                0.01310778796340234
+              ]
+            },
+            {
+              "center_m": [
+                0.299264879283694,
+                5.000270903110504e-06,
+                0.09250332363658212
+              ],
+              "half_extents_m": [
+                0.11748423900738116,
+                0.17865770379251242,
+                0.04390961815947042
+              ]
+            }
+          ]
+        },
+        "geometry_scope": "conservative_proxy_of_backend_collision_model_not_safety_certificate"
+      },
+      "geometry": {
+        "schema": "measured_collider_geometry/v1",
+        "shapes": [
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/left_hand/left_hand_index_0_link/collisions/left_hand_index_0_link/mesh",
+            "body": "left_hand_index_0_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.023899999912828238,
+              -0.0010250019840896147,
+              5.000038072466503e-05
+            ],
+            "half_extents_body": [
+              0.03090762747500252,
+              0.01363936608908906,
+              0.012856036746337108
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/left_hand/left_hand_index_1_link/collisions/left_hand_index_1_link/mesh",
+            "body": "left_hand_index_1_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.022480837535113127,
+              7.378729060292938e-05,
+              0.00010006409138439872
+            ],
+            "half_extents_body": [
+              0.029486653146370372,
+              0.0088596708598181,
+              0.013005242932296115
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/left_hand/left_hand_middle_0_link/collisions/left_hand_middle_0_link/mesh",
+            "body": "left_hand_middle_0_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.023899999912828183,
+              -0.0010250019840896147,
+              5.000038072466503e-05
+            ],
+            "half_extents_body": [
+              0.03090762747500252,
+              0.01363936608908906,
+              0.012856036746337108
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/left_hand/left_hand_middle_1_link/collisions/left_hand_middle_1_link/mesh",
+            "body": "left_hand_middle_1_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.022480837535113127,
+              7.378729060290162e-05,
+              0.00010006409138439525
+            ],
+            "half_extents_body": [
+              0.029486653146370372,
+              0.0088596708598181,
+              0.013005242932296119
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/left_hand/left_hand_thumb_0_link/collisions/left_hand_thumb_0_link/mesh",
+            "body": "left_hand_thumb_0_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.0007000002078711666,
+              -0.014150000177323806,
+              -8.673617379884035e-19
+            ],
+            "half_extents_body": [
+              0.010807459238738255,
+              0.014156272207746526,
+              0.00950388670627285
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/left_hand/left_hand_thumb_1_link/collisions/mesh_0/box",
+            "body": "left_hand_thumb_1_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.0010000000474974346,
+              -0.03200000151991845,
+              -4.0657581468206416e-20
+            ],
+            "half_extents_body": [
+              0.00020119417267979044,
+              0.00045110049914747527,
+              0.0002010760112335326
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/left_hand/left_hand_thumb_2_link/collisions/left_hand_thumb_2_link/mesh",
+            "body": "left_hand_thumb_2_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -7.378729060293979e-05,
+              -0.022480837535113086,
+              -0.00010006409138442213
+            ],
+            "half_extents_body": [
+              0.008859541847958273,
+              0.02948678215823015,
+              0.01300544771488134
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/left_hand/left_hand_palm_link/collisions/left_hand_palm_link/mesh",
+            "body": "left_hand_palm_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.04335,
+              0.0005490276962518761,
+              8.903443813323975e-07
+            ],
+            "half_extents_body": [
+              0.04336381574078761,
+              0.02089003884299148,
+              0.04390511164508269
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/pelvis/collisions/pelvis_contour_link/mesh",
+            "body": "pelvis",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0016515962779521942,
+              7.826834917068481e-06,
+              -0.08988468907773495
+            ],
+            "half_extents_body": [
+              0.05978064773774147,
+              0.06776956258511543,
+              0.06212178966200352
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/left_knee_link/collisions/left_knee_link/mesh",
+            "body": "left_knee_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.012011513113975525,
+              -3.686174750328064e-05,
+              -0.1375117339193821
+            ],
+            "half_extents_body": [
+              0.05190910561180115,
+              0.03585055632686615,
+              0.17756201116538048
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/left_ankle_roll_link/collisions/spheres/Sphere_05",
+            "body": "left_ankle_roll_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.12,
+              0.026000000000000023,
+              -0.031000000000000028
+            ],
+            "half_extents_body": [
+              0.005001001938261334,
+              0.005001002234831491,
+              0.005001000187710407
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/left_ankle_roll_link/collisions/spheres/Sphere_04",
+            "body": "left_ankle_roll_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.12,
+              -0.025999999999999968,
+              -0.031000000000000028
+            ],
+            "half_extents_body": [
+              0.005001001938261334,
+              0.005001002234831477,
+              0.005001000187710407
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/left_ankle_roll_link/collisions/spheres/Sphere_07",
+            "body": "left_ankle_roll_link",
+            "part": "mobile_platform",
+            "center_body": [
+              -0.020000000000000004,
+              -0.025999999999999995,
+              -0.031000000000000028
+            ],
+            "half_extents_body": [
+              0.005001001938261341,
+              0.005001002234831477,
+              0.005001000187710407
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/left_ankle_roll_link/collisions/spheres/Sphere_06",
+            "body": "left_ankle_roll_link",
+            "part": "mobile_platform",
+            "center_body": [
+              -0.02,
+              0.026000000000000023,
+              -0.031000000000000028
+            ],
+            "half_extents_body": [
+              0.005001001938261341,
+              0.005001002234831491,
+              0.005001000187710407
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/right_knee_link/collisions/right_knee_link/mesh",
+            "body": "right_knee_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.012011513113975525,
+              3.482215106487274e-05,
+              -0.1375117339193821
+            ],
+            "half_extents_body": [
+              0.05190910561180115,
+              0.03584898984229565,
+              0.17756201116538048
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/right_ankle_roll_link/collisions/spheres/Sphere_05",
+            "body": "right_ankle_roll_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.12,
+              0.02600000000000001,
+              -0.031000000000000028
+            ],
+            "half_extents_body": [
+              0.005001001938261334,
+              0.005001002234831477,
+              0.005001000187710407
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/right_ankle_roll_link/collisions/spheres/Sphere_04",
+            "body": "right_ankle_roll_link",
+            "part": "mobile_platform",
+            "center_body": [
+              0.12,
+              -0.025999999999999968,
+              -0.031000000000000028
+            ],
+            "half_extents_body": [
+              0.005001001938261334,
+              0.005001002234831491,
+              0.005001000187710407
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/right_ankle_roll_link/collisions/spheres/Sphere_07",
+            "body": "right_ankle_roll_link",
+            "part": "mobile_platform",
+            "center_body": [
+              -0.020000000000000004,
+              -0.025999999999999995,
+              -0.031000000000000028
+            ],
+            "half_extents_body": [
+              0.005001001938261341,
+              0.005001002234831491,
+              0.005001000187710407
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/right_ankle_roll_link/collisions/spheres/Sphere_06",
+            "body": "right_ankle_roll_link",
+            "part": "mobile_platform",
+            "center_body": [
+              -0.02,
+              0.02600000000000001,
+              -0.031000000000000028
+            ],
+            "half_extents_body": [
+              0.005001001938261341,
+              0.005001002234831477,
+              0.005001000187710407
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/torso_link/collisions/torso_link_rev_1_0/mesh",
+            "body": "torso_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.008492160588502884,
+              6.370246410369873e-07,
+              0.15135536761954427
+            ],
+            "half_extents_body": [
+              0.07513592181897163,
+              0.10771475522017479,
+              0.1602650631608665
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/torso_link/collisions/head_link/mesh",
+            "body": "torso_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.007777403574436903,
+              2.101808786392212e-05,
+              0.3836842328310013
+            ],
+            "half_extents_body": [
+              0.07017112313008309,
+              0.07779662473297119,
+              0.10288936061954498
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/left_wrist_yaw_link/collisions/left_wrist_yaw_link/mesh",
+            "body": "left_wrist_yaw_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.011753772385418415,
+              0.003067745827138424,
+              -0.00024709664285182953
+            ],
+            "half_extents_body": [
+              0.029747427200734616,
+              0.026933255364954473,
+              0.030248095972299577
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/right_wrist_yaw_link/collisions/right_wrist_yaw_link/mesh",
+            "body": "right_wrist_yaw_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.011753772385418415,
+              -0.0030677448958158493,
+              -0.00024709664285182953
+            ],
+            "half_extents_body": [
+              0.029747427200734616,
+              0.026933254433631898,
+              0.030248095972299577
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/right_hand/right_hand_index_0_link/collisions/right_hand_index_0_link/mesh",
+            "body": "right_hand_index_0_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.02389999991282821,
+              0.001025001984089599,
+              -5.000038072466677e-05
+            ],
+            "half_extents_body": [
+              0.03090762521617853,
+              0.013639363834900777,
+              0.012856033807524115
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/right_hand/right_hand_index_1_link/collisions/right_hand_index_1_link/mesh",
+            "body": "right_hand_index_1_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.022480837535113086,
+              -7.378729060292591e-05,
+              -0.00010006409138440305
+            ],
+            "half_extents_body": [
+              0.029486651229178113,
+              0.008859668711950461,
+              0.013005240112791654
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/right_hand/right_hand_middle_0_link/collisions/right_hand_middle_0_link/mesh",
+            "body": "right_hand_middle_0_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.023899999912828155,
+              0.001025001984089599,
+              -5.000038072464942e-05
+            ],
+            "half_extents_body": [
+              0.03090762521617853,
+              0.013639363834900777,
+              0.012856033807524125
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/right_hand/right_hand_middle_1_link/collisions/right_hand_middle_1_link/mesh",
+            "body": "right_hand_middle_1_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.022480837535113086,
+              -7.378729060292591e-05,
+              -0.00010006409138441693
+            ],
+            "half_extents_body": [
+              0.029486651229178113,
+              0.008859668711950461,
+              0.013005240112791668
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/right_hand/right_hand_thumb_0_link/collisions/right_hand_thumb_0_link/mesh",
+            "body": "right_hand_thumb_0_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.0007000002078711796,
+              0.014150000177323806,
+              4.336808689942018e-18
+            ],
+            "half_extents_body": [
+              0.010807457264971758,
+              0.014156271438764752,
+              0.009503885714520098
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/right_hand/right_hand_thumb_1_link/collisions/mesh_0/box",
+            "body": "right_hand_thumb_1_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.0010000000474974379,
+              0.032000001519918435,
+              -6.071532165918825e-18
+            ],
+            "half_extents_body": [
+              0.00020119411979200102,
+              0.00045110048499786323,
+              0.00020107599357663502
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/right_hand/right_hand_thumb_2_link/collisions/right_hand_thumb_2_link/mesh",
+            "body": "right_hand_thumb_2_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              -7.378729060289555e-05,
+              0.022480837535113093,
+              0.00010006409138440826
+            ],
+            "half_extents_body": [
+              0.008859538393057103,
+              0.029486781548071456,
+              0.013005446970052131
+            ]
+          },
+          {
+            "name": "/g1_29dof_with_hand_rev_1_0/right_hand/right_hand_palm_link/collisions/right_hand_palm_link/mesh",
+            "body": "right_hand_palm_link",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.043349999934248595,
+              -0.0005490276962518692,
+              -8.903443813462752e-07
+            ],
+            "half_extents_body": [
+              0.04336381000362437,
+              0.020890035778150774,
+              0.04390510752880145
+            ]
+          }
+        ],
+        "body_names": [
+          "left_ankle_roll_link",
+          "left_hand_index_0_link",
+          "left_hand_index_1_link",
+          "left_hand_middle_0_link",
+          "left_hand_middle_1_link",
+          "left_hand_palm_link",
+          "left_hand_thumb_0_link",
+          "left_hand_thumb_1_link",
+          "left_hand_thumb_2_link",
+          "left_knee_link",
+          "left_wrist_yaw_link",
+          "pelvis",
+          "right_ankle_roll_link",
+          "right_hand_index_0_link",
+          "right_hand_index_1_link",
+          "right_hand_middle_0_link",
+          "right_hand_middle_1_link",
+          "right_hand_palm_link",
+          "right_hand_thumb_0_link",
+          "right_hand_thumb_1_link",
+          "right_hand_thumb_2_link",
+          "right_knee_link",
+          "right_wrist_yaw_link",
+          "torso_link"
+        ],
+        "runtime_transform_source": "measured_physx_bodies",
+        "geometry_scope": "conservative_collision_aabbs_not_exact_contact_certificate"
+      }
+    },
+    {
+      "robot": "Robot_Go2",
+      "asset": "/home/w84384651/Documents/.RoboCine-Jev/ros2_ws/jev_agent_wbc/Robot_Go2/vendor/LeggedManip_Lab/source/LeggedManip_Lab/LeggedManip_Lab/assets/go2_piper/go2_piper.usd",
+      "asset_sha256": "7096d6fe13922bb16678a7963eb5eef9a4e5fafc8de0cfc8b512f002f83dfc16",
+      "shape_count": 27,
+      "measured_body_count": 24,
+      "all_authored_collision_bounds_contained": true,
+      "manipulator_bodies": [
+        "end_effector",
+        "link1",
+        "link2",
+        "link3",
+        "link4",
+        "link5",
+        "link6"
+      ],
+      "representation_parts": [
+        "mobile_platform",
+        "camera_manipulator"
+      ],
+      "observation": {
+        "schema": "jev_geometry/v1",
+        "kind": "observation",
+        "stamp_s": 0.0,
+        "source": "measured_fk",
+        "units": "m_s_rad",
+        "axes": "right_handed_camera_x_forward_y_left_z_up",
+        "world_from_mount": {
+          "translation_m": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "quaternion_xyzw": [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        },
+        "mount_from_camera": {
+          "translation_m": [
+            0.25001283784474304,
+            -0.040001601747757166,
+            0.420539991248258
+          ],
+          "quaternion_xyzw": [
+            -1.8523591981727323e-06,
+            -0.04318832718732632,
+            -5.058117843327806e-06,
+            0.999066948890686
+          ]
+        },
+        "occupancy_frame": "mount",
+        "occupancy": {
+          "mobile_platform": [
+            {
+              "center_m": [
+                -0.18806948964093118,
+                0.0,
+                -0.32980665129685754
+              ],
+              "half_extents_m": [
+                0.02933150590026888,
+                0.164001004529953,
+                0.11819434763025888
+              ]
+            },
+            {
+              "center_m": [
+                0.04627900011837484,
+                0.0,
+                0.01340775176942581
+              ],
+              "half_extents_m": [
+                0.28567999577319625,
+                0.14650100044202466,
+                0.14259325144922502
+              ]
+            },
+            {
+              "center_m": [
+                0.19873050148989768,
+                0.0,
+                -0.32980665129685754
+              ],
+              "half_extents_m": [
+                0.02933150590026888,
+                0.164001004529953,
+                0.11819434763025888
+              ]
+            }
+          ],
+          "camera_manipulator": [
+            {
+              "center_m": [
+                -0.13887366111949084,
+                9.788351753581281e-07,
+                0.20226518186145304
+              ],
+              "half_extents_m": [
+                0.20266530954920592,
+                0.048505432481188104,
+                0.12577923237187016
+              ]
+            },
+            {
+              "center_m": [
+                0.08710914095441398,
+                -3.5314451742041175e-07,
+                0.2906685418572887
+              ],
+              "half_extents_m": [
+                0.04102330148018156,
+                0.07250247751766033,
+                0.04383956651125287
+              ]
+            },
+            {
+              "center_m": [
+                0.15332178074303104,
+                -1.0669207653000307e-06,
+                0.29168903279063807
+              ],
+              "half_extents_m": [
+                0.04596324923529001,
+                0.02650254936457419,
+                0.03826162677988901
+              ]
+            }
+          ]
+        },
+        "geometry_scope": "conservative_proxy_of_backend_collision_model_not_safety_certificate"
+      },
+      "geometry": {
+        "schema": "measured_collider_geometry/v1",
+        "shapes": [
+          {
+            "name": "/go2_piper/base/collisions/base/Scene/mesh",
+            "body": "base",
+            "part": "mobile_platform",
+            "center_body": [
+              0.1019800454378128,
+              -0.0002230033278465271,
+              -0.004002515226602554
+            ],
+            "half_extents_body": [
+              0.22997895045375824,
+              0.09700097305870056,
+              0.09283749548888207
+            ]
+          },
+          {
+            "name": "/go2_piper/FL_hip/collisions/mesh_0/cylinder",
+            "body": "FL_hip",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.07999999821186066,
+              0.0
+            ],
+            "half_extents_body": [
+              0.04600100008940697,
+              0.020001001127478074,
+              0.046001000773977764
+            ]
+          },
+          {
+            "name": "/go2_piper/FL_thigh/collisions/mesh_0/box",
+            "body": "FL_thigh",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              -0.10649999976158142
+            ],
+            "half_extents_body": [
+              0.0005790008392806402,
+              0.0003011249843016252,
+              0.022685499918217777
+            ]
+          },
+          {
+            "name": "/go2_piper/FL_calf/collisions/mesh_0/cylinder",
+            "body": "FL_calf",
+            "part": "mobile_platform",
+            "center_body": [
+              0.00800000037997961,
+              0.0,
+              -0.05999999865889549
+            ],
+            "half_extents_body": [
+              0.024244935116132904,
+              0.012001000104308128,
+              0.061184372799046344
+            ]
+          },
+          {
+            "name": "/go2_piper/FL_foot/collisions/mesh_0/sphere",
+            "body": "FL_foot",
+            "part": "mobile_platform",
+            "center_body": [
+              -0.0020000000949949026,
+              0.0,
+              0.0
+            ],
+            "half_extents_body": [
+              0.02200099988079071,
+              0.02200099988079071,
+              0.02200099988079071
+            ]
+          },
+          {
+            "name": "/go2_piper/FR_hip/collisions/mesh_0/cylinder",
+            "body": "FR_hip",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              -0.07999999821186066,
+              0.0
+            ],
+            "half_extents_body": [
+              0.04600100008940697,
+              0.020001001127478074,
+              0.046001000773977764
+            ]
+          },
+          {
+            "name": "/go2_piper/FR_thigh/collisions/mesh_0/box",
+            "body": "FR_thigh",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              -0.10649999976158142
+            ],
+            "half_extents_body": [
+              0.0005790008392806402,
+              0.0003011249843016252,
+              0.022685499918217777
+            ]
+          },
+          {
+            "name": "/go2_piper/FR_calf/collisions/mesh_0/cylinder",
+            "body": "FR_calf",
+            "part": "mobile_platform",
+            "center_body": [
+              0.009999999776482582,
+              0.0,
+              -0.05999999865889549
+            ],
+            "half_extents_body": [
+              0.024662012048269566,
+              0.0130010002682209,
+              0.06138769451545964
+            ]
+          },
+          {
+            "name": "/go2_piper/FR_foot/collisions/mesh_0/sphere",
+            "body": "FR_foot",
+            "part": "mobile_platform",
+            "center_body": [
+              -0.0020000000949949026,
+              0.0,
+              0.0
+            ],
+            "half_extents_body": [
+              0.02200099988079071,
+              0.02200099988079071,
+              0.02200099988079071
+            ]
+          },
+          {
+            "name": "/go2_piper/RL_hip/collisions/mesh_0/cylinder",
+            "body": "RL_hip",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.07999999821186066,
+              0.0
+            ],
+            "half_extents_body": [
+              0.04600100008940697,
+              0.020001001127478074,
+              0.046001000773977764
+            ]
+          },
+          {
+            "name": "/go2_piper/RL_thigh/collisions/mesh_0/box",
+            "body": "RL_thigh",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              -0.10649999976158142
+            ],
+            "half_extents_body": [
+              0.0005790008392806402,
+              0.0003011249843016252,
+              0.022685499918217777
+            ]
+          },
+          {
+            "name": "/go2_piper/RL_calf/collisions/mesh_0/cylinder",
+            "body": "RL_calf",
+            "part": "mobile_platform",
+            "center_body": [
+              0.009999999776482582,
+              0.0,
+              -0.05999999865889549
+            ],
+            "half_extents_body": [
+              0.024662012048269566,
+              0.0130010002682209,
+              0.06138769451545964
+            ]
+          },
+          {
+            "name": "/go2_piper/RL_foot/collisions/mesh_0/sphere",
+            "body": "RL_foot",
+            "part": "mobile_platform",
+            "center_body": [
+              -0.0020000000949949026,
+              0.0,
+              0.0
+            ],
+            "half_extents_body": [
+              0.02200099988079071,
+              0.02200099988079071,
+              0.02200099988079071
+            ]
+          },
+          {
+            "name": "/go2_piper/RR_hip/collisions/mesh_0/cylinder",
+            "body": "RR_hip",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              -0.07999999821186066,
+              0.0
+            ],
+            "half_extents_body": [
+              0.04600100008940697,
+              0.020001001127478074,
+              0.046001000773977764
+            ]
+          },
+          {
+            "name": "/go2_piper/RR_thigh/collisions/mesh_0/box",
+            "body": "RR_thigh",
+            "part": "mobile_platform",
+            "center_body": [
+              0.0,
+              0.0,
+              -0.10649999976158142
+            ],
+            "half_extents_body": [
+              0.0005790008392806402,
+              0.0003011249843016252,
+              0.022685499918217777
+            ]
+          },
+          {
+            "name": "/go2_piper/RR_calf/collisions/mesh_0/cylinder",
+            "body": "RR_calf",
+            "part": "mobile_platform",
+            "center_body": [
+              0.009999999776482582,
+              0.0,
+              -0.05999999865889549
+            ],
+            "half_extents_body": [
+              0.024662012048269566,
+              0.0130010002682209,
+              0.06138769451545964
+            ]
+          },
+          {
+            "name": "/go2_piper/RR_foot/collisions/mesh_0/sphere",
+            "body": "RR_foot",
+            "part": "mobile_platform",
+            "center_body": [
+              -0.0020000000949949026,
+              0.0,
+              0.0
+            ],
+            "half_extents_body": [
+              0.02200099988079071,
+              0.02200099988079071,
+              0.02200099988079071
+            ]
+          },
+          {
+            "name": "/go2_piper/link0/collisions/base_link/node_STL_BINARY_/mesh",
+            "body": "link0",
+            "part": "mobile_platform",
+            "center_body": [
+              -0.00925000011920929,
+              0.0,
+              0.0430000014603138
+            ],
+            "half_extents_body": [
+              0.04925099922513962,
+              0.04000099910593033,
+              0.0430010014603138
+            ]
+          },
+          {
+            "name": "/go2_piper/link1/collisions/link1/node_STL_BINARY_/mesh",
+            "body": "link1",
+            "part": "camera_manipulator",
+            "center_body": [
+              5.451589822769165e-05,
+              0.0020000003278255463,
+              -0.006500006653368473
+            ],
+            "half_extents_body": [
+              0.03593259094452858,
+              0.038751000298023225,
+              0.036500994806945325
+            ]
+          },
+          {
+            "name": "/go2_piper/link2/collisions/link2/node_STL_BINARY_/mesh",
+            "body": "link2",
+            "part": "camera_manipulator",
+            "center_body": [
+              0.14252224005758768,
+              -0.016547972336411497,
+              -3.469446951953614e-18
+            ],
+            "half_extents_body": [
+              0.18694469257117283,
+              0.09497573333747333,
+              0.048503840769143325
+            ]
+          },
+          {
+            "name": "/go2_piper/link3/collisions/link3/node_STL_BINARY_/mesh",
+            "body": "link3",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.013108532875776294,
+              -0.0923910597339273,
+              0.0003750007599592174
+            ],
+            "half_extents_body": [
+              0.06425942142486761,
+              0.1298284044510738,
+              0.04037799446917921
+            ]
+          },
+          {
+            "name": "/go2_piper/link4/collisions/link4/node_STL_BINARY_/mesh",
+            "body": "link4",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.0015125963836908306,
+              0.002043479122221468,
+              -0.0037759030237793957
+            ],
+            "half_extents_body": [
+              0.03694819521228784,
+              0.030541918926775248,
+              0.0376666435766702
+            ]
+          },
+          {
+            "name": "/go2_piper/link5/collisions/link5/node_STL_BINARY_/mesh",
+            "body": "link5",
+            "part": "camera_manipulator",
+            "center_body": [
+              7.729977368267638e-08,
+              -0.033260645344853394,
+              -0.001958261243998994
+            ],
+            "half_extents_body": [
+              0.0398278666753859,
+              0.061943207395094825,
+              0.030460267084058027
+            ]
+          },
+          {
+            "name": "/go2_piper/link6/collisions/link6/node_STL_BINARY_/mesh",
+            "body": "link6",
+            "part": "camera_manipulator",
+            "center_body": [
+              -5.988590419291409e-05,
+              9.059906005859375e-06,
+              -0.002000000094994898
+            ],
+            "half_extents_body": [
+              0.017819822320698755,
+              0.017486992516881024,
+              0.005033129631161092
+            ]
+          },
+          {
+            "name": "/go2_piper/link6/collisions/gripper_base/node_STL_BINARY_/mesh",
+            "body": "link6",
+            "part": "camera_manipulator",
+            "center_body": [
+              -0.004749999381601828,
+              0.0,
+              0.03150000050663948
+            ],
+            "half_extents_body": [
+              0.04071765270705559,
+              0.0725019346097151,
+              0.03761925567831466
+            ]
+          },
+          {
+            "name": "/go2_piper/link6/collisions/link7/node_STL_BINARY_/mesh",
+            "body": "link6",
+            "part": "camera_manipulator",
+            "center_body": [
+              3.469446951953614e-18,
+              -0.013249863116511884,
+              0.09754995735800454
+            ],
+            "half_extents_body": [
+              0.034638459087759296,
+              0.013252151226629478,
+              0.04311002973355488
+            ]
+          },
+          {
+            "name": "/go2_piper/link6/collisions/link8/node_STL_BINARY_/mesh",
+            "body": "link6",
+            "part": "camera_manipulator",
+            "center_body": [
+              9.592874812211494e-08,
+              0.013249861201051398,
+              0.09754995669460703
+            ],
+            "half_extents_body": [
+              0.03463855501399635,
+              0.013252078576742519,
+              0.04310995243741997
+            ]
+          }
+        ],
+        "body_names": [
+          "FL_calf",
+          "FL_foot",
+          "FL_hip",
+          "FL_thigh",
+          "FR_calf",
+          "FR_foot",
+          "FR_hip",
+          "FR_thigh",
+          "RL_calf",
+          "RL_foot",
+          "RL_hip",
+          "RL_thigh",
+          "RR_calf",
+          "RR_foot",
+          "RR_hip",
+          "RR_thigh",
+          "base",
+          "link0",
+          "link1",
+          "link2",
+          "link3",
+          "link4",
+          "link5",
+          "link6"
+        ],
+        "runtime_transform_source": "measured_physx_bodies",
+        "geometry_scope": "conservative_collision_aabbs_not_exact_contact_certificate"
+      }
+    }
+  ],
+  "source_sha256": "0274c254e13e909358c30ca6ca7b6a33b2cb0d55f590e544c4842f8bb2503566"
+}

@@ -7,6 +7,7 @@ from .kc_svsdf import SweptCollision, advance, advance_sequence, primitive_sdf
 
 
 class DynamicCollision(SweptCollision):
+    adaptive_sweep = True
     def __init__(self, scene, physical_time=None, uncertainty_rate=None, geometry=None):
         super().__init__(scene,geometry)
         self.observed_centers = self.centers.copy()
@@ -22,7 +23,11 @@ class DynamicCollision(SweptCollision):
                                       if uncertainty_rate is None else uncertainty_rate)
         if not np.isfinite(self.uncertainty_rate) or self.uncertainty_rate < 0:
             raise ValueError('invalid motion uncertainty rate')
-        self.radius_rates = np.where(self.track_ids > 0, self.uncertainty_rate, 0.)
+        self.age_radius_rates = np.where(self.track_ids > 0, self.uncertainty_rate, 0.)
+        extra_rates=np.asarray(scene.get('surfel_radius_rates',np.zeros(len(self.centers))),float)
+        if extra_rates.shape!=self.radii.shape or not np.isfinite(extra_rates).all() or np.any(extra_rates<0):
+            raise ValueError('invalid observed occupancy radius rates')
+        self.radius_rates = self.age_radius_rates+extra_rates
         self.stamp = float(scene.get('observation_stamp', 0.))
         self.physical_time = self.stamp
         self.set_time(self.stamp if physical_time is None else physical_time)
@@ -32,7 +37,7 @@ class DynamicCollision(SweptCollision):
         age = max(0., self.physical_time - self.stamp)
         self.centers = self.observed_centers + self.velocities * age
         self.radii = (self.observed_radii
-                      + self.radius_rates * (self.ages + age))
+                      + self.age_radius_rates*self.ages + self.radius_rates*age)
         self.tree = cKDTree(self.centers)
 
     def at_time(self, offset):
@@ -48,6 +53,17 @@ class DynamicCollision(SweptCollision):
     def static_collision(self):
         mask = self.track_ids == 0
         return SweptCollision({**self.scene, 'surfel_centers': self.centers[mask], 'surfel_radii': self.radii[mask]})
+
+    def active_obstacles(self,x,z=0.,base_rotation=None,per_body=8):
+        centers,radii=super().active_obstacles(x,z,base_rotation,per_body)
+        if not self.is_mesh:return centers,radii
+        # A distant center can have a nearby occupied surface when a lost
+        # mover's uncertainty grows. Center-only spatial pruning must never
+        # hide that volume from the controller before the final swept gate.
+        moving=np.flatnonzero(self.track_ids>0)
+        if not len(moving):return centers,radii
+        indices=np.unique(np.r_[np.atleast_1d(self.tree.query(centers,k=1)[1]),moving])
+        return self.centers[indices],self.radii[indices]
 
     def primitive_motion(self, state, centers, z=0., base_rotation=None):
         """Explicit obstacle contribution to d_dot for every robot primitive."""
@@ -72,9 +88,6 @@ class DynamicCollision(SweptCollision):
                                       initial=0.))
         speed = abs(u[0]) + np.abs(u[1:]) @ self.geometry.reach + obstacle_speed
         count = min(max_samples, max(3, int(np.ceil(speed * duration / (2 * tolerance))) + 1))
-        times = np.linspace(0, duration, count)
-        states = advance_sequence(x,u,times)
-        rotations = None if base_rotation is None else Rotation.from_euler('z',u[1]*times).as_matrix()@base_rotation
         # Include every moving surface even if it starts outside the static
         # nearest-witness neighbourhood. Nearby static surfaces use the same
         # established selection as the static swept oracle.
@@ -95,15 +108,30 @@ class DynamicCollision(SweptCollision):
             robot_speed = abs(u[0])+np.abs(u[1:])@self.geometry.reach
             omitted_lower = 1.5-self.geometry.max_body_extent-static_radius-robot_speed*duration
         else:
+            times = np.linspace(0, duration, count)
+            states = advance_sequence(x,u,times)
+            rotations = None if base_rotation is None else Rotation.from_euler('z',u[1]*times).as_matrix()@base_rotation
             centers, _ = self.active_sequence(states, z, rotations)
             indices = np.unique(np.r_[self.tree.query(centers, k=1)[1], np.flatnonzero(self.track_ids > 0)])
-        moving_centers = self.centers[indices][None]+times[:, None, None]*self.velocities[indices][None]
-        moving_radii = self.radii[indices][None]+times[:, None]*self.radius_rates[indices][None]
-        values = self.geometry.distances_sequence(states, moving_centers, z, rotations)-moving_radii[:, :, None]
-        upper = values.min(axis=0)
-        error = speed * duration / (2 * (count - 1))
-        return dict(lower=np.minimum(upper-error, omitted_lower), upper=upper, error=error, index=values.argmin(axis=0),
-                    states=states, times=times, values=values)
+        def evaluate(samples):
+            times = np.linspace(0, duration, samples)
+            states = advance_sequence(x,u,times)
+            rotations = None if base_rotation is None else Rotation.from_euler('z',u[1]*times).as_matrix()@base_rotation
+            moving_centers = self.centers[indices][None]+times[:, None, None]*self.velocities[indices][None]
+            moving_radii = self.radii[indices][None]+times[:, None]*self.radius_rates[indices][None]
+            values = self.geometry.distances_sequence(states, moving_centers, z, rotations)-moving_radii[:, :, None]
+            upper = values.min(axis=0)
+            error = speed * duration / (2 * (samples - 1))
+            return dict(lower=np.minimum(upper-error, omitted_lower), upper=upper, error=error, index=values.argmin(axis=0),
+                        states=states, times=times, values=values, obstacle_indices=indices)
+        if self.adaptive_sweep and duration<=.2+1e-9 and count>3:
+            coarse=evaluate(3)
+            # The same global Lipschitz bound proves the ENTIRE interval.
+            # Far obstacles need no tighter bound; ambiguous intervals retain
+            # the original sample budget/tolerance and all selected witnesses.
+            if np.min(coarse['lower'])>=self.margin:
+                return coarse
+        return evaluate(count)
 
     def terms(self, x, u, duration, z=0., coupled=True, influence=.065):
         static = self.static_collision()

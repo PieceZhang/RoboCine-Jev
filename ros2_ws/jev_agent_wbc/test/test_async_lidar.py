@@ -25,14 +25,15 @@ def wait_packet(worker,t):
     pytest.fail('mapping worker did not return')
 
 
-def test_async_mapping_preserves_preroll_and_every_output_field():
+@pytest.mark.parametrize('options',[{},dict(acquisition_duration_s=0.)])
+def test_async_mapping_preserves_preroll_and_every_output_field(options):
     reference=RuntimeLidar()
-    for t in np.arange(-.8,.01,.1):reference.integrate(*scan(reference,float(t)))
-    worker=AsyncLidar(copy.deepcopy(reference))
+    for t in np.arange(-.8,.01,.1):reference.integrate(*scan(reference,float(t)),**options)
+    worker=AsyncLidar(copy.deepcopy(reference),**options)
     try:
         for t in (.1,.2,.3,.4):
             inputs=scan(reference,t)
-            expected=reference.integrate(*inputs)
+            expected=reference.integrate(*inputs,**options)
             worker.submit(*inputs,extra=dict(acquired=t))
             result=wait_packet(worker,t+.04)
             assert native(result['snapshot'])==native(expected)

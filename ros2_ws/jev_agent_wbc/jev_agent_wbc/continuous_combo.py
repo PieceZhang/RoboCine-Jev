@@ -42,7 +42,7 @@ def local_scene(observation,offset):
     return dict(observation,observation_stamp=observation['observation_stamp']-offset)
 
 
-def run(case,nominal_root,output,watchdog=35.,model='jev-1.14.0'):
+def run(case,nominal_root,output,watchdog=35.,model='jev-1.14.0',execution=None):
     case=Path(case);output=Path(output);output.mkdir(parents=True,exist_ok=False)
     task=json.loads((case/'task.json').read_text());runtime=RuntimeScene(case/'runtime_scene.json');scene=runtime.document
     source=scene.get('source_combo',case.name)
@@ -50,6 +50,8 @@ def run(case,nominal_root,output,watchdog=35.,model='jev-1.14.0'):
     state=np.array(scene['initial_state'],float);previous=np.array(scene.get('initial_control',np.zeros(8)),float);z=scene['base_z']
     lidar=RuntimeLidar()
     for stamp in np.linspace(-.8,0.,9):observed=lidar.synthetic_scan(runtime,state,z,float(stamp))
+    if execution is not None:
+        state,z,previous,observed=execution.initial()
     save_json(output/'source_task.json',task);save_json(output/'runtime_scene.json',scene)
     intrinsics=[.5/np.tan(np.deg2rad(27.5))*288/384,.5/np.tan(np.deg2rad(27.5)),.5,.5]
     events=(output/'events.jsonl').open('w')
@@ -57,7 +59,15 @@ def run(case,nominal_root,output,watchdog=35.,model='jev-1.14.0'):
     client=SystemOneClient(url='https://api.typesafe.ai/v1/systemone',model=model,timeout_s=15.,journal=output/'jev_api.jsonl',
         policy='Choose a short safe whole-body connector using current observations. The camera is free during connectors. Never alter physical safety limits.')
     engines=[];programs=[];goals=[];phases=[];transfers=[];rows=[];failure='';completed=False;clock=0.;begin=time.monotonic();free=None
-    pool=ThreadPoolExecutor(max_workers=1);prepared_goals={}
+    if execution is None:
+        pool=ThreadPoolExecutor(max_workers=1)
+    else:
+        from concurrent.futures import ProcessPoolExecutor
+        import multiprocessing
+        from .shot_preview_worker import initialize_worker
+        pool=ProcessPoolExecutor(max_workers=1,mp_context=multiprocessing.get_context('spawn'),initializer=initialize_worker)
+        pool.submit(initialize_worker).result(timeout=30.)
+    prepared_goals={}
     refresh_pool=ThreadPoolExecutor(max_workers=1,thread_name_prefix='arrival-refresh')
     try:
         # No simulated obstacle motion has begun yet. This is task preparation,
@@ -76,15 +86,21 @@ def run(case,nominal_root,output,watchdog=35.,model='jev-1.14.0'):
                 save_json(output/'initial_goal.json',goal_record)
             engine=CinematicEngine(original,local_scene(observed,0.),output/f'phase_{index+1:02d}',
                 mode='jev',api_url='https://api.typesafe.ai/v1/systemone',model=model,subject_model=scene['subject'],intrinsics=intrinsics,
+                coordination_async=execution is not None,
                 budget=SearchBudget(max_proposals=3,max_rollouts=2,candidate_wall_budget_s=6.,activation_lead_s=.8))
             engines.append(engine);goals.append(goal)
-            programs.append(prepare(engine,local_scene(observed,0.),goal,z,initial_boundary=initial_boundary))
+            programs.append(prepare(engine,local_scene(observed,0.),goal,z,initial_boundary=initial_boundary)
+                if execution is None else execution.prepare(prepare,engine,local_scene(observed,0.),goal,z,initial_boundary=initial_boundary))
             save_json(output/f'phase_{index+1:02d}/original_task.json',original.task)
             save_json(output/f'phase_{index+1:02d}/phase_program.json',programs[-1])
             journal(dict(event='main_program_prepared',time_s=0.,phase_index=index,selection=programs[-1]['shapes'],source='official_jev_before_physical_start'))
+        if execution is not None:
+            for prepared_engine in engines:prepared_engine.warm_workers()
+            execution.ready(engines)
+            state,z,previous,observed=execution.initial()
         begin=time.monotonic()
         def tick(command,info,stage,index,local_t,reference_p,reference_r):
-            nonlocal state,previous,clock,observed
+            nonlocal state,previous,clock,observed,z
             p,r,_=whole_body_kinematics(state,z)
             truth=DynamicCollision(runtime.truth_collision(clock),clock,uncertainty_rate=0.)
             info['target_position']=np.asarray(info.get('target_position',reference_p)).tolist()
@@ -92,6 +108,9 @@ def run(case,nominal_root,output,watchdog=35.,model='jev-1.14.0'):
                 camera_quaternion_xyzw=Rotation.from_matrix(r).as_quat().tolist(),reference_position=np.asarray(reference_p).tolist(),
                 reference_quaternion_xyzw=Rotation.from_matrix(reference_r).as_quat().tolist(),stage=stage,phase_index=index,local_time_s=local_t,
                 truth_clearance_m=float(truth.clearance(state,z).min()),info=info,runtime_tracks=observed.get('tracks',[]),observation_stamp=observed['observation_stamp']))
+            if execution is not None:
+                state,z,previous,observed,clock=execution.exchange(command,info,stage,index,local_t,reference_p,reference_r)
+                return
             state=advance(state,command,.02);previous=np.asarray(command).copy();clock=round(clock+.02,8)
             wait=begin+clock-time.monotonic()
             if wait>0:time.sleep(wait)
@@ -137,7 +156,9 @@ def run(case,nominal_root,output,watchdog=35.,model='jev-1.14.0'):
                         # instead of retracing the old detour to a fixed reset.
                         goal_future=pool.submit(nearby_goal,state.copy(),free.goal.copy(),engine.active,deepcopy(observed),z)
                         revising=True;last_goal_search=clock
-                    before=time.monotonic();command,info=free.step(state,observed,clock)
+                    before=time.monotonic()
+                    command,info=(free.step(state,observed,clock) if execution is None else
+                                  execution.transfer_step(free,state,observed,clock,previous))
                     ready=goal_installed and free.ready(state,previous)
                     ready_since=clock if ready and ready_since is None else ready_since if ready else None
                     if ready and arrival_plan is not None and arrival_plan.done() and not refresh_finished:
@@ -236,7 +257,9 @@ def run(case,nominal_root,output,watchdog=35.,model='jev-1.14.0'):
             try:
                 count=round((engine.original.duration+POLICY.terminal_hold_s)/.02)+1
                 for step in range(count):
-                    local_t=step*.02;before=time.monotonic()
+                    local_t=step*.02 if execution is None else clock-started
+                    if local_t>engine.original.duration+POLICY.terminal_hold_s+1e-8:break
+                    before=time.monotonic()
                     if local_t>=engine.original.duration:
                         # Terminal framing holds the CAMERA, not every motor.
                         # Keep redundant body escape available during that
@@ -251,7 +274,10 @@ def run(case,nominal_root,output,watchdog=35.,model='jev-1.14.0'):
                             if inside_terminal_band(error):engine.wbc.terminal_camera_pose=(p.copy(),r.copy())
                     if index+1<len(engines) and index+1 not in prepared_goals and local_t>=engine.original.duration-1.2:
                         prepared_goals[index+1]=pool.submit(nearby_goal,state.copy(),goals[index+1],engines[index+1].active,deepcopy(observed),z)
-                    command,info=engine.step(state,local_scene(observed,started),local_t,.02,base_z=z,commanded_q=state[3:],measured_control=previous)
+                    if execution is None:
+                        command,info=engine.step(state,local_scene(observed,started),local_t,.02,base_z=z,commanded_q=state[3:],measured_control=previous)
+                    else:
+                        command,info=execution.step(engine,state,local_scene(observed,started),local_t,.02,z)
                     info['iteration_compute_wall_s']=time.monotonic()-before
                     p,r,_=engine.original.sample(local_t)
                     tick(command,info,'main_action',index,local_t,p,r)
@@ -307,6 +333,8 @@ def run(case,nominal_root,output,watchdog=35.,model='jev-1.14.0'):
             phases=phases,transfers=transfers,obstacle_avoidance_enabled=True,representation_boxes=3,
             shot_acceptance=dict(accepted=accepted,failed_checks=failed),safety_pass=bool(completed and not failure),
             scope='continuous CPU combo; no state, actuator-history, LiDAR-map or physical-obstacle-clock resets between phases',pace=1)
+        if execution is not None:
+            result.update(backend='physx_measured_controller',scope='controller stage audit; authoritative measured safety/acceptance in parent')
         save_json(output/'summary.json',result);save_json(output/'telemetry.json',rows)
         save_json(output/'original_task.json',dict(task,shot_phase=[dict(name='continuous_combo',motion='continuous_combo',start_s=0.,end_s=max(clock,.02))]))
         save_json(output/'stage_timeline.json',dict(phases=phases,transfers=transfers))

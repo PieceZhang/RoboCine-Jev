@@ -57,38 +57,30 @@ def response_velocity(old,command0,command1,tau,duration,t):
     return np.where(tau > 0.,value,command0+slope*t)
 
 
+def feedback_frequency(nominal,dt,latency=0.):
+    """Bound delayed feedback gain; actuator and safety constraints are unchanged."""
+    if not np.isfinite(latency) or latency<0:
+        raise ValueError('feedback latency must be finite and nonnegative')
+    return min(nominal,.6/dt,.35/latency if latency>0 else float('inf'))
+
+
 def small_qp(H, g, A, lo, hi):
-    """Exact active-set enumeration for the usual two self-motion inputs."""
-    C = np.vstack([A[np.isfinite(hi)], -A[np.isfinite(lo)]])
-    b = np.r_[hi[np.isfinite(hi)], -lo[np.isfinite(lo)]]
-    inv = np.linalg.inv(H)
-    free = -inv@g
-    if not len(b) or np.all(C@free <= b+1e-9):
-        return free
-    if len(g) == 1:
-        low = np.max(b[C[:, 0] < 0]/C[C[:, 0] < 0, 0], initial=-np.inf)
-        high = np.min(b[C[:, 0] > 0]/C[C[:, 0] > 0, 0], initial=np.inf)
-        if low > high+1e-8:
-            raise RuntimeError('TPR task-conditioned safety set empty')
-        return np.array([np.clip(free[0], low, high)])
-    normal = C@inv
-    projected = free-(C@free-b)[:, None]*normal/np.sum(normal*C, axis=1)[:, None]
-    i, j = np.triu_indices(len(b), 1)
-    determinant = C[i, 0]*C[j, 1]-C[i, 1]*C[j, 0]
-    keep = np.abs(determinant) > 1e-10
-    i, j, determinant = i[keep], j[keep], determinant[keep]
-    intersections = np.c_[(b[i]*C[j, 1]-C[i, 1]*b[j])/determinant,
-                           (C[i, 0]*b[j]-b[i]*C[j, 0])/determinant]
-    candidates = np.vstack([projected, intersections])
-    feasible = np.all(C@candidates.T <= b[:, None]+1e-8, axis=0)
-    if not np.any(feasible):
-        raise RuntimeError('TPR task-conditioned safety set empty')
-    candidates = candidates[feasible]
-    values = .5*np.einsum('ni,ij,nj->n', candidates, H, candidates)+candidates@g
-    return candidates[np.argmin(values)]
+    """Solve the identical small convex problem without cubic enumeration."""
+    from .small_convex_qp import solve
+    return solve(H,g,A,lo,hi)
 
 
 def qp(H, g, A, lo, hi, warm=None):
+    try:
+        return _solve_qp(H, g, A, lo, hi, warm)
+    except RuntimeError as error:
+        # Preserve the final failing mathematical problem for independent
+        # replay. This does not turn an infeasible command into a fallback.
+        error.qp_problem = dict(H=H, g=g, A=A, lo=lo, hi=hi)
+        raise
+
+
+def _solve_qp(H, g, A, lo, hi, warm=None):
     if np.any(lo > hi):
         raise RuntimeError('TPR hard constraint intersection is empty')
     # Eliminate exact equalities with an undamped SVD. Besides making the
@@ -143,7 +135,7 @@ def qp(H, g, A, lo, hi, warm=None):
     answer = offset+Z@result.x if valid else offset
     AA,ll,hh = original
     residual = max(0., float(np.max(ll-AA@answer)), float(np.max(AA@answer-hh)))
-    if (not converged or residual > 1e-6) and len(g) <= 16:
+    if (not converged or residual > 1e-6) and len(g) <= 32:
         # Older bundled OSQP versions can stall on nearly parallel faces.
         # A dense active-set refinement solves the IDENTICAL convex problem.
         # OSQP's infeasibility certificate is finite but is NOT a primal
@@ -206,6 +198,26 @@ def primitive_values(geometry,state,centers,z=0.,rotation=None):
     return geometry.primitive_arrays(frames,centers)
 
 
+def motion_evidence(scene):
+    """Small causal model identity, independent of map revision/point density."""
+    return dict(stamp=float(scene.get('observation_stamp', 0.)), tracks={
+        int(row['id']): (np.asarray(row['center'], float).copy(),
+                         np.asarray(row['velocity'], float).copy())
+        for row in scene.get('tracks', [])})
+
+
+def motion_changed(previous, current):
+    if previous is None:
+        return True
+    a, b = previous['tracks'], current['tracks']
+    if a.keys() != b.keys():
+        return True
+    age = max(0., current['stamp']-previous['stamp'])
+    return any(np.linalg.norm(b[key][1]-velocity) > .08 or
+               np.linalg.norm(b[key][0]-(center+velocity*age)) > .035
+               for key, (center, velocity) in a.items())
+
+
 class ReconfigurationPreview:
     """Short horizon, relinearized nonholonomic configuration SQP.
 
@@ -235,14 +247,13 @@ class ReconfigurationPreview:
     def update(self, c, state, velocity, t, dt, z, rotation, commanded_q):
         if self.trajectory is None or t >= self.trajectory.duration-1e-9:
             return np.zeros(8)
-        tracks={int(row['id']):np.array(row['velocity']) for row in c.collision.scene.get('tracks',[])}
-        old_tracks=getattr(self,'observed_motion',{})
-        changed=(tracks.keys()!=old_tracks.keys() or any(np.linalg.norm(v-old_tracks[k])>.08 for k,v in tracks.items() if k in old_tracks))
-        if changed:self.observed_motion=tracks
+        observed = motion_evidence(c.collision.scene)
+        changed = motion_changed(getattr(self, 'observed_motion', None), observed)
         if t-self.updated < self.period-1e-8 and not changed:
             return np.zeros(8) if self.controls is None else self.sample(t+dt)
         started = time.perf_counter()
         self.updated = t
+        self.observed_motion = observed
         body_mode=getattr(c,'body_aware',False) or getattr(c,'body_adaptation_seen',False)
         n = max(self.nodes,10) if body_mode else self.nodes
         horizon=max(self.horizon,2.5) if body_mode else self.horizon
@@ -518,6 +529,8 @@ class AsyncReconfigurationPreview(ReconfigurationPreview):
         self.pending_generation = -1
         self.requested = -np.inf
         self.accepted = self.rejected = 0
+        self.motion_replans = 0
+        self.pending_motion = self.accepted_motion = self.requested_motion = None
 
     def warm(self):
         """Start the numerical worker before entering the control loop."""
@@ -545,31 +558,41 @@ class AsyncReconfigurationPreview(ReconfigurationPreview):
         return np.linalg.norm(difference[:2]) < .035 and np.max(np.abs(difference[2:])) < .12
 
     def update(self, c, state, velocity, t, dt, z, rotation, commanded_q):
+        observed = motion_evidence(c.collision.scene)
+        changed = motion_changed(self.requested_motion, observed)
+        if self.controls is not None and motion_changed(self.accepted_motion, observed):
+            self.controls = self.times = self.states = None
+            self.info.update(tpr_prediction_valid=False,
+                             tpr_prediction_failure='observed obstacle motion changed')
         if self.pending is not None and self.pending.done():
             pending, self.pending = self.pending, None
             try:
                 result = pending.result()
-                if self.accept(result, state, t):
+                same_motion = not motion_changed(self.pending_motion, observed)
+                if same_motion and self.accept(result, state, t):
                     for name in ('updated', 'times', 'controls', 'states', 'info', 'anchor'):
                         setattr(self, name, getattr(result, name))
                     self.accepted += 1
+                    self.accepted_motion = self.pending_motion
                 else:
                     self.rejected += 1
                     self.info.update(tpr_prediction_valid=False,
-                                     tpr_prediction_failure=result.info.get('tpr_prediction_failure') or 'stale or mismatched asynchronous prediction')
+                                     tpr_prediction_failure=('observed obstacle motion changed' if not same_motion else
+                                         result.info.get('tpr_prediction_failure') or 'stale or mismatched asynchronous prediction'))
             except Exception as error:
                 self.rejected += 1
                 self.info.update(tpr_prediction_valid=False, tpr_prediction_failure=str(error))
         if self.controls is not None and t-self.updated > .6:
             self.controls = self.times = self.states = None
             self.info.update(tpr_prediction_valid=False, tpr_prediction_failure='prediction expired')
-        if self.pending is None and t-self.requested >= self.period-1e-8:
+        if self.pending is None and (changed or t-self.requested >= self.period-1e-8):
             if self.pool is None:
                 import multiprocessing
                 from concurrent.futures import ProcessPoolExecutor
                 from .shot_preview_worker import initialize_worker
                 self.pool = ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context('spawn'), initializer=initialize_worker)
             snapshot = ReconfigurationPreview(self.horizon, self.nodes, self.period)
+            snapshot.observed_motion = self.accepted_motion
             for name in ('trajectory', 'times', 'controls', 'anchor'):
                 setattr(snapshot, name, getattr(self, name))
             self.pending = self.pool.submit(compute_reconfiguration, snapshot, c.collision.scene,
@@ -578,8 +601,11 @@ class AsyncReconfigurationPreview(ReconfigurationPreview):
                 None if commanded_q is None else np.asarray(commanded_q).copy(),
                 getattr(c,'body_aware',False) or getattr(c,'body_adaptation_seen',False))
             self.requested, self.pending_generation = t, self.generation
+            self.requested_motion = self.pending_motion = observed
+            self.motion_replans += int(changed)
         self.info.update(tpr_prediction_async=True, tpr_prediction_pending=self.pending is not None,
                          tpr_prediction_accepted=self.accepted, tpr_prediction_rejected=self.rejected,
+                         tpr_motion_replans=self.motion_replans,
                          tpr_prediction_age_s=None if self.controls is None else t-self.updated)
         return np.zeros(8) if self.controls is None else self.sample(t+dt)
 
@@ -616,6 +642,7 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
     original=getattr(received,'original',received)
     from .combo import is_combo
     ordered=received is not None and is_combo(original)
+    authored = received is not None and bool(getattr(original, 'task', {}).get('shot_phase'))
     if ordered and any(np.linalg.norm(row['velocity'])>.04 for row in c.collision.scene.get('tracks',[])):
         c.body_adaptation_seen=True
     combo=received is not None and (getattr(c,'body_aware',False) or (ordered and getattr(c,'body_adaptation_seen',False)))
@@ -645,6 +672,13 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
             # of a hairpin otherwise commands the opposite translation while
             # the path constraint requires forward progress.
             feedforward=np.asarray(geometric_twist)
+    yield_info=dict(active=False)
+    if authored and getattr(c,'observed_clock_enabled',False) and not brake and not preparing:
+        from .observed_clock import update as observed_yield
+        yield_info=observed_yield(c,received,state,measured,trajectory_time,base_z,base_rotation)
+        if yield_info['active']:
+            target_p,target_r,_=received.sample(yield_info['progress'])
+            feedforward=received.sample(yield_info['progress'])[2]*yield_info['rate']
     error = np.r_[np.asarray(target_p)-p, Rotation.from_matrix(target_r@r.T).as_rotvec()]
     ff = np.asarray(feedforward, float)
     if ff.shape != (6,) or not np.isfinite(ff).all() or not np.isfinite(error).all():
@@ -691,7 +725,9 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
                 # planned angular speed that leaves a terminal centroid bias.
                 ff[3:]=live_gaze+geometric_twist[3:]-planned_gaze
                 ff_acc[3:]=0.
-    frequency = min(float(getattr(c, 'tpr_servo_frequency', 12.)), .6/dt)
+    if yield_info['active']:ff_acc=np.zeros(6)
+    feedback_latency=float(getattr(c,'feedback_latency_s',0.))
+    frequency = feedback_frequency(float(getattr(c, 'tpr_servo_frequency', 12.)),dt,feedback_latency)
     desired_acc = ff_acc+2*frequency*(ff-camera_velocity)+frequency**2*error
     desired = J@measured+dt*(desired_acc-Jdot@measured)
     if semantic_axis is not None:
@@ -820,6 +856,9 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
                 kinematic_recovery_preference=True
     elif brake:
         preferred = np.zeros(8)
+    clock_guide_preference=yield_info.get('body_control_preference')
+    if clock_guide_preference is not None and not brake and not preparing:
+        preferred=np.asarray(clock_guide_preference)
     mark('prediction')
     W = np.array([1., 1., 1., .35, .35, .35])
     JW = W[:, None]*J
@@ -857,8 +896,9 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
     reserve_R=rows[reserve_mask]
     reserve_target=np.maximum(0.,-motion[reserve_mask]-1.2*(distances[reserve_mask]-.10))
     body_priority=bool((body_preference is not None or len(reserve_R)) and not brake and not preparing and
-                       combo)
+                       combo and not yield_info['active'])
     body_info['whole_body_reserve_rows']=int(len(reserve_R))
+    body_info['observed_yield']=yield_info
     manifold_rows=np.empty((0,8));manifold_target=np.empty(0)
     forward_limit=np.inf
     if combo and semantic_axis is not None:
@@ -963,7 +1003,9 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
                 nonlocal primary_H,primary_g
                 projected=posture_null.T@metric@posture_null
                 primary_H+=projected;primary_g-=projected@goal
-            if kinematic_preference_active and not body_priority:
+            if clock_guide_preference is not None and not body_priority:
+                posture_cost(5.*np.eye(8),preferred)
+            elif kinematic_preference_active and not body_priority:
                 posture_cost((10. if getattr(c,'arrival_reanchored',False) else 1.)*np.eye(8),preferred)
             elif kinematic_recovery_preference and not body_priority:
                 recovery_weights=np.r_[5.,5.,np.ones(6)]
@@ -976,6 +1018,7 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
             # must not pull a freshly re-anchored arrival off that branch.
             if kinematic_preference_active and not body_priority and getattr(c,'arrival_reanchored',False):
                 predictive_preference=False
+            if yield_info['active'] and not c.reconfiguration.info.get('tpr_prediction_path_progress_free'):predictive_preference=False
             if predictive_preference:
                 posture_cost(10.*np.eye(8),predictive_command)
             body_info['verified_path_preview_preference']=predictive_preference
@@ -983,7 +1026,11 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
             if getattr(c,'posture_anchor_key',None)!=anchor_key:
                 c.posture_anchor_key=anchor_key;c.posture_anchor=state[3:].copy()
             joint_margin=np.minimum(state[3:]-JOINT_LOWER,JOINT_UPPER-state[3:])
-            reserve_weights=3.*np.maximum(0.,(.30-joint_margin)/.30)**2
+            # Recover redundant joint reserve before a crossing leaves the
+            # camera unable to settle at the authored deadline. This is a
+            # posture objective only; actuator/collision rows and the camera
+            # manifold retain their existing bounds and priority.
+            reserve_weights=12.*np.maximum(0.,(.30-joint_margin)/.30)**2
             restoration=np.clip(.8*(c.posture_anchor-state[3:]),-.4,.4)
             posture_cost(np.diag(np.r_[0.,0.,reserve_weights]),np.r_[0.,0.,restoration])
             if body_preference is not None and not predictive_preference:
@@ -1040,18 +1087,37 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
         lo = np.r_[actuator_lo,low]
         try:
             command, violation, task_feasible = hierarchy(lo)
-        except RuntimeError as error:
-            au,al=np.isfinite(actuator_hi),np.isfinite(actuator_lo)
-            actuator=linprog(np.zeros(8),A_ub=np.vstack([actuator_A[au],-actuator_A[al]]),
-                b_ub=np.r_[actuator_hi[au],-actuator_lo[al]],bounds=[(None,None)]*8,method='highs')
-            error.diagnostics=dict(kind='control_constraints_infeasible',time_s=trajectory_time,
-                actuator_bounds_feasible=bool(actuator.success),
-                current_observed_clearance_m=float(distances.min()),
-                joint_margin_rad=float(np.min(np.minimum(state[3:]-JOINT_LOWER,JOINT_UPPER-state[3:]))),
-                deadline_s=c.limits.deadline_s,active_collision_rows=len(R),
-                map_age_s=max(0.,c.physical_time-c.collision.stamp),barriers_attempted=['acceleration_and_velocity','velocity'])
-            raise
-        barrier_mode = 'certified_velocity_barrier'
+        except RuntimeError:
+            # A new measured velocity can invalidate a sufficient derivative
+            # inequality without invalidating physical separation. Use the
+            # available acceleration to recover its reserve, with a finite-step
+            # distance constraint. This command is still rejected below unless
+            # BOTH nonlinear swept certificates meet their unchanged margins.
+            step_low = np.r_[(-h/dt-motion)[active], self_velocity_low]
+            lo = np.r_[actuator_lo, step_low]
+            deficient = R@measured < direct_low
+            recovery_rows, recovery_target = R[deficient], direct_low[deficient]
+            recovery_H = np.eye(8)+100.*recovery_rows.T@recovery_rows
+            recovery_g = -100.*recovery_rows.T@recovery_target
+            try:
+                command, violation = qp(recovery_H, recovery_g, A, lo, hi, previous)
+                task_feasible = False
+                low = step_low
+                barrier_mode = 'certified_swept_recovery'
+            except RuntimeError as error:
+                au,al=np.isfinite(actuator_hi),np.isfinite(actuator_lo)
+                actuator=linprog(np.zeros(8),A_ub=np.vstack([actuator_A[au],-actuator_A[al]]),
+                    b_ub=np.r_[actuator_hi[au],-actuator_lo[al]],bounds=[(None,None)]*8,method='highs')
+                error.diagnostics=dict(kind='control_constraints_infeasible',time_s=trajectory_time,
+                    actuator_bounds_feasible=bool(actuator.success),
+                    current_observed_clearance_m=float(distances.min()),
+                    joint_margin_rad=float(np.min(np.minimum(state[3:]-JOINT_LOWER,JOINT_UPPER-state[3:]))),
+                    deadline_s=c.limits.deadline_s,active_collision_rows=len(R),
+                    map_age_s=max(0.,c.physical_time-c.collision.stamp),
+                    barriers_attempted=['acceleration_and_velocity','velocity','finite_step_with_nonlinear_sweep'])
+                raise
+        else:
+            barrier_mode = 'certified_velocity_barrier'
     # Task-conditioned JOINT margin, a single LP over all active rows.
     rho = None
     actuator_task_feasible = None
@@ -1135,6 +1201,7 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
             rho_definition=None,scope='configuration transfer; camera task not requested; physical constraints and swept checks retained')
     mark('continuous_certificates')
     info = dict(position_error=float(np.linalg.norm(error[:3])), orientation_error=float(np.linalg.norm(error[3:])),
+                feedback_latency_s=feedback_latency,servo_frequency_rad_s=frequency,
                 free_camera_transfer=free_transfer_control is not None,
                 body_anticipation=body_info,
                 feedback_progress_s=feedback_progress,

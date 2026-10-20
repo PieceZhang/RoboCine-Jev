@@ -21,6 +21,37 @@ def barrier_gains(collision, indices):
     return np.where(incoming[:,None],np.where(platform[None,:],12.,6.),2.)
 
 
+def future_reserve(collision, state, velocity, z=0., rotation=None):
+    """Causal short-horizon clearance preferences for every articulated body.
+
+    A current separating normal can miss a crossing that is still distant.
+    Predict measured movers, linearize each future surface at the current
+    configuration, and request only the rate needed for finite clearance.
+    These soft objectives never replace the execution safety certificates.
+    """
+    from .tpr_wbc import integration_matrix
+    moving=np.flatnonzero((collision.track_ids>0)&(np.linalg.norm(collision.velocities,axis=1)>.02))
+    if not len(moving):return np.empty((0,8)),np.empty(0)
+    horizons=np.array([.4,.8,1.2])
+    centers=collision.centers[moving,None]+horizons[None,:,None]*collision.velocities[moving,None]
+    distance,gradient=collision.geometry.primitive_distances(state,centers.reshape(-1,3),z,rotation)
+    distance=(distance.reshape(len(moving),len(horizons),-1)-collision.radii[moving,None,None]
+              -collision.radius_rates[moving,None,None]*horizons[None,:,None])
+    gradient=gradient.reshape(*distance.shape,9)
+    required=(.10-distance)/horizons[None,:,None]
+    rows=gradient@integration_matrix(state[2])
+    deficit=required-rows@velocity
+    selected=[]
+    for body in range(8):
+        mask=(collision.geometry.shape_bodies[None,None,:]==body)&(distance<.14)&(deficit>0.)
+        indices=np.argwhere(mask)
+        if len(indices):
+            i,j,k=indices[np.argmax(deficit[mask])]
+            selected.append((rows[i,j,k],required[i,j,k]))
+    if not selected:return np.empty((0,8)),np.empty(0)
+    return np.array([row for row,_ in selected]),np.array([target for _,target in selected])
+
+
 def phase_axis(original, phase, position):
     motion=phase['motion'].lower()
     if motion in ('movein','moveout'):
@@ -175,17 +206,26 @@ def preview_seed(controller, reference, state, velocity, at, step, nodes, z=0., 
 
 
 def base_preference(collision, state, velocity, z=0., rotation=None, task_axis=None, escape_memory=None,camera_locked=True):
-    moving=np.flatnonzero((collision.track_ids>0)&(np.linalg.norm(collision.velocities[:,:2],axis=1)>.04))
+    moving=np.flatnonzero((collision.track_ids>0)&(np.linalg.norm(collision.velocities[:,:2],axis=1)>.02))
     info=dict(active=False,source='observed_motion_and_robot_geometry',threats=[])
     if not len(moving):return None,info
     direction=np.array([np.cos(state[2]),np.sin(state[2])])
     # Predict the mover relative to the current base position, rather than to
     # a rapidly changing escape command; otherwise the preference chatters.
-    centers=collision.centers[moving];speeds=collision.velocities[moving]
+    centers=collision.centers[moving];measured_speeds=collision.velocities[moving]
+    accelerations={int(row['id']):np.asarray(row['acceleration'],float)
+                   for row in collision.scene.get('tracks',[]) if row.get('acceleration') is not None}
+    acceleration=np.array([accelerations.get(int(collision.track_ids[i]),np.zeros(3)) for i in moving])
+    # Only a short measured acceleration trend guides preparation. It is
+    # advisory; the independent current-time safety certificate is unchanged.
+    speeds=measured_speeds+.35*acceleration
     relative=centers[:,:2]-state[:2]
     closest=-np.sum(relative*speeds[:,:2],axis=1)/np.maximum(np.sum(speeds[:,:2]**2,axis=1),1e-8)
     lookahead=np.linspace(0.,2.5,11)
-    predicted=centers[:,None,:]+speeds[:,None,:]*lookahead[None,:,None]
+    trend=np.minimum(lookahead,.5)
+    predicted=(centers[:,None,:]+measured_speeds[:,None,:]*lookahead[None,:,None]+
+               acceleration[:,None,:]*(trend*lookahead-.5*trend**2)[None,:,None])
+    info['acceleration_lookahead_s']=.5
     distances,gradients=collision.geometry.primitive_distances(state,predicted.reshape(-1,3),z,rotation)
     distances=distances.reshape(len(moving),len(lookahead),-1)
     # Predict the full corridor, but request platform escape only for the
@@ -195,7 +235,8 @@ def base_preference(collision, state, velocity, z=0., rotation=None, task_axis=N
     gradients=gradients.reshape(len(moving),len(lookahead),-1,9)
     bodies=collision.geometry.shape_bodies[None,None,:]
     base=(bodies==0)|((bodies<=2)&(np.linalg.norm(gradients[...,3:],axis=-1)<.05))
-    clear=np.where(base,distances-collision.radii[moving,None,None],np.inf)
+    clear=np.where(base,distances-collision.radii[moving,None,None]
+                   -collision.radius_rates[moving,None,None]*lookahead[None,:,None],np.inf)
     minima=clear.reshape(len(moving),-1).argmin(axis=1)
     when,links=np.unravel_index(minima,clear.shape[1:])
     clearances=clear[np.arange(len(moving)),when,links]

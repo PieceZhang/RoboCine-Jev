@@ -43,6 +43,25 @@ def test_partial_visible_subject_surface_does_not_bias_center():
     assert estimate['stamp_s']==2.
 
 
+def test_oriented_seed_copy_keeps_measured_tilt_and_independent_lift_configuration():
+    from copy import copy
+    from dataclasses import replace
+    state=np.array([.1,-.2,.7,0.,-.9,2.1,0.,-1.2,0.])
+    rotation=Rotation.from_euler('xyz',[.03,-.02,.7]).as_matrix()
+    scene=dict(surfel_centers=[[2.,2.,.6]],surfel_radius=.1,minimum_clearance_m=.025)
+    search=KinematicSearch(state,np.zeros(8),0.,.002,Limits(),base_rotation=rotation,scene=scene)
+    proxy=OrientedSearch(search)
+    seed=copy(proxy)
+    seed.collision=None
+    seed.policy=replace(seed.policy,step_s=.1)
+    assert seed is not search and search.collision is not None and proxy.collision is not None
+    assert seed._lift.__self__ is seed
+    assert search.policy.step_s!=seed.policy.step_s
+    np.testing.assert_array_equal(seed.tilt,search.tilt)
+    for actual,expected in zip(seed.fk(state),search.fk(state)):
+        np.testing.assert_array_equal(actual,expected)
+
+
 def test_insufficient_returns_remain_unknown():
     model=dict(id='subject',position=[1.5,.2,.8],radius=.13,height=.36)
     estimate=subject_from_returns([[1.37,.2,.8]],model,0.)
@@ -125,3 +144,18 @@ def test_motor_brakes_before_unchanged_cpu_position_margin():
     target=motors.step(np.ones(8),.001,np.zeros(8),positions)
     np.testing.assert_allclose(target[2:],0.,atol=1e-11)
     assert limits.position_margin==.01
+
+
+def test_motor_headroom_prevents_delayed_command_consuming_wbc_reserve():
+    from jev_agent_wbc.jvs_kinematics import JOINT_UPPER
+    limits=Limits();motors=MotorTargets(limits)
+    q=JOINT_UPPER-limits.position_margin-.08
+    measured=np.zeros(8)
+    for _ in range(600):
+        before=measured.copy()
+        target=motors.step(np.ones(8),.01,measured,q)
+        measured=motors.control.copy()
+        q+=.01*target[2:]
+        assert np.all(abs(measured-before)<=limits.acceleration*.01+1e-12)
+        assert np.all(JOINT_UPPER-q>=limits.position_margin+.0049)
+    assert np.max(abs(measured[2:]))<1e-7

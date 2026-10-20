@@ -314,7 +314,8 @@ class CollisionGeometry:
         br=rotations[...,self.shape_bodies,:,:]
         origins=positions[...,self.shape_bodies,:]+np.einsum('...pij,pj->...pi',br,self.shape_offsets)
         rotation=br@self.shape_rotations
-        local=np.einsum('...npi,...pij->...npj',centers[...,None,:]-origins[...,None,:,:],rotation)
+        delta=centers[...,None,:]-origins[...,None,:,:]
+        local=np.matmul(delta[...,None,:],rotation[...,None,:,:,:])[...,0,:]
         distances=np.empty(local.shape[:-1]);normals=np.empty_like(local) if gradient else None
         for kind,ids in self.shape_groups.items():
             points=local[...,ids,:];shape=points.shape
@@ -332,7 +333,7 @@ class CollisionGeometry:
             else:distance=result
             distances[...,ids]=distance.reshape(shape[:-1])
         if gradient:
-            return distances,np.einsum('...npi,...pji->...npj',normals,rotation)
+            return distances,np.matmul(rotation[...,None,:,:,:],normals[...,None])[...,0]
         return distances
 
     def primitive_distances(self,x,centers,z=0.,base_rotation=None,with_normals=False):
@@ -347,7 +348,7 @@ class CollisionGeometry:
         # Compute the full chain once, then mask joints downstream of each
         # primitive. Every primitive still supplies its own exact union row.
         full=self.point_jacobians(x,centers,6,origins,axes,z)
-        gradients=-np.einsum('npi,nij->npj',normals,full)
+        gradients=-np.matmul(normals,full)
         gradients[...,3:]*=self.shape_joint_mask
         result=ds,gradients
         return (*result,normals) if with_normals else result

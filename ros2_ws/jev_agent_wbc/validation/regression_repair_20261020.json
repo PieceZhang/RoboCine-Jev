@@ -1,0 +1,649 @@
+{
+  "date": "2026-10-20",
+  "scope": "CPU regression restoration and full PhysX retest; PhysX parity goal remains unmet",
+  "configuration": {
+    "model": "jev-1.14.0",
+    "api": "https://api.typesafe.ai/v1/systemone",
+    "pace": 1,
+    "physics_hz": 100,
+    "agent_camera": "raw physical execution camera",
+    "live_rgb_recording": false
+  },
+  "cpu": {
+    "trial": "cpu07",
+    "completed": 12,
+    "accepted": 12,
+    "independent_safety_passed": 12,
+    "minimum_continuous_clearance_lower_m": 0.09677066696839921,
+    "audit_evidence": "results/regression_repair_20261020/cpu07/independent_audit.json"
+  },
+  "physx": {
+    "trial": "physx01",
+    "completed": 10,
+    "accepted": 6,
+    "safety_passed": 9,
+    "timing_passed": 9,
+    "realtime_task_successes": 6,
+    "cases": [
+      {
+        "case": "combo_01_easy",
+        "completed": true,
+        "accepted": false,
+        "safe": true,
+        "failure": "",
+        "contacts": 0,
+        "timing": true,
+        "max_tick_ms": 17.84884836524725,
+        "phases": [
+          {
+            "index": 0,
+            "accepted": false,
+            "failed": [
+              "direction",
+              "natural_curve",
+              "terminal_frame"
+            ]
+          },
+          {
+            "index": 1,
+            "accepted": true,
+            "failed": []
+          }
+        ],
+        "physical_maxima": {
+          "position_violation": 0.0,
+          "velocity_violation": 0.0,
+          "wheel_speed_violation": 0.0,
+          "acceleration_violation": 0.4334867000579834,
+          "wheel_acceleration_violation": 0.0,
+          "lateral_velocity": 0.002063251417281911
+        }
+      },
+      {
+        "case": "combo_02_easy",
+        "completed": true,
+        "accepted": false,
+        "safe": true,
+        "failure": "",
+        "contacts": 0,
+        "timing": true,
+        "max_tick_ms": 17.69351400434971,
+        "phases": [
+          {
+            "index": 0,
+            "accepted": false,
+            "failed": [
+              "direction",
+              "natural_curve",
+              "terminal_frame"
+            ]
+          },
+          {
+            "index": 1,
+            "accepted": false,
+            "failed": [
+              "direction",
+              "natural_curve"
+            ]
+          }
+        ],
+        "physical_maxima": {
+          "position_violation": 0.0,
+          "velocity_violation": 0.0,
+          "wheel_speed_violation": 0.0,
+          "acceleration_violation": 0.36594581604003906,
+          "wheel_acceleration_violation": 0.0,
+          "lateral_velocity": 0.0023244792514519066
+        }
+      },
+      {
+        "case": "combo_03_medium",
+        "completed": false,
+        "accepted": false,
+        "safe": false,
+        "failure": "runtime_fail_safe: current_state_sweep_failed",
+        "contacts": 95,
+        "timing": false,
+        "max_tick_ms": 22.624058183282614,
+        "phases": [
+          {
+            "index": 0,
+            "accepted": false,
+            "failed": [
+              "safety",
+              "direction",
+              "natural_curve",
+              "terminal_frame"
+            ]
+          },
+          {
+            "index": 1,
+            "accepted": false,
+            "failed": "phase_not_executed"
+          },
+          {
+            "index": 2,
+            "accepted": false,
+            "failed": "phase_not_executed"
+          }
+        ],
+        "physical_maxima": {
+          "position_violation": 0.0,
+          "velocity_violation": 0.0,
+          "wheel_speed_violation": 0.0,
+          "acceleration_violation": 78.57414245605469,
+          "wheel_acceleration_violation": 9.962553024291992,
+          "lateral_velocity": 0.0023937653597324326
+        }
+      },
+      {
+        "case": "combo_04_medium",
+        "completed": true,
+        "accepted": false,
+        "safe": false,
+        "failure": "",
+        "contacts": 0,
+        "timing": true,
+        "max_tick_ms": 18.715825863182545,
+        "phases": [
+          {
+            "index": 0,
+            "accepted": false,
+            "failed": [
+              "safety",
+              "direction",
+              "natural_curve",
+              "terminal_frame"
+            ]
+          },
+          {
+            "index": 1,
+            "accepted": false,
+            "failed": [
+              "safety",
+              "direction",
+              "natural_curve",
+              "terminal_frame"
+            ]
+          },
+          {
+            "index": 2,
+            "accepted": false,
+            "failed": [
+              "safety",
+              "natural_curve"
+            ]
+          }
+        ],
+        "physical_maxima": {
+          "position_violation": 0.0,
+          "velocity_violation": 0.001088857650756836,
+          "wheel_speed_violation": 0.0,
+          "acceleration_violation": 0.34310269355773926,
+          "wheel_acceleration_violation": 0.0,
+          "lateral_velocity": 0.003261261338521298
+        }
+      },
+      {
+        "case": "combo_05_hard",
+        "completed": false,
+        "accepted": false,
+        "safe": false,
+        "failure": "runtime_fail_safe: current_state_sweep_failed",
+        "contacts": 309,
+        "timing": false,
+        "max_tick_ms": 24.422988761216402,
+        "phases": [
+          {
+            "index": 0,
+            "accepted": false,
+            "failed": [
+              "safety",
+              "direction",
+              "natural_curve",
+              "terminal_frame"
+            ]
+          },
+          {
+            "index": 1,
+            "accepted": false,
+            "failed": "phase_not_executed"
+          },
+          {
+            "index": 2,
+            "accepted": false,
+            "failed": "phase_not_executed"
+          }
+        ],
+        "physical_maxima": {
+          "position_violation": 0.0,
+          "velocity_violation": 0.22960226535797124,
+          "wheel_speed_violation": 0.0,
+          "acceleration_violation": 93.40017700195312,
+          "wheel_acceleration_violation": 350.07720947265625,
+          "lateral_velocity": 0.14435813229818528
+        }
+      },
+      {
+        "case": "combo_06_hard",
+        "completed": true,
+        "accepted": false,
+        "safe": true,
+        "failure": "",
+        "contacts": 0,
+        "timing": false,
+        "max_tick_ms": 20.852547138929367,
+        "phases": [
+          {
+            "index": 0,
+            "accepted": true,
+            "failed": []
+          },
+          {
+            "index": 1,
+            "accepted": false,
+            "failed": [
+              "natural_curve",
+              "terminal_frame"
+            ]
+          },
+          {
+            "index": 2,
+            "accepted": false,
+            "failed": [
+              "natural_curve",
+              "terminal_frame"
+            ]
+          }
+        ],
+        "physical_maxima": {
+          "position_violation": 0.0,
+          "velocity_violation": 0.0,
+          "wheel_speed_violation": 0.0,
+          "acceleration_violation": 0.362074613571167,
+          "wheel_acceleration_violation": 0.0,
+          "lateral_velocity": 0.0027247539748761905
+        }
+      },
+      {
+        "case": "movein",
+        "completed": true,
+        "accepted": true,
+        "safe": true,
+        "failure": "",
+        "contacts": 0,
+        "timing": true,
+        "max_tick_ms": 16.187075059860945,
+        "phases": [
+          {
+            "index": 0,
+            "accepted": true,
+            "failed": []
+          }
+        ],
+        "physical_maxima": {
+          "position_violation": 0.0,
+          "velocity_violation": 0.0,
+          "wheel_speed_violation": 0.0,
+          "acceleration_violation": 0.1665663719177246,
+          "wheel_acceleration_violation": 0.0,
+          "lateral_velocity": 0.00214647621975021
+        }
+      },
+      {
+        "case": "orbit",
+        "completed": true,
+        "accepted": true,
+        "safe": true,
+        "failure": "",
+        "contacts": 0,
+        "timing": true,
+        "max_tick_ms": 15.528268180787563,
+        "phases": [
+          {
+            "index": 0,
+            "accepted": true,
+            "failed": []
+          }
+        ],
+        "physical_maxima": {
+          "position_violation": 0.0,
+          "velocity_violation": 6.389617919921875e-05,
+          "wheel_speed_violation": 0.0,
+          "acceleration_violation": 0.2506535053253174,
+          "wheel_acceleration_violation": 0.0,
+          "lateral_velocity": 0.0018481841940431016
+        }
+      },
+      {
+        "case": "pedestal_down",
+        "completed": true,
+        "accepted": true,
+        "safe": true,
+        "failure": "",
+        "contacts": 0,
+        "timing": true,
+        "max_tick_ms": 14.901543036103249,
+        "phases": [
+          {
+            "index": 0,
+            "accepted": true,
+            "failed": []
+          }
+        ],
+        "physical_maxima": {
+          "position_violation": 0.0,
+          "velocity_violation": 0.0,
+          "wheel_speed_violation": 0.0,
+          "acceleration_violation": 0.8418915271759033,
+          "wheel_acceleration_violation": 0.0,
+          "lateral_velocity": 0.003058100093411145
+        }
+      },
+      {
+        "case": "pedestal_up",
+        "completed": true,
+        "accepted": true,
+        "safe": true,
+        "failure": "",
+        "contacts": 0,
+        "timing": true,
+        "max_tick_ms": 15.654671005904675,
+        "phases": [
+          {
+            "index": 0,
+            "accepted": true,
+            "failed": []
+          }
+        ],
+        "physical_maxima": {
+          "position_violation": 0.0,
+          "velocity_violation": 0.0,
+          "wheel_speed_violation": 0.0,
+          "acceleration_violation": 1.4751296043395996,
+          "wheel_acceleration_violation": 0.0,
+          "lateral_velocity": 0.0027785268555437616
+        }
+      },
+      {
+        "case": "truck_left",
+        "completed": true,
+        "accepted": true,
+        "safe": true,
+        "failure": "",
+        "contacts": 0,
+        "timing": true,
+        "max_tick_ms": 17.554023768752813,
+        "phases": [
+          {
+            "index": 0,
+            "accepted": true,
+            "failed": []
+          }
+        ],
+        "physical_maxima": {
+          "position_violation": 0.0,
+          "velocity_violation": 0.0,
+          "wheel_speed_violation": 0.0,
+          "acceleration_violation": 0.40665459632873535,
+          "wheel_acceleration_violation": 0.0,
+          "lateral_velocity": 0.0020891273369281903
+        }
+      },
+      {
+        "case": "truck_right",
+        "completed": true,
+        "accepted": true,
+        "safe": true,
+        "failure": "",
+        "contacts": 0,
+        "timing": true,
+        "max_tick_ms": 16.772378236055374,
+        "phases": [
+          {
+            "index": 0,
+            "accepted": true,
+            "failed": []
+          }
+        ],
+        "physical_maxima": {
+          "position_violation": 0.0,
+          "velocity_violation": 0.0,
+          "wheel_speed_violation": 0.0,
+          "acceleration_violation": 0.22914361953735352,
+          "wheel_acceleration_violation": 0.0,
+          "lateral_velocity": 0.00222813365458601
+        }
+      }
+    ]
+  },
+  "followup_trials": [
+    {
+      "trial": "physx02_compiled",
+      "case": "combo_01_easy",
+      "completed": false,
+      "accepted": false,
+      "safe": true,
+      "failure": "runtime_fail_safe: interpolated motor command fails dynamic clearance certificate",
+      "contacts": 0,
+      "timing_pass": false,
+      "max_tick_ms": 21.152509842067957,
+      "phases": [
+        {
+          "index": 0,
+          "accepted": false,
+          "failed": [
+            "natural_curve",
+            "terminal_frame",
+            "execution_error"
+          ]
+        },
+        {
+          "index": 1,
+          "accepted": false,
+          "failed": "phase_not_executed"
+        }
+      ]
+    },
+    {
+      "trial": "physx03_delay",
+      "case": "combo_01_easy",
+      "completed": true,
+      "accepted": false,
+      "safe": true,
+      "failure": "",
+      "contacts": 0,
+      "timing_pass": false,
+      "max_tick_ms": 25.614161044359207,
+      "phases": [
+        {
+          "index": 0,
+          "accepted": false,
+          "failed": [
+            "direction",
+            "natural_curve",
+            "terminal_frame"
+          ]
+        },
+        {
+          "index": 1,
+          "accepted": false,
+          "failed": [
+            "natural_curve"
+          ]
+        }
+      ]
+    },
+    {
+      "trial": "physx04_warmcompiled",
+      "case": "combo_01_easy",
+      "completed": true,
+      "accepted": false,
+      "safe": true,
+      "failure": "",
+      "contacts": 0,
+      "timing_pass": false,
+      "max_tick_ms": 53.08912508189678,
+      "phases": [
+        {
+          "index": 0,
+          "accepted": false,
+          "failed": [
+            "direction",
+            "natural_curve"
+          ]
+        },
+        {
+          "index": 1,
+          "accepted": false,
+          "failed": [
+            "direction",
+            "natural_curve"
+          ]
+        }
+      ]
+    },
+    {
+      "trial": "physx04_warmcompiled",
+      "case": "combo_03_medium",
+      "completed": true,
+      "accepted": false,
+      "safe": true,
+      "failure": "",
+      "contacts": 0,
+      "timing_pass": false,
+      "max_tick_ms": 23.540459107607603,
+      "phases": [
+        {
+          "index": 0,
+          "accepted": false,
+          "failed": [
+            "natural_curve"
+          ]
+        },
+        {
+          "index": 1,
+          "accepted": true,
+          "failed": []
+        },
+        {
+          "index": 2,
+          "accepted": false,
+          "failed": [
+            "natural_curve",
+            "terminal_frame"
+          ]
+        }
+      ]
+    },
+    {
+      "trial": "physx05_velocity",
+      "case": "combo_01_easy",
+      "completed": false,
+      "accepted": false,
+      "safe": true,
+      "failure": "RuntimeError: TPR hard constraint intersection is empty",
+      "contacts": 0,
+      "timing_pass": true,
+      "max_tick_ms": 19.400541204959154,
+      "phases": [
+        {
+          "index": 0,
+          "accepted": false,
+          "failed": [
+            "natural_curve",
+            "terminal_frame",
+            "execution_error"
+          ]
+        },
+        {
+          "index": 1,
+          "accepted": false,
+          "failed": "phase_not_executed"
+        }
+      ]
+    },
+    {
+      "trial": "physx06_startpreview",
+      "case": "combo_01_easy",
+      "completed": false,
+      "accepted": false,
+      "safe": true,
+      "failure": "runtime_fail_safe: interpolated motor command fails dynamic clearance certificate",
+      "contacts": 0,
+      "timing_pass": false,
+      "max_tick_ms": 26.83037519454956,
+      "phases": [
+        {
+          "index": 0,
+          "accepted": false,
+          "failed": [
+            "direction",
+            "natural_curve",
+            "terminal_frame",
+            "execution_error"
+          ]
+        },
+        {
+          "index": 1,
+          "accepted": false,
+          "failed": "phase_not_executed"
+        }
+      ]
+    }
+  ],
+  "unit_checks": {
+    "isolated_commit_scope_passed": 169,
+    "optional_compiled_module_skipped_in_system_python": 1,
+    "isaac_compiled_parity_and_no_live_specialization_passed": 6
+  },
+  "unchanged_acceptance_files": {
+    "jev_agent_wbc/shot_acceptance.py": {
+      "unchanged": true,
+      "sha256": "c5ae094937a65df6169dc9d661fe969e6bc9715a5dd1c4b8ccaf17e9f3da02b2"
+    },
+    "jev_agent_wbc/camera_intent.py": {
+      "unchanged": true,
+      "sha256": "bf729978d073bc9146882240a0f298804eaf1be5145983e228e33e4ae36b7f17"
+    },
+    "jev_agent_wbc/safety.py": {
+      "unchanged": true,
+      "sha256": "62a813132bed1634a9e6381fa37d4d3e01e04a0c7766268b6cfc8e4ce97cd8ea"
+    },
+    "jev_agent_wbc/whole_body_qp.py": {
+      "unchanged": true,
+      "sha256": "a76f7bd60ced487e0a280b8af62eb2d4da4422235d2b334e302662dc84b14ca8"
+    },
+    "jev_agent_wbc/physical_session_audit.py": {
+      "unchanged": true,
+      "sha256": "d5a4b174178c7b16acf3d17b5b8c06568eb2160eb3a0ec3d50af61ce90e3b1dd"
+    },
+    "scripts/physx_acceptance.py": {
+      "unchanged": true,
+      "sha256": "ef43780e636bab53a03ea9c320300259f2439fcda8b4155f4ff7f7d967ff603a"
+    }
+  },
+  "retained_repairs": [
+    "Restore legal directed bypass construction and startup generator contracts.",
+    "Restore anticipatory control semantics and soft joint reserve without modifying hard constraints.",
+    "Recover well-conditioned simultaneous raw sphere observations before voxel thinning.",
+    "Continue sparse current observations for previously measured stationary spheres; ambiguous fits never refresh age.",
+    "Retain 100 Hz nonblocking PhysX execution, raw-camera feedback, bounded recovery and compatibility interfaces.",
+    "Normalize optional compiled geometry input types and readonly views to avoid JIT specialization after arming."
+  ],
+  "unresolved": [
+    "Default PhysX passes all six singles but fails the six combinations.",
+    "Combination 1/2: cinematic direction, curve and terminal checks despite safe completion.",
+    "Combination 3/5: transfer command gaps and latched sweep failure followed by moving-obstacle contact.",
+    "Combination 4: cinematic failures and measured velocity excess 0.001088858 above unchanged 0.001 limit.",
+    "Combination 6: later-phase cinematic failures and one physical timing overrun.",
+    "Compiled warmup repair lets combination 3 complete safely without contact, but cinematic and strict timing checks still fail.",
+    "Delay-aware servo, velocity-only transport and startup-preview diagnostics were not adopted as defaults."
+  ],
+  "evidence_root": "results/regression_repair_20261020",
+  "limitations": [
+    "One official closed-loop batch per configuration is evidence for those runs, not a statistical guarantee.",
+    "CPU truth auditing never supplies future obstacle truth to the Agent.",
+    "Unchanged safety and cinematic thresholds; no PhysX parity claim."
+  ]
+}
