@@ -7,7 +7,10 @@ only by the 14 policy position targets and the official DC motor controller.
 from pathlib import Path
 import argparse,json,time,hashlib,sys,shutil,importlib.metadata
 ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT.parent))
+from jev_agent_wbc.robot_sensor_rig import RobotSensorRig, SensorAudit, add_sensor_arguments, lab_body_poses
 p=argparse.ArgumentParser()
+add_sensor_arguments(p)
 p.add_argument('--gui',action='store_true')
 p.add_argument('--output',type=Path,default=None)
 p.add_argument('--commands',type=Path,default=ROOT/'config/commands.json')
@@ -23,7 +26,7 @@ def record_unhandled(exc_type,exc,tb):
     sys.__excepthook__(exc_type,exc,tb)
 sys.excepthook=record_unhandled
 from isaaclab.app import AppLauncher
-launcher=AppLauncher(headless=not a.gui,enable_cameras=a.snapshot,device='cpu')
+launcher=AppLauncher(headless=not a.gui,enable_cameras=a.snapshot or a.sensor_rgb,device='cpu')
 app=launcher.app
 import torch,numpy as np,yaml
 import isaaclab.sim as sim_utils
@@ -50,6 +53,9 @@ def main():
     cfg.prim_path='/World/G1';cfg.spawn.usd_path=str(ROOT/'assets/G1/g1.usd')
     cfg.init_state.pos=(0.,0.,0.78)
     robot=Articulation(cfg)
+    import omni.usd
+    sensor_rig=RobotSensorRig(omni.usd.get_context().get_stage(), '/World/G1', 'g1', a.sensor_config)
+    sensor_audit=SensorAudit(sensor_rig, out, a.sensor_audit)
     policy_path=ROOT/'policies/unitree_g1_velocity_history.pt'
     policy=torch.jit.load(str(policy_path),map_location='cpu').eval()
     sim.reset()
@@ -120,12 +126,15 @@ def main():
              'base_position':state[:3].tolist(),'rpy':[float(r[0]),float(pitch[0]),float(yaw[0])],
              'finite':finite,'joint_position':robot.data.joint_pos[0].tolist()}
         rows.append(row)
+        if a.sensor_audit:
+            sensor_audit.record(t+dt, lab_body_poses(robot, sensor_rig.parent_names), c['name'])
         if not finite or state[2]<0.45 or abs(float(r[0]))>0.9 or abs(float(pitch[0]))>0.9:
             failures.append({'step':step,'time':t+dt,'reason':'nonfinite' if not finite else 'fallen','state':row});break
         # pace=1: no time dilation; physics and wall clock pacing reported separately.
         remaining=wall+(step+1)*dt-time.monotonic()
         if remaining>0: time.sleep(remaining)
     wall_elapsed=time.monotonic()-wall
+    sensor_audit.finish(len(rows)*dt, sim.render if a.sensor_rgb else None)
     with (out/'trajectory.jsonl').open('w') as f:
         for row in rows:f.write(json.dumps(row)+'\n')
     reports=[]

@@ -20,10 +20,13 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT.parent))
+from jev_agent_wbc.robot_sensor_rig import RobotSensorRig, SensorAudit, add_sensor_arguments, lab_body_poses
 faulthandler.register(signal.SIGUSR1, all_threads=False)
 POLICY = ROOT / "vendor/LeggedManip_Lab/mujoco/deploy/policy/go2_piper/wbc/policy.pt"
 
 parser = argparse.ArgumentParser(description=__doc__)
+add_sensor_arguments(parser)
 parser.add_argument("--output", type=Path, default=None)
 parser.add_argument("--seconds", type=float, default=8.0, help="Simulation seconds per case, including 2 s settling.")
 parser.add_argument("--cases", default="stand,forward,backward,left,right,diagonal_left,diagonal_right,yaw_left,yaw_right,coordinated")
@@ -37,7 +40,7 @@ parser.set_defaults(device="cpu")
 args = parser.parse_args()
 if not args.gui:
     args.headless = True
-if args.snapshot:
+if args.snapshot or args.sensor_rgb:
     args.enable_cameras = True
 if args.device is None:
     args.device = "cpu"
@@ -66,7 +69,7 @@ def main():
     cfg.wait_for_textures = False
     cfg.num_rerenders_on_reset = 0
     if args.headless:
-        # No RGB sensors participate in the control loop. Render once at the end.
+        # Optional sensor RGB checks run after the timed control loop.
         cfg.sim.render_interval = 1_000_000
     cfg.scene.terrain.terrain_type = "usd"
     cfg.scene.terrain.usd_path = str(ROOT / "assets/ground.usda")
@@ -97,6 +100,9 @@ def main():
     cfg.episode_length_s = 1e6
     env = ManagerBasedRLEnv(cfg=cfg)
     robot = env.scene["robot"]
+    import omni.usd
+    sensor_rig = RobotSensorRig(omni.usd.get_context().get_stage(), '/World/envs/env_0/Robot', 'go2', args.sensor_config)
+    sensor_audit = SensorAudit(sensor_rig, output, args.sensor_audit)
     policy = torch.jit.load(str(POLICY), map_location=env.device).eval()
     joint_expr = ["FR_hip_joint", "FR_thigh_joint", "FR_calf_joint",
                   "FL_hip_joint", "FL_thigh_joint", "FL_calf_joint",
@@ -181,6 +187,9 @@ def main():
                 "action": action[0].detach().cpu().tolist(),
             }
             rows.append(row)
+            if args.sensor_audit:
+                sensor_audit.record((len(measurements)+len(rows))*env.step_dt,
+                                    lab_body_poses(robot, sensor_rig.parent_names), case)
             if step % 100 == 0:
                 print(f"CASE_STEP {case} {step}/{expected_steps}", flush=True)
             # pace=1: never deliberately run slower than physical time.
@@ -230,6 +239,7 @@ def main():
         (output / "progress.json").write_text(json.dumps(results, indent=2) + "\n")
         print(json.dumps(result), flush=True)
     wall_elapsed = time.monotonic() - wall_start
+    sensor_audit.finish(len(measurements)*env.step_dt, env.sim.render if args.sensor_rgb else None)
     if args.snapshot:
         try:
             import omni.usd

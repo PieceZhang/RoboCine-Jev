@@ -84,6 +84,13 @@ D1 已成功导入为 `assets/generated/go2_d1/go2_d1.usd`，包括约 28 MB 的
 
 该目录还保存 `validator_source.py`、`arguments.json`、源码 SHA、模型／策略来源和 `diagnostic.png`／`diagnostic.usd`。结果目录已存在时拒绝覆盖。启动器会检查本轮 `run_complete`，不能将 Kit 初始化错误退出 0 当成通过。
 
-当前 `scripts/validate_wbc.py` 与该轮冻结源码完全相同，SHA256 为 `c3280c6e34d0f3438913bd73377212bc32533ad5cc4f16a3c0250920afe181d6`。`asset_closure.json` 检查了 Piper 的全部 5 个本地 USD 层；无外部云模型资产，OmniPBR 材质来自 Isaac Sim 本地内置文件并记录 SHA，未解析依赖为空。`pip check` 已通过。
+该轮冻结的 `validator_source.py` SHA256 为 `c3280c6e34d0f3438913bd73377212bc32533ad5cc4f16a3c0250920afe181d6`；当前入口另增加下述传感器安装。`asset_closure.json` 检查了 Piper 的全部 5 个本地 USD 层；无外部云模型资产，OmniPBR 材质来自 Isaac Sim 本地内置文件并记录 SHA，未解析依赖为空。该轮 `pip check` 已通过。
 
 调试历史 `validation_01/02` 和 `reset_diagnostic_01/02` 均不作为已完成验收。确切根因是验收脚本在 inference_mode 运行物理后，却在模式外做第二次 reset，引发 PyTorch inference tensor 原地写入异常；随后 Kit 关停回调循环掩盖了错误。现已统一 reset 的推理上下文，先保存异常，再禁用仅用于关停的等待回调。最初的纹理加载猜测已被后续调用栈和实际异常排除。物理步长、执行器、策略、动作及观测未因此改变。
+
+## 运镜 Camera 与机身 LiDAR
+
+当前 Piper 入口安装 1 个 `end_effector` Camera、1 个固定于 `base` 的主 LiDAR 和 2 个辅助 LiDAR。
+`--sensor-audit` 记录完整机身姿态下的扫描与本体遮挡；`--sensor-rgb` 在运行后检查实际 RGB 与拍摄方向。
+配置、输出及未验证范围见 [三平台传感器安装说明](../SENSOR_INSTALLATION.md)。
+此标定仅用于 Go2-Piper；D1 需独立标定。新增传感器尚未接通避障 Agent，历史 WBC 验收不代表新安装已完成物理或全姿态视场验收。

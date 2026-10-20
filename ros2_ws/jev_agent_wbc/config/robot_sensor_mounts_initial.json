@@ -1,0 +1,52 @@
+{
+  "schema": "robot_sensor_mounts/v1",
+  "camera": {
+    "resolution": [640, 480],
+    "horizontal_fov_deg": 75.0,
+    "clipping_m": [0.01, 100.0]
+  },
+  "lidar": {
+    "horizontal_samples": 180,
+    "elevation_deg": [-30, -25, -20, -15, -10, -5, 0, 5, 10, 15, 20, 25, 30, 45, 60],
+    "min_range_m": 0.05,
+    "max_range_m": 10.0
+  },
+  "robots": {
+    "g1": {
+      "asset": "Robot_G1/assets/G1/g1.usd",
+      "camera": {
+        "parent": "right_wrist_yaw_link",
+        "translation_m": [0.18, 0.0, 0.045],
+        "forward_parent": [1, 0, 0],
+        "up_parent": [0, 0, 1]
+      },
+      "lidars": [
+        {"name": "main", "parent": "torso_link", "translation_m": [0.10, 0.0, 0.32], "rpy_deg": [0, 0, 0]}
+      ]
+    },
+    "go2": {
+      "asset": "Robot_Go2/vendor/LeggedManip_Lab/source/LeggedManip_Lab/LeggedManip_Lab/assets/go2_piper/go2_piper.usd",
+      "camera": {
+        "parent": "end_effector",
+        "translation_m": [0.06, 0.0, 0.03],
+        "forward_parent": [1, 0, 0],
+        "up_parent": [0, 0, 1]
+      },
+      "lidars": [
+        {"name": "main", "parent": "base", "translation_m": [-0.08, 0.0, 0.30], "rpy_deg": [0, 0, 0]}
+      ]
+    },
+    "ridgeback": {
+      "asset": "Robot_Ridgeback_UR5/assets/Isaac/Robots/Clearpath/RidgebackUr/ridgeback_ur5.usd",
+      "camera": {
+        "parent": "ur_arm_wrist_3_link",
+        "translation_m": [0.0, 0.0, 0.07],
+        "forward_parent": [0, 0, 1],
+        "up_parent": [0, 1, 0]
+      },
+      "lidars": [
+        {"name": "main", "parent": "base_link", "translation_m": [-0.22, 0.0, 0.43], "rpy_deg": [0, 0, 0]}
+      ]
+    }
+  }
+}

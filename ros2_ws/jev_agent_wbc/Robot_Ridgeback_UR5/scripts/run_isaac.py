@@ -12,10 +12,13 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT.parent))
+from jev_agent_wbc.robot_sensor_rig import RobotSensorRig, SensorAudit, add_sensor_arguments, pose_transform
 
 
 def main():
     parser = argparse.ArgumentParser()
+    add_sensor_arguments(parser)
     parser.add_argument("--output", type=Path, default=ROOT / "results" / time.strftime("acceptance_%Y%m%d_%H%M%S"))
     parser.add_argument("--inspect", action="store_true")
     parser.add_argument("--probe", action="store_true", help="5-second physical diagnostic; not a full acceptance")
@@ -102,6 +105,8 @@ def run(args, app):
     robot = world.scene.add(SingleArticulation(prim_path=robot_path, name="ridgeback_ur5"))
     ee = world.scene.add(SingleRigidPrim(prim_path=robot_path + "/ur_arm_wrist_3_link", name="ee"))
     base = world.scene.add(SingleRigidPrim(prim_path=robot_path + "/base_link", name="base"))
+    sensor_rig = RobotSensorRig(stage, robot_path, 'ridgeback', args.sensor_config)
+    sensor_audit = SensorAudit(sensor_rig, args.output, args.sensor_audit)
     world.reset()
     # Recheck after PhysX reset, before executing a command. Fabric may keep
     # stage transforms static, so explicitly compare USD and physical base Z.
@@ -167,6 +172,9 @@ def run(args, app):
             record.update(ee_ref_p=ref_p.tolist(), ee_ref_qwxyz=ref_R.as_quat()[[3,0,1,2]].tolist(),
                           position_error=float(np.linalg.norm(ref_p - p)), orientation_error=float(np.linalg.norm(error_R)))
         rows.append(record)
+        if args.sensor_audit:
+            sensor_audit.record(steps*.01, {'ur_arm_wrist_3_link': pose_transform(p, orientation),
+                                          'base_link': pose_transform(bp, bq)}, phase)
         # pace=1 only caps faster-than-real-time execution; it never changes dt.
         remaining = start_wall + steps*.01 - time.monotonic()
         if remaining > 0:
@@ -187,6 +195,7 @@ def run(args, app):
         basis="USD world collision bounds checked against PhysX measured Z and locked planar roll/pitch")
     (args.output / "configuration.json").write_text(json.dumps(info, indent=2))
     if args.inspect:
+        sensor_audit.finish(steps*.01, world.render if args.sensor_rgb else None)
         (args.output / "samples.json").write_text(json.dumps(rows, indent=2))
         return
     if args.probe:
@@ -199,6 +208,7 @@ def run(args, app):
         with (args.output / "samples.jsonl").open("w") as f:
             for row in rows: f.write(json.dumps(row) + "\n")
         print("PROBE", json.dumps(probe), flush=True)
+        sensor_audit.finish(steps*.01, world.render if args.sensor_rgb else None)
         return
     direction_results = []
     directions = [("forward", [.15,0,0]), ("backward",[-.15,0,0]), ("left",[0,.15,0]), ("right",[0,-.15,0]),
@@ -247,6 +257,7 @@ def run(args, app):
     for i in range(200):
         q, qd, p, rot = step(qtarget.copy(), np.zeros(9), "final_stop")
     elapsed = time.monotonic() - start_wall
+    sensor_audit.finish(steps*.01, world.render if args.sensor_rgb else None)
     wrows = [r for r in rows if r["phase"] == "whole_body"]
     position_errors = np.array([r["position_error"] for r in wrows])
     rotation_errors = np.array([r["orientation_error"] for r in wrows])

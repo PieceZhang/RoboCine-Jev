@@ -40,3 +40,10 @@ headless体验没有active viewport，因此没有生成诊断PNG，具体见sna
 补齐全部声明依赖后，已通过 [final_env_smoke_01](results/final_env_smoke_01) 的4秒物理复验，Kit实际仍使用内置Warp1.8.2；200步完整状态与原smoke_02逐项完全一致，且正常关闭（无监督器终止）。最终pip check为“No broken requirements found.”。
 
 本目录暂不包含 Agent 避障适配。
+
+## 运镜 Camera 与机身 LiDAR
+
+当前入口安装 1 个右腕 Camera、1 个上躯干主 LiDAR 和 3 个机身辅助 LiDAR，安装变换和相机光轴均显式配置。
+`--sensor-audit` 采样本体遮挡和实测 TF；`--sensor-rgb` 在运行后检查实际相机图像与前方光轴。
+配置、输出及未验证范围见 [三平台传感器安装说明](../SENSOR_INSTALLATION.md)。
+新增传感器尚未接通避障 Agent；历史行走验收不等于全姿态传感器覆盖验收。

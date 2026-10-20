@@ -1,0 +1,303 @@
+{
+  "schema": "robot_sensor_mounts/v1",
+  "camera": {
+    "resolution": [
+      640,
+      480
+    ],
+    "horizontal_fov_deg": 75.0,
+    "clipping_m": [
+      0.01,
+      100.0
+    ]
+  },
+  "lidar": {
+    "horizontal_samples": 180,
+    "elevation_deg": [
+      -80,
+      -78,
+      -76,
+      -74,
+      -72,
+      -70,
+      -68,
+      -66,
+      -64,
+      -62,
+      -60,
+      -58,
+      -56,
+      -54,
+      -52,
+      -50,
+      -48,
+      -46,
+      -44,
+      -42,
+      -40,
+      -38,
+      -36,
+      -34,
+      -32,
+      -30,
+      -28,
+      -26,
+      -24,
+      -22,
+      -20,
+      -18,
+      -16,
+      -14,
+      -12,
+      -10,
+      -8,
+      -6,
+      -4,
+      -2,
+      0,
+      2,
+      4,
+      6,
+      8,
+      10,
+      12,
+      14,
+      16,
+      18,
+      20,
+      22,
+      24,
+      26,
+      28,
+      30,
+      32,
+      34,
+      36,
+      38,
+      40,
+      42,
+      44,
+      46,
+      48,
+      50,
+      52,
+      54,
+      56,
+      58,
+      60
+    ],
+    "min_range_m": 0.05,
+    "max_range_m": 10.0
+  },
+  "robots": {
+    "g1": {
+      "asset": "Robot_G1/assets/G1/g1.usd",
+      "camera": {
+        "parent": "right_wrist_yaw_link",
+        "translation_m": [
+          0.2,
+          0.04,
+          0.11
+        ],
+        "forward_parent": [
+          1,
+          0,
+          0
+        ],
+        "up_parent": [
+          0,
+          0,
+          1
+        ]
+      },
+      "lidars": [
+        {
+          "name": "main",
+          "parent": "torso_link",
+          "translation_m": [
+            0.1,
+            0.0,
+            0.32
+          ],
+          "rpy_deg": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "aux",
+          "parent": "pelvis",
+          "translation_m": [
+            -0.14,
+            0.0,
+            0.0
+          ],
+          "rpy_deg": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "front_low",
+          "parent": "pelvis",
+          "translation_m": [
+            0.14,
+            0.0,
+            -0.04
+          ],
+          "rpy_deg": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "left_aux",
+          "parent": "pelvis",
+          "translation_m": [
+            -0.1,
+            0.14,
+            -0.02
+          ],
+          "rpy_deg": [
+            0,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    "go2": {
+      "asset": "Robot_Go2/vendor/LeggedManip_Lab/source/LeggedManip_Lab/LeggedManip_Lab/assets/go2_piper/go2_piper.usd",
+      "camera": {
+        "parent": "end_effector",
+        "translation_m": [
+          0.075,
+          -0.04,
+          0.12
+        ],
+        "forward_parent": [
+          1,
+          0,
+          0
+        ],
+        "up_parent": [
+          0,
+          0,
+          1
+        ]
+      },
+      "lidars": [
+        {
+          "name": "main",
+          "parent": "base",
+          "translation_m": [
+            -0.25,
+            0.0,
+            0.36
+          ],
+          "rpy_deg": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "aux",
+          "parent": "base",
+          "translation_m": [
+            0.37,
+            0.13,
+            0.12
+          ],
+          "rpy_deg": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "rear_low",
+          "parent": "base",
+          "translation_m": [
+            -0.17,
+            -0.13,
+            0.12
+          ],
+          "rpy_deg": [
+            0,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    "ridgeback": {
+      "asset": "Robot_Ridgeback_UR5/assets/Isaac/Robots/Clearpath/RidgebackUr/ridgeback_ur5.usd",
+      "camera": {
+        "parent": "ur_arm_wrist_3_link",
+        "translation_m": [
+          0.0,
+          0.0,
+          0.08
+        ],
+        "forward_parent": [
+          0,
+          0,
+          1
+        ],
+        "up_parent": [
+          0,
+          1,
+          0
+        ]
+      },
+      "lidars": [
+        {
+          "name": "main",
+          "parent": "base_link",
+          "translation_m": [
+            -0.22,
+            0.0,
+            0.43
+          ],
+          "rpy_deg": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "aux",
+          "parent": "base_link",
+          "translation_m": [
+            0.455,
+            0.385,
+            0.33
+          ],
+          "rpy_deg": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "name": "rear_low",
+          "parent": "base_link",
+          "translation_m": [
+            -0.455,
+            -0.385,
+            0.33
+          ],
+          "rpy_deg": [
+            0,
+            0,
+            0
+          ]
+        }
+      ]
+    }
+  }
+}
