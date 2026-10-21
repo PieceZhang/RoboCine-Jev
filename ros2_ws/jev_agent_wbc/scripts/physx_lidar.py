@@ -23,10 +23,11 @@ def load_native(output):
     if not extension or not extension.startswith('omni.physx-107.3.26'):
         raise RuntimeError(f'native LiDAR requires verified omni.physx 107.3.26, got {extension}')
     import isaacsim
+    import torch
     kit = Path(isaacsim.__file__).resolve().parent/'kit'
     source = Path(__file__).parent/'native/physx_ray_batch.cpp'
     includes = [Path(sysconfig.get_paths()['include']),kit/'dev/include',
-                Path(sys.prefix)/'lib/python3.11/site-packages/torch/include']
+                Path(torch.__file__).resolve().parent/'include']
     digest = hashlib.sha256(source.read_bytes()+sys.version.encode()+extension.encode()).hexdigest()[:16]
     folder = Path(output).resolve().parent/'native_cache'/digest
     folder.mkdir(parents=True,exist_ok=True)
@@ -35,7 +36,9 @@ def load_native(output):
         command = ['c++','-O3','-shared','-std=c++17','-fPIC','-fabi-version=16',
                    '-DPYBIND11_INTERNALS_VERSION=4',*[f'-I{p}' for p in includes],
                    str(source),'-o',str(target)]
-        subprocess.run(command,check=True,capture_output=True,text=True,timeout=60.)
+        built=subprocess.run(command,capture_output=True,text=True,timeout=60.)
+        if built.returncode:
+            raise RuntimeError('native LiDAR compile failed: '+built.stderr[-6000:])
     spec = importlib.util.spec_from_file_location('physx_ray_batch',target)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

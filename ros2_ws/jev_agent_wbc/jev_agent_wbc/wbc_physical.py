@@ -37,12 +37,24 @@ def constraint_feedback(evidence, now_s, max_age_s=.1):
         if raw is None:
             result[name] = dict(status='unknown', stamp_s=None, scope='not_available', reason='missing_evidence')
             continue
-        if not isinstance(raw, dict) or set(raw)-{'status', 'stamp_s', 'scope', 'reserve_fraction', 'clearance_m'}:
+        if not isinstance(raw, dict) or set(raw)-{'status', 'stamp_s', 'scope', 'reserve_fraction', 'clearance_m',
+                                                'acquisition_stamp_s','valid_until_s'}:
             raise ValueError('unsupported constraint evidence fields')
         status, scope = raw.get('status'), raw.get('scope')
         if status not in ('pass', 'fail', 'unknown', 'not_applicable') or scope not in CONSTRAINT_SCOPES:
             raise ValueError('explicit constraint status and scope required')
         row = deepcopy(raw)
+        if 'acquisition_stamp_s' in row or 'valid_until_s' in row:
+            if name!='environment' or scope!='fresh_environment_map':
+                raise ValueError('forecast source timestamps belong only to environmental evidence')
+            acquired=number(row.get('acquisition_stamp_s'),'acquisition_stamp_s',0.)
+            expires=number(row.get('valid_until_s'),'valid_until_s',0.)
+            # The original runtime rejects sensor evidence older than 0.6 s.
+            # Backends may use a stricter lease; this does not extend it.
+            if not 0<=expires-acquired<=.6+1e-9:
+                raise ValueError('invalid environmental source lease')
+            if row.get('stamp_s') is None or not acquired<=row['stamp_s']<=expires or now_s>expires:
+                row.update(status='unknown',reason='environment_source_expired_or_future')
         if 'reserve_fraction' in row and row['reserve_fraction'] is not None:
             if not 0 <= number(row['reserve_fraction'], 'reserve_fraction', 0.) <= 1:
                 raise ValueError('reserve must be a fraction or null')

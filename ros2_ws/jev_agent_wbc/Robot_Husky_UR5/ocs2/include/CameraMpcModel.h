@@ -59,6 +59,26 @@ struct CameraModel {
     }
     if(i!=6) throw std::runtime_error("expected six exact USD joints");
   }
+  std::pair<Pose,matrix_t> differential(const vector_t& x) const {
+    Pose prefix=Pose::Identity();
+    prefix.topLeftCorner<3,3>()=Eigen::AngleAxisd(x(2),Eigen::Vector3d::UnitZ()).toRotationMatrix()*measuredTilt;
+    prefix.topRightCorner<3,1>() << x(0),x(1),height;
+    Eigen::Vector3d basePosition=prefix.topRightCorner<3,1>();
+    std::vector<Eigen::Vector3d> wworld(6),vworld(6);
+    for(int i=0;i<6;++i) {
+      wworld[i]=prefix.topLeftCorner<3,3>()*omega[i];
+      vworld[i]=prefix.topLeftCorner<3,3>()*velocity[i]+prefix.topRightCorner<3,1>().cross(wworld[i]);
+      double a=x(3+i)-rest(i);auto w=skew(omega[i]);Pose e=Pose::Identity();
+      e.topLeftCorner<3,3>()=Eigen::Matrix3d::Identity()+std::sin(a)*w+(1-std::cos(a))*w*w;
+      e.topRightCorner<3,1>()=(a*Eigen::Matrix3d::Identity()+(1-std::cos(a))*w+(a-std::sin(a))*w*w)*velocity[i];
+      prefix=prefix*e;
+    }
+    Pose pose=prefix*M*extrinsic;Eigen::Vector3d point=pose.topRightCorner<3,1>();
+    matrix_t J=matrix_t::Zero(6,x.size());J(0,0)=J(1,1)=J(5,2)=1.;
+    J.block<3,1>(0,2)=Eigen::Vector3d::UnitZ().cross(point-basePosition);
+    for(int i=0;i<6;++i){J.block<3,1>(0,3+i)=wworld[i].cross(point)+vworld[i];J.block<3,1>(3,3+i)=wworld[i];}
+    return {pose,J};
+  }
   Pose camera(const vector_t& x) const {
     Pose base=Pose::Identity();base.topLeftCorner<3,3>()=Eigen::AngleAxisd(x(2),Eigen::Vector3d::UnitZ()).toRotationMatrix()*measuredTilt;
     base.topRightCorner<3,1>() << x(0),x(1),height;
@@ -101,8 +121,10 @@ class CameraCost final:public StateCost {
     auto e=error(model_.camera(x),reference(t,target));return .5*e.dot(weight_.cwiseProduct(e)) + .5e-8*x.squaredNorm();
   }
   ScalarFunctionQuadraticApproximation getQuadraticApproximation(scalar_t t,const vector_t& x,const TargetTrajectories& target,const PreComputation& pre) const override {
-    auto goal=reference(t,target);auto e=error(model_.camera(x),goal);matrix_t J=matrix_t::Zero(6,x.size());
-    for(int i=0;i<9;++i) { auto plus=x,minus=x;plus(i)+=1e-6;minus(i)-=1e-6;J.col(i)=(error(model_.camera(plus),goal)-error(model_.camera(minus),goal))/(2e-6); }
+    auto goal=reference(t,target);auto differential=model_.differential(x);auto e=error(differential.first,goal);
+    matrix_t J=differential.second;Eigen::Vector3d angle=e.tail<3>();auto W=skew(angle);double theta=angle.norm();
+    double c=theta<1e-5 ? 1./12. : (1.-.5*theta/std::tan(.5*theta))/(theta*theta);
+    J.bottomRows(3)=(Eigen::Matrix3d::Identity()-.5*W+c*W*W)*goal.topLeftCorner<3,3>().transpose()*differential.second.bottomRows(3);
     ScalarFunctionQuadraticApproximation out;out.setZero(x.size());out.f=getValue(t,x,target,pre);
     out.dfdx=J.transpose()*weight_.cwiseProduct(e)+1e-8*x;
     // A consistent tiny state regularizer makes the rank-six GN Hessian

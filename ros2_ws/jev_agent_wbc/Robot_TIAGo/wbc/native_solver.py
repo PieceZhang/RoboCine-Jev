@@ -54,7 +54,45 @@ class NativeGiskardSolver:
         if q.shape!=(8,) or previous.shape!=(10,) or not np.isfinite([*q,*previous]).all():
             raise ValueError('Invalid measured actuator state')
         lo,hi = self.bounds(q,previous)
+        if request.get('environment') is not None:
+            # Reserve measured wheel/drive tracking headroom under avoidance.
+            # The physical speed audit and original hardware caps stay intact.
+            lo=np.maximum(lo,-.90*self.speed)
+            hi=np.minimum(hi,.90*self.speed)
+            rates=np.asarray(request['measured_rates'],float)[2:]
+            if rates.shape!=(8,) or not np.isfinite(rates).all():
+                raise ValueError('avoidance requires measured joint rates')
+            a=self.accel[2:];dt=.01
+            stop=lambda d:np.maximum(0.,np.sqrt((a*dt)**2+2*a*np.maximum(d,0.))-a*dt)
+            # Reserve measured travel during the bounded asynchronous/drive
+            # response interval before applying the original stopping bound.
+            lo[2:]=np.maximum(lo[2:],-stop(q-self.lower-.017-.12*np.maximum(-rates,0.)))
+            hi[2:]=np.minimum(hi[2:],stop(self.upper-q-.017-.12*np.maximum(rates,0.)))
+            if np.any(lo>hi+1e-9):
+                raise RuntimeError('measured asynchronous stopping reserve infeasible')
+        self.collisions.activation=.2 if request.get('environment') is not None else .08
         collision_A,collision_b,collision_report = self.collisions.query(request['poses'],request['body_jacobians'])
+        soft_A=collision_A.copy() if request.get('preserve_proposed_camera_twist') else np.zeros((0,10))
+        soft_b=np.array([-1.*(record['distance_m']-.035) for record in collision_report['barriers']]) if len(soft_A) else np.zeros(0)
+        if request.get('preserve_proposed_camera_twist') and request.get('environment') is not None:
+            # Early velocity damping is subordinate to the camera goal and
+            # original hard acceleration/stopping constraints. A delayed
+            # command may temporarily exceed this preference; it must never
+            # make an otherwise feasible hard QP infeasible.
+            soft_A=np.vstack([soft_A,np.eye(10)[2:],-np.eye(10)[2:]])
+            soft_b=np.r_[soft_b,-2.*np.maximum(q-self.lower-.08,0.),
+                         -2.*np.maximum(self.upper-q-.08,0.)]
+        environment=request.get('environment')
+        if environment is not None:
+            if (environment.get('status')!='measured'
+                    or not environment['acquisition_stamp_s']<=request['sample_s']<=environment['valid_until_s']
+                    or abs(environment['stamp_s']-request['sample_s'])>1e-8):
+                raise RuntimeError('Environment evidence is stale, infeasible or not bound to this physical state')
+            A=np.asarray(environment['A'],float).reshape(-1,10)
+            b=np.asarray(environment['lower'],float)
+            if b.shape!=(len(A),) or not np.isfinite(A).all() or not np.isfinite(b).all():
+                raise ValueError('Invalid environment velocity inequalities')
+            collision_A=np.vstack([collision_A,A]);collision_b=np.r_[collision_b,b]
         if request['mode']=='camera':
             J,error,ff = [np.asarray(request[k],float) for k in ('jacobian','error','feedforward')]
             if J.shape!=(6,10) or error.shape!=(6,) or ff.shape!=(6,) or not all(np.isfinite(a).all() for a in (J,error,ff)):
@@ -75,19 +113,44 @@ class NativeGiskardSolver:
             target = np.asarray(request['desired_rates'],float)
             if target.shape!=(10,) or not np.isfinite(target).all():
                 raise ValueError('Invalid actuator tracking request')
-            hessian,linear = np.ones(10),-target
-            equality = np.zeros((0,10));target=np.zeros(0)
-            lower,upper,slack = lo,hi,0
+            if request.get('preserve_proposed_camera_twist'):
+                # Reallocate the upstream Executor's proposed camera twist
+                # when physical acceleration/stopping bounds clip a joint.
+                # The original measured-Jacobian task and every inequality
+                # remain active; this is not a second camera planner.
+                J=np.asarray(request['jacobian'],float)
+                if J.shape!=(6,10) or not np.isfinite(J).all():
+                    raise ValueError('camera-preserving native projection requires the measured Jacobian')
+                hessian=np.r_[np.ones(10),np.full(6,100.)]
+                linear=np.r_[-target,np.zeros(6)]
+                equality=np.c_[J,-np.eye(6)];target=J@target
+                lower,upper,slack=np.r_[lo,np.full(6,-np.inf)],np.r_[hi,np.full(6,np.inf)],6
+            else:
+                hessian,linear = np.ones(10),-target
+                equality = np.zeros((0,10));target=np.zeros(0)
+                lower,upper,slack = lo,hi,0
         else:
             raise ValueError('Unsupported task mode')
         inequalities = np.vstack([self.wheels,collision_A])
         inequalities = np.c_[inequalities,np.zeros((len(inequalities),slack))]
-        qp = self.Data(num_equality_slack_variables=slack,num_inequality_slack_variables=0,
+        inequality_lower=np.r_[[-8.,-8.],collision_b]
+        inequality_upper=np.r_[[8.,8.],np.full(len(collision_b),np.inf)]
+        if len(soft_A):
+            count=len(soft_A)
+            # Soft early self-clearance preferences share the genuine native
+            # QP. The original FCL barriers above remain hard and unchanged.
+            inequalities=np.vstack([np.c_[inequalities,np.zeros((len(inequalities),count))],
+                                    np.c_[soft_A,np.zeros((count,slack)),np.eye(count)]])
+            equality=np.c_[equality,np.zeros((len(equality),count))]
+            hessian=np.r_[hessian,np.full(count,1000.)];linear=np.r_[linear,np.zeros(count)]
+            lower=np.r_[lower,np.zeros(count)];upper=np.r_[upper,np.full(count,np.inf)]
+            inequality_lower=np.r_[inequality_lower,soft_b];inequality_upper=np.r_[inequality_upper,np.full(count,np.inf)]
+        qp = self.Data(num_equality_slack_variables=slack,num_inequality_slack_variables=len(soft_A),
             quadratic_weights=hessian,linear_weights=linear,box_lower_constraints=lower,box_upper_constraints=upper,
             equality_matrix=sparse.csc_matrix(equality),equality_bounds=target,
             inequality_matrix=sparse.csc_matrix(inequalities),
-            inequality_lower_bounds=np.r_[[-8.,-8.],collision_b],
-            inequality_upper_bounds=np.r_[[8.,8.],np.full(len(collision_b),np.inf)])
+            inequality_lower_bounds=inequality_lower,
+            inequality_upper_bounds=inequality_upper)
         solution = self.solver.solver_call(qp)
         u = solution[:10].copy()
         violation = max(0.,float(np.max(lo-u)),float(np.max(u-hi)),float(np.max(np.abs(self.wheels@u)-8.)))

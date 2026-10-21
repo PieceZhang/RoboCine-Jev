@@ -177,7 +177,9 @@ class DynamicLidarMap(LidarCollisionMap):
             # filter, but never accumulate a dynamic object's historical trail.
             filtered = LidarCollisionMap(voxel_size=self.voxel_size, map_radius=self.map_radius,
                 minimum_height=self.minimum_height, maximum_height=self.maximum_height,
-                minimum_clearance=self.minimum_clearance, retention_s=self.retention_s, confirmations=1)
+                minimum_clearance=self.minimum_clearance, retention_s=self.retention_s, confirmations=1,
+                geometry=self.geometry)
+            filtered.sensor_housings = self.sensor_housings
             exact_geometry=scan.get('exact_ray_geometry',False)
             if type(exact_geometry) is not bool or (exact_geometry and scan.get('acquisition_duration_s')!=0.):
                 raise ValueError('exact ray geometry requires an instantaneous scan')

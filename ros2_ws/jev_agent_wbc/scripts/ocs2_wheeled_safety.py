@@ -7,8 +7,40 @@ import threading
 import time
 import itertools
 import ctypes
+from collections import deque
 
 import numpy as np
+
+
+class MeasuredLateralYawModel:
+    """Causal skid-steer base-origin model, fitted from raw measured velocities.
+
+    The fit changes prediction only. It never creates lateral wheel commands or
+    changes physical actuator, collision, tilt, or freshness limits.
+    """
+    def __init__(self):
+        self.samples=deque()
+        self.gain_m=0.
+        self.fit_rmse_mps=None
+
+    def update(self,stamp_s,lateral_mps,yaw_radps):
+        if not np.isfinite([stamp_s,lateral_mps,yaw_radps]).all():
+            raise ValueError('finite fresh body velocity required')
+        if self.samples and stamp_s<=self.samples[-1][0]:
+            raise ValueError('body velocity acquisitions must increase')
+        self.samples.append((stamp_s,lateral_mps,yaw_radps))
+        while self.samples and self.samples[0][0]<stamp_s-.5:
+            self.samples.popleft()
+        values=np.asarray(self.samples)
+        active=np.abs(values[:,2])>=.05
+        if np.count_nonzero(active)>=10:
+            velocity=values[active,1];yaw=values[active,2]
+            estimate=float(np.clip(velocity@yaw/(yaw@yaw),-.35,.35))
+            self.gain_m=.8*self.gain_m+.2*estimate
+            self.fit_rmse_mps=float(np.sqrt(np.mean((velocity-self.gain_m*yaw)**2)))
+        return dict(gain_m=float(self.gain_m),fit_rmse_mps=self.fit_rmse_mps,
+                    acquisition_stamp_s=float(stamp_s),window_s=.5,
+                    source='causal_raw_body_velocity_regression')
 
 
 class NativeWorker:
@@ -43,7 +75,8 @@ class NativeWorker:
                     raise RuntimeError('native SLQ rejected request: '+str(result))
                 if result.get('request_id') != request['request_id'] or result.get('state_stamp_s') != request['state_stamp_s']:
                     raise RuntimeError('native result request/state binding mismatch')
-                result.update(transport_wall_s=time.monotonic()-self.submitted_wall,request_wall_s=self.submitted_wall)
+                result.update(transport_wall_s=time.monotonic()-self.submitted_wall,request_wall_s=self.submitted_wall,
+                              camera_path_id=request.get('camera_path_id'))
             except Exception as exc:
                 result = dict(ok=False, request_id=request['request_id'], state_stamp_s=request['state_stamp_s'],
                               reason=str(exc), transport_wall_s=time.monotonic()-start)

@@ -1,5 +1,6 @@
 """Nonblocking physical-loop client with finite freshness and recovery budgets."""
 import pickle
+import json
 from pathlib import Path
 import socket
 import subprocess
@@ -20,6 +21,8 @@ class AsyncGiskardClient:
         self.python = str(python or self.root/'wbc/.venv/bin/python')
         self.metadata = metadata
         self.log = Path(log_path).open('a')
+        self.failed_requests_path=Path(log_path).with_suffix('.failed_requests.jsonl')
+        self.failed_requests_saved=0
         self.restarts,self.sequence,self.pending = 0,0,None
         self.last,self.ready = None,False
         self.events=[]
@@ -65,10 +68,17 @@ class AsyncGiskardClient:
                 self.ready=True
                 self.initialization=packet
             elif packet['kind']=='command':
+                pending=self.pending
                 self.pending=None
                 self.last=packet
                 if not packet['ok']:
-                    self.events.append(dict(sim_s=sim_s,event='solver_rejected',error=packet['error']))
+                    self.events.append(dict(sim_s=sim_s,event='solver_rejected',error=packet['error'],
+                                            traceback=packet.get('traceback')))
+                    if pending is not None and self.failed_requests_saved<10:
+                        with self.failed_requests_path.open('a') as failures:
+                            failures.write(json.dumps(dict(request=pending,response=packet),
+                                default=lambda value:value.tolist() if hasattr(value,'tolist') else str(value))+'\n')
+                        self.failed_requests_saved+=1
         if self.process.poll() is not None:
             if not self.exit_reported:
                 self.events.append(dict(sim_s=sim_s,event='worker_exited',code=self.process.returncode))
@@ -101,6 +111,8 @@ class AsyncGiskardClient:
                 framework_tick_wall_s=packet.get('framework_tick_wall_s'),projection_norm=packet.get('projection_norm'),
                 upstream_proposal=packet.get('upstream_proposal'),upstream_derivative_mode=packet.get('upstream_derivative_mode'))
             status['measured_native_camera_consistency']=packet.get('measured_native_camera_consistency')
+            status['native_nonholonomic_base_preference']=packet.get('native_nonholonomic_base_preference')
+            status['native_timed_camera_twist_tracking']=packet.get('native_timed_camera_twist_tracking',False)
         if self.ready and self.pending is None:
             self.sequence+=1
             payload=dict(request,sequence=self.sequence)

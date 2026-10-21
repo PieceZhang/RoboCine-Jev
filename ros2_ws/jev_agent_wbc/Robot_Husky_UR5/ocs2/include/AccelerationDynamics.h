@@ -7,7 +7,8 @@ namespace jev {
 // Pose/joint state and real velocities are measured separately by the executor.
 class AccelerationDynamics final : public ocs2::SystemDynamicsBase {
  public:
-  explicit AccelerationDynamics(bool omni) : flow_(omni), nu_(omni ? 9 : 8) {}
+  explicit AccelerationDynamics(bool omni,double lateralYawGain=0.)
+      : flow_(omni,6,lateralYawGain), nu_(omni ? 9 : 8) {}
   AccelerationDynamics* clone() const override { return new AccelerationDynamics(*this); }
   using SystemDynamicsBase::computeFlowMap;
   using SystemDynamicsBase::linearApproximation;

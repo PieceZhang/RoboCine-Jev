@@ -42,6 +42,8 @@ def main():
         help='One original direction plus its fixed5s stop; diagnostic only, no camera acceptance.')
     p.add_argument('--arm-only',action='store_true',help='Original8s independent arm fixture, fixed5s measured home return and fixed5s zero-command strict stop; diagnostic only.')
     p.add_argument('--initial-heading-rad', type=float, default=0., help='Initial placement only, before physics; useful for WBC diagnostics.')
+    p.add_argument('--camera-preparation-lift-m',type=float,default=None,
+                   help='Native physical arm preparation before scene binding (0 to .25 m); avoidance default .20, otherwise 0.')
     p.add_argument('--gui', action='store_true')
     p.add_argument('--sensor-audit', action='store_true')
     p.add_argument('--sensor-rgb', action='store_true')
@@ -55,7 +57,14 @@ def main():
     p.add_argument('--backend',choices=['giskard-executor','giskard-core'],default='giskard-executor')
     p.add_argument('--trajectory', type=Path, help='JSON samples: t_s, position_m, quaternion_xyzw; world optical frame.')
     p.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)
+    from jev_agent_wbc.multi_robot_runtime import add_arguments
+    add_arguments(p)
     a = p.parse_args()
+    if a.avoidance_case:a.wbc_only=True
+    if a.camera_preparation_lift_m is None:
+        a.camera_preparation_lift_m=.20 if a.avoidance_case else 0.
+    if not 0.<=a.camera_preparation_lift_m<=.25:
+        p.error('--camera-preparation-lift-m must be in [0, .25]')
     a.robot_dir, a.output = a.robot_dir.resolve(), a.output.resolve()
     a.output.mkdir(parents=True, exist_ok=False)
     spec = json.loads((a.robot_dir/'robot.json').read_text())
@@ -90,6 +99,9 @@ def main():
     shared_files=[PACKAGE/'jev_agent_wbc'/name for name in ('representation.py','wbc_protocol.py','wbc_physical.py')]
     for path in shared_files:
         (shared/path.name).write_bytes(path.read_bytes())
+    if a.avoidance_case:
+        from jev_agent_wbc.multi_robot_runtime import freeze_package
+        freeze_package(PACKAGE,shared)
     sys.path[:0]=[str(a.native_sources),str(shared.parent)]
     import importlib.util
     def frozen_module(index, module_name):
@@ -282,6 +294,10 @@ def run(a, spec):
     session=LiveTaskSession(Capabilities('genuine Giskard World/Executor physical backend' if a.backend=='giskard-executor'
         else 'genuine Giskard explicit-QP component physical adapter',True,frozenset({'timed_camera_se3'})))
     feedback_file=(a.output/'public_feedback.jsonl').open('w',buffering=1)
+    avoidance=None
+    if a.avoidance_case:
+        from jev_agent_wbc.multi_robot_runtime import AvoidanceRuntime
+        avoidance=AvoidanceRuntime(a,PACKAGE,stage,rig,geometry,spec['base_link'],'tiago')
     world.reset()
     floor_readback=audit_ground(stage,'/World/Ground','/World/GroundMaterial')
     (a.output/'single_floor_after_reset.json').write_text(json.dumps(floor_readback,indent=2)+'\n')
@@ -521,6 +537,10 @@ def run(a, spec):
             measured_rates=np.r_[base_T[:3,0]@state['linear'],base_T[:3,2]@state['angular'],measured_qd[arm_ids]])
         if ref is not None and wbc.camera_request is not None:
             packet.update(mode='camera',**wbc.camera_request)
+        if avoidance is not None and avoidance.scene_start is not None:
+            packet['environment']=avoidance.environment_barriers(steps*dt,measured_poses,measured_body_js)
+            if avoidance.should_brake(steps*dt,measured_poses):
+                packet.update(mode='actuator',desired_rates=np.zeros(10))
         measured_motion=wbc.measured_motion_check(measured_q[arm_ids],packet['measured_rates'])
         before_native=time.perf_counter()
         native_command,native_status=native.command(packet)
@@ -551,16 +571,22 @@ def run(a, spec):
             if np.max(np.abs(parking.events[-1]['external_actuation_forces_Nm']))>1e-7:
                 raise RuntimeError('Unexpected external wheel actuation force in parking mode')
         target[arm_ids] = np.clip(target[arm_ids]+np.asarray(joint_speed)*dt, arm_lower+.002, arm_upper-.002)
+        if avoidance is not None:
+            lead=np.minimum(.03,wbc.speed[2:]*.12)
+            target[arm_ids]=np.clip(target[arm_ids],measured_q[arm_ids]-lead,measured_q[arm_ids]+lead)
         # Independent indexed actions avoid sending position targets to wheels.
         hold_ids = np.array([i for i in range(len(names)) if i not in wheel_ids])
         controller.apply_action(ArticulationAction(joint_positions=target[hold_ids], joint_velocities=velocities[hold_ids], joint_indices=hold_ids))
         controller.apply_action(ArticulationAction(joint_positions=parking_state['target_rad'],
             joint_velocities=velocities[wheel_ids], joint_indices=wheel_ids))
         before_physics=time.perf_counter()
+        if avoidance is not None:avoidance.update_scene((steps+1)*dt)
         world.step(render=False)
         after_physics=time.perf_counter()
         steps += 1
         post=acquire();q,poses,camera=post['q'],post['poses'],post['camera']
+        if avoidance is not None:
+            avoidance.update(steps*dt,poses,camera,native_joint_positions=dict(zip(names,q)))
         after_readback=time.perf_counter()
         bp = poses[spec['base_link']]
         # Bind feedback to this row's POST-step measurement, not the preceding
@@ -607,7 +633,7 @@ def run(a, spec):
                     stamp_s=steps*dt,scope='measured_native_limits'),
                 self_collision=dict(status='pass' if native_status['fresh_native_command'] and clearance is not None and clearance>=0. else 'unknown',
                     stamp_s=native_status['command_sample_s'],scope='measured_collision_model',clearance_m=clearance),
-                environment=dict(status='unknown',stamp_s=None,scope='not_available'),
+                environment=(avoidance.environment(steps*dt,poses) if avoidance is not None else dict(status='unknown',stamp_s=None,scope='not_available')),
                 policy_domain=dict(status='not_applicable',stamp_s=None,scope='not_applicable'))
             feedback=session.feedback(obs,feasible=False if post_guard_error else None,
                 reason='actuation_limit' if post_guard_error else ('accepted' if native_status['fresh_native_command'] else 'command_stale'),
@@ -676,9 +702,78 @@ def run(a, spec):
             raise RuntimeError(label+': original strict measured stop failed at end of fixed5s physical hold')
         return state
 
+    native_prepared_heading=None
+    native_posture_reference=None
     try:
         q, poses, camera = hold(2., 'settle')
+        if avoidance is not None:
+            from jev_agent_wbc.multi_robot_geometry import NativeKinematicModel
+            native_model=NativeKinematicModel.from_stage(stage,root,poses,spec['base_link'],
+                [j['name'] for j in spec['joints']],q[arm_ids],arm_lower,arm_upper,
+                wbc.speed[2:],geometry,rig,omnidirectional=False)
+            if a.camera_preparation_lift_m:
+                if not 0.<a.camera_preparation_lift_m<=.25:
+                    raise ValueError('native camera preparation height must be in (0,.25] m')
+                from scipy.optimize import least_squares
+                goal=camera.copy();goal[2,3]+=a.camera_preparation_lift_m
+                def preparation_residual(delta):
+                    predicted=native_model.camera(np.r_[np.zeros(3),delta])
+                    return np.r_[60.*(predicted[:3,3]-goal[:3,3]),
+                        16.*Rotation.from_matrix(goal[:3,:3]@predicted[:3,:3].T).as_rotvec(),.03*delta]
+                fitted=least_squares(preparation_residual,np.zeros(len(arm_ids)),
+                    bounds=(native_model.lower-native_model.q0+.03,native_model.upper-native_model.q0-.03),
+                    max_nfev=100)
+                if np.linalg.norm(preparation_residual(fitted.x)[:6])>.05:
+                    raise RuntimeError('native camera preparation IK has no accurate bounded solution')
+                goal_q=native_model.q0+fitted.x
+                wbc.camera_request=None
+                for _ in range(round(6./dt)):
+                    q,poses,camera=measured()
+                    desired=np.clip(2.*(goal_q-q[arm_ids]),-.6*wbc.speed[2:],.6*wbc.speed[2:])
+                    q,poses,camera=step(np.zeros(2),desired,'native_camera_preparation',
+                                        joint_ref=goal_q,park=True)
+                measured_error=dict(position_m=float(np.linalg.norm(camera[:3,3]-goal[:3,3])),
+                    orientation_rad=float(Rotation.from_matrix(goal[:3,:3]@camera[:3,:3].T).magnitude()))
+                (a.output/'native_camera_preparation.json').write_text(json.dumps(dict(
+                    requested_lift_m=a.camera_preparation_lift_m,physical_motion_s=6.,
+                    target_camera=goal.tolist(),target_joints=goal_q.tolist(),
+                    measured_error=measured_error,task_clock_started=False),indent=2)+'\n')
+                if measured_error['position_m']>.02 or measured_error['orientation_rad']>.04:
+                    raise RuntimeError('native camera preparation failed measured pose tolerance')
+                native_model=NativeKinematicModel.from_stage(stage,root,poses,spec['base_link'],
+                    [j['name'] for j in spec['joints']],q[arm_ids],arm_lower,arm_upper,
+                    wbc.speed[2:],geometry,rig,omnidirectional=False)
+            avoidance.bind(steps*dt,poses,camera,native_model)
+            displacement=avoidance.original.sample(8.)[0]-avoidance.original.sample(0.)[0]
+            base=poses[spec['base_link']]
+            yaw=np.arctan2(base[1,0],base[0,0])
+            heading=np.arctan2(displacement[1],displacement[0])
+            difference=np.arctan2(np.sin(heading-yaw),np.cos(heading-yaw))
+            # A differential base prepares for a predominantly lateral shot
+            # while the physical camera holds its original world pose.
+            if np.linalg.norm(displacement[:2])>.05 and abs(np.sin(difference))>.8:
+                if abs(difference)>np.pi/2:
+                    difference=np.arctan2(np.sin(difference+np.pi),np.cos(difference+np.pi))
+                native_prepared_heading=float(yaw+difference)
+                anchor=camera.copy()
+                avoidance.emit('native_nonholonomic_preparation',heading_rad=native_prepared_heading,
+                    camera_world_target=anchor,public_camera_path_changed=False)
+                for _ in range(round(a.avoidance_lead_s/dt)):
+                    q,poses,camera=measured()
+                    error=np.r_[anchor[:3,3]-camera[:3,3],
+                        Rotation.from_matrix(anchor[:3,:3]@camera[:3,:3].T).as_rotvec()]
+                    wbc.camera_request=dict(jacobian=acquire()['camera_jacobian'],error=error,
+                        feedforward=np.zeros(6),reference=anchor,
+                        native_preparation=True,
+                        native_base_heading_target_rad=native_prepared_heading)
+                    q,poses,camera=step(np.zeros(2),np.zeros(len(arm_ids)),'avoidance_pre_roll',anchor)
+            else:
+                q,poses,camera=hold(a.avoidance_lead_s,'avoidance_pre_roll')
         base0 = poses[spec['base_link']].copy()
+        if avoidance is not None:
+            native_posture_reference=q[arm_ids].copy()
+            avoidance.emit('native_prepared_posture_bound',stamp_s=steps*dt,
+                scope='private_measured_posture_preference_only',public_camera_path_changed=False)
         if a.probe:
             for i in range(200):
                 ramp = min(1., i/50., (199-i)/50.)
@@ -776,7 +871,10 @@ def run(a, spec):
                     duration = trajectory[0][-1]
                 # Author a new acceptance task, or admit the caller's unchanged task.
                 # Public axes and absolute simulation clock remain in the live session.
-                if a.task:
+                if avoidance is not None:
+                    task=avoidance.task(steps*dt,poses,camera)
+                    duration=task.trajectory.end_s-steps*dt
+                elif a.task:
                     task=TimedTask.from_dict(json.loads(a.task.read_text()))
                     duration=task.trajectory.end_s-steps*dt
                 else:
@@ -813,14 +911,31 @@ def run(a, spec):
                     raise RuntimeError('Public task unsupported/rejected: '+repr(admitted))
                 whole_rows=[]
                 for i in range(round(duration/dt)):
+                    if avoidance is not None:
+                        q,poses,camera=measured()
+                        revision=avoidance.revision(session,steps*dt,poses,camera)
+                        if revision is not None:task=revision
                     absolute_t=min((steps+1)*dt,task.trajectory.end_s)
                     ref,feedforward=session.reference(absolute_t)
                     q,poses,camera=measured()
                     J=acquire()['camera_jacobian']
                     error=np.r_[ref[:3,3]-camera[:3,3],Rotation.from_matrix(ref[:3,:3]@camera[:3,:3].T).as_rotvec()]
                     wbc.camera_request=dict(jacobian=J,error=error,feedforward=feedforward,reference=ref)
+                    if native_prepared_heading is not None:
+                        wbc.camera_request['native_base_heading_target_rad']=native_prepared_heading
+                    if native_posture_reference is not None:
+                        wbc.camera_request['native_posture_reference']=native_posture_reference.tolist()
+                    if avoidance is not None and avoidance.generation:
+                        from jev_agent_wbc.native_allocation import witness_posture
+                        hint=witness_posture(avoidance.lift,steps*dt-avoidance.scene_start)
+                        if hint is not None:
+                            if hint['camera_path_id']!=session.camera_path_id:
+                                raise ValueError('native posture hint belongs to another camera trajectory')
+                            wbc.camera_request['native_posture_reference']=[hint['joint_positions'][names[j]] for j in arm_ids]
+                            wbc.camera_request['native_base_heading_target_rad']=hint['base_heading_rad']
                     q,poses,camera=step(np.zeros(2),np.zeros(len(arm_ids)),'whole_body_camera',ref)
                     whole_rows.append(rows[-1])
+                if avoidance is not None:avoidance.execution_complete=True
                 errors = np.array([r['position_error_m'] for r in whole_rows])
                 angles = np.array([r['orientation_error_rad'] for r in whole_rows])
                 bases = np.array([np.asarray(r['T_world_base'])[:2, 3] for r in whole_rows])
@@ -897,6 +1012,7 @@ def run(a, spec):
         print('ACCEPTANCE', json.dumps(result), flush=True)
         return 0 if result['passed'] else 2
     finally:
+        if avoidance is not None:avoidance.finish()
         # Always command brake, including after solver/safety exceptions.
         controller.apply_action(ArticulationAction(joint_velocities=np.zeros(len(wheel_ids)), joint_indices=wheel_ids))
         controller.apply_action(ArticulationAction(joint_positions=np.asarray(robot.get_joint_positions())[arm_ids], joint_velocities=np.zeros(len(arm_ids)), joint_indices=arm_ids))

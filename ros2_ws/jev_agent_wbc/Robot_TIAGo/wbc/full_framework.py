@@ -183,15 +183,26 @@ class FullGiskardExecutor:
             context.qp_controller_config.set_dof_weight(dof.name,Derivatives.velocity,cost*speed**2)
         for dof,variable,joint in zip(self.dofs[2:],self.joint_costs,spec['joints']):
             context.qp_controller_config.set_dof_weight(dof.name,Derivatives.velocity,variable*joint['velocity']**2)
+        self.posture_weight=sm.FloatVariable('tiago_native_posture_weight')
+        context.float_variable_data.register_expression(self.posture_weight)
+        context.float_variable_data.set_value(self.posture_weight,.003)
+        self.posture_targets=[sm.FloatVariable(f'tiago_native_posture_target_{i}') for i in range(8)]
+        for variable,joint in zip(self.posture_targets,spec['joints']):
+            context.float_variable_data.register_expression(variable)
+            context.float_variable_data.set_value(variable,joint['home'])
         self.posture=JointPositionList(name='native_camera_home_preference',
-            goal_state=JointState.from_str_dict({j['name']:j['home'] for j in spec['joints']},world),
-            weight=.003*self.camera_enabled,max_velocity=.5)
-        self.model_manifest.update(native_posture_goal='giskardpy JointPositionList, weight .003 only during camera task',
-            native_limit_preference='effective velocity cost .002+.5*pressure; quadratic pressure within min(.25,.2*range), no range reduction',
+            goal_state=JointState.from_str_dict({j['name']:v for j,v in zip(spec['joints'],self.posture_targets)},world),
+            weight=self.posture_weight*self.camera_enabled,max_velocity=.5)
+        self.model_manifest.update(native_posture_goal='giskardpy JointPositionList: ordinary home weight .003; avoidance measured prepared posture weight .03; camera task only',
+            native_limit_preference='ordinary .002+.5*pressure within min(.25,.2*range); avoidance .002+2*pressure within min(.55,.30*range); no hard range reduction',
+            avoidance_projection='preserve proposed camera twist with weight100 soft residual; early self separation and joint damping are soft preferences; original independent hard guards retained',
             native_base_effective_velocity_cost=[.06,.03])
         initial=world.compute_forward_kinematics_np(world.root,self.camera)
         self.binding=GiskardCameraGoalBinding(context,CameraReferenceSample(-.01,initial,np.zeros(6)))
-        self.binding.goal.weight=self.camera_enabled
+        self.timed_camera_enabled=sm.FloatVariable('native_timed_camera_twist_enabled')
+        context.float_variable_data.register_expression(self.timed_camera_enabled)
+        context.float_variable_data.set_value(self.timed_camera_enabled,0.)
+        self.binding.goal.weight=self.camera_enabled*(1.-self.timed_camera_enabled)
         self.rate_targets=[sm.FloatVariable(f'tiago_rate_target_{i}') for i in range(10)]
         for variable in self.rate_targets:
             context.float_variable_data.register_expression(variable)
@@ -210,6 +221,28 @@ class FullGiskardExecutor:
                 return result
         self.rate_task=ActuatorRateTask(name='physical_actuator_tracking',expressions=[d.variables.position for d in self.dofs],
             targets=self.rate_targets,enabled=1.-self.camera_enabled)
+        # Track the supplied timed SE(3) trajectory with its world twist.
+        # CartesianPose alone treats each incoming knot as a stationary goal.
+        # The world owns these FK derivatives and the original Giskard QP.
+        self.camera_rate_targets=[sm.FloatVariable(f'native_camera_twist_{i}') for i in range(12)]
+        for variable in self.camera_rate_targets:
+            context.float_variable_data.register_expression(variable)
+            context.float_variable_data.set_value(variable,0.)
+        camera_fk=world.compose_forward_kinematics_expression(world.root,self.camera)
+        self.camera_rate_task=ActuatorRateTask(name='native_timed_SE3_tracking',
+            expressions=[camera_fk.position[i] for i in range(3)]+
+                        [camera_fk.rotation_matrix[i,j] for i in range(3) for j in range(3)],
+            targets=self.camera_rate_targets,enabled=self.timed_camera_enabled)
+        self.base_support_enabled=sm.FloatVariable('native_camera_base_support_enabled')
+        context.float_variable_data.register_expression(self.base_support_enabled)
+        context.float_variable_data.set_value(self.base_support_enabled,0.)
+        self.base_support_targets=[sm.FloatVariable(f'native_camera_base_support_{i}') for i in range(2)]
+        for variable in self.base_support_targets:
+            context.float_variable_data.register_expression(variable)
+            context.float_variable_data.set_value(variable,0.)
+        self.base_support=ActuatorRateTask(name='native_nonholonomic_camera_support',
+            expressions=[d.variables.position for d in self.dofs[:2]],targets=self.base_support_targets,
+            enabled=.01*self.base_support_enabled)
         manager=world.collision_manager
         bodies={body.name.name:body for body in world.bodies_with_collision}
         @dataclass
@@ -223,7 +256,9 @@ class FullGiskardExecutor:
             manager.add_ignore_collision_rule(AllowedNamedBodyPairs(pairs=allowed))
         statechart=MotionStatechart()
         statechart.add_node(self.binding.goal);statechart.add_node(self.rate_task)
+        statechart.add_node(self.camera_rate_task)
         statechart.add_node(self.posture)
+        statechart.add_node(self.base_support)
         statechart.add_node(SelfCollisionAvoidance(name='official_filtered_self_collision',robot=self.config.robot,cancel_if_collision_violated=True))
         self.executor=Executor(context)
         self.executor.compile(statechart)
@@ -284,9 +319,42 @@ class FullGiskardExecutor:
         data.set_value(self.camera_enabled,float(camera_mode))
         q=np.asarray(request['q'])
         lower=np.array([j['lower'] for j in self.spec['joints']]);upper=np.array([j['upper'] for j in self.spec['joints']])
-        zone=np.minimum(.25,.2*(upper-lower))
+        avoidance=request.get('environment') is not None
+        data.set_value(self.timed_camera_enabled,float(avoidance and camera_mode))
+        data.set_value(self.base_support_enabled,float(avoidance and camera_mode))
+        base_preference=None
+        if avoidance and camera_mode:
+            base=np.asarray(request['poses'][self.spec['base_link']])
+            camera=np.asarray(request['measured_camera'])
+            reference=np.asarray(request['reference'])
+            error=np.r_[reference[:3,3]-camera[:3,3],
+                        Rotation.from_matrix(reference[:3,:3]@camera[:3,:3].T).as_rotvec()]
+            twist=np.asarray(request['feedforward'])+np.r_[4.*error[:3],3.*error[3:]]
+            wx,wy,wz=twist[3:]
+            skew=np.array([[0.,-wz,wy],[wz,0.,-wx],[-wy,wx,0.]])
+            targets=np.r_[twist[:3],(skew@camera[:3,:3]).ravel()]
+            for variable,value in zip(self.camera_rate_targets,targets):data.set_value(variable,float(value))
+            world_velocity=np.asarray(request['feedforward'])[:3]+.4*(np.asarray(request['reference'])[:3,3]-camera[:3,3])
+            yaw=np.arctan2(base[1,0],base[0,0])
+            prepared_heading=request.get('native_base_heading_target_rad')
+            heading=float(prepared_heading) if prepared_heading is not None else np.arctan2(world_velocity[1],world_velocity[0])
+            error=np.arctan2(np.sin(heading-yaw),np.cos(heading-yaw))
+            if abs(error)>np.pi/2:
+                error=np.arctan2(np.sin(error+np.pi),np.cos(error+np.pi))
+            yaw_rate=float(np.clip(1.2*error,-.35,.35)) if prepared_heading is not None or np.linalg.norm(world_velocity[:2])>.005 else 0.
+            translation=world_velocity-np.cross([0.,0.,yaw_rate],camera[:3,3]-base[:3,3])
+            forward=float(np.clip(translation@base[:3,0],-.22,.22))
+            base_preference=[forward,yaw_rate]
+            for variable,value in zip(self.base_support_targets,base_preference):data.set_value(variable,value)
+        data.set_value(self.posture_weight,.03 if avoidance else .003)
+        preferred=np.asarray(request.get('native_posture_reference',[j['home'] for j in self.spec['joints']]),float)
+        if preferred.shape!=(8,) or not np.isfinite(preferred).all() or np.any(preferred<lower) or np.any(preferred>upper):
+            raise ValueError('native posture reference exceeds original measured joint bounds')
+        for variable,value in zip(self.posture_targets,preferred):
+            data.set_value(variable,float(value))
+        zone=np.minimum(.55 if avoidance else .25,(.30 if avoidance else .2)*(upper-lower))
         pressure=np.clip(1.-np.minimum(q-lower,upper-q)/zone,0.,1.)**2
-        for variable,value in zip(self.joint_costs,.002+.5*pressure):data.set_value(variable,float(value))
+        for variable,value in zip(self.joint_costs,.002+(2. if avoidance else .5)*pressure):data.set_value(variable,float(value))
         if camera_mode:
             self.binding.update(CameraReferenceSample(request['sample_s'],np.asarray(request['reference']),np.asarray(request['feedforward'])))
         else:
@@ -298,9 +366,13 @@ class FullGiskardExecutor:
         # Explicit independent safety projection under unchanged measured bounds
         # and actual-USD FCL distance barriers, using genuine upstream solver.
         safety_request=dict(request,mode='actuator',desired_rates=proposal)
+        if avoidance and camera_mode:
+            safety_request['preserve_proposed_camera_twist']=True
         result=self.safety.solve(safety_request)
         result.update(full_world_executor=True,upstream_task_controller='CartesianPose/ActuatorRateTask -> MotionStatechart -> Executor -> QPController',
             upstream_proposal=proposal,framework_tick_wall_s=framework_wall,
             projection_norm=float(np.linalg.norm(result['command']-proposal)),upstream_derivative_mode=self.derivative_mode,
             measured_native_camera_consistency=camera_consistency)
+        result['native_nonholonomic_base_preference']=base_preference
+        result['native_timed_camera_twist_tracking']=bool(avoidance and camera_mode)
         return result

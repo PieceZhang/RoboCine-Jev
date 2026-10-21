@@ -11,6 +11,7 @@ import sys
 import time
 
 PACKAGE=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(PACKAGE))
 
 
 def main():
@@ -25,7 +26,10 @@ def main():
     parser.add_argument('--sensor-rgb',action='store_true')
     parser.add_argument('--gui',action='store_true')
     parser.add_argument('--child',action='store_true',help=argparse.SUPPRESS)
+    from jev_agent_wbc.multi_robot_runtime import add_arguments
+    add_arguments(parser)
     args=parser.parse_args()
+    if args.avoidance_case:args.wbc_only=True
     args.robot_dir=args.robot_dir.resolve();args.output=args.output.resolve()
     args.output.mkdir(parents=True,exist_ok=False)
     frozen=args.output/'sources';frozen.mkdir()
@@ -36,7 +40,7 @@ def main():
     source_files += [args.robot_dir/spec['sensor_config']]
     if (args.robot_dir/'robot.json').is_file():source_files.append(args.robot_dir/'robot.json')
     if args.task_file:source_files.append(args.task_file)
-    binary=args.worker_binary or args.robot_dir/'ocs2/.cache/backend/camera_mpc_worker'
+    binary=args.worker_binary or args.robot_dir/('ocs2/.cache/avoidance/camera_mpc_worker' if args.avoidance_case else 'ocs2/.cache/backend/camera_mpc_worker')
     if not binary.is_file():raise FileNotFoundError('Build the actual native OCS2 camera_mpc_worker first')
     binary=binary.resolve();shutil.copy2(binary,frozen/'camera_mpc_worker');args.worker_binary=frozen/'camera_mpc_worker'
     guard_library=binary.with_name('libmeasured_collision_guard.so')
@@ -48,6 +52,9 @@ def main():
     pkg=frozen/'python/jev_agent_wbc';pkg.mkdir(parents=True);(pkg/'__init__.py').write_text('')
     for name in ['representation.py','wbc_protocol.py','wbc_physical.py','robot_sensor_rig.py']:
         src=PACKAGE/'jev_agent_wbc'/name;shutil.copy2(src,pkg/name);snapshot[str(src)]=dict(snapshot='python/jev_agent_wbc/'+name,sha256=hashlib.sha256(src.read_bytes()).hexdigest())
+    if args.avoidance_case:
+        from jev_agent_wbc.multi_robot_runtime import freeze_package
+        freeze_package(PACKAGE,pkg)
     sys.path[:0]=[str(frozen/'python'),str(PACKAGE/'scripts'),str(PACKAGE)]
     m=importlib.util.spec_from_file_location('frozen_ocs2_safety',frozen/'1_ocs2_wheeled_safety.py');safety=importlib.util.module_from_spec(m);m.loader.exec_module(safety);args.safety=safety
     m=importlib.util.spec_from_file_location('frozen_ocs2_scene',frozen/'2_ocs2_wheeled_scene.py');scene=importlib.util.module_from_spec(m);m.loader.exec_module(scene);args.scene=scene
@@ -145,10 +152,16 @@ def run(a):
     # explicitly rigid-fixed bodies merged by PhysX, never live USD substitution.
     xcache=UsdGeom.XformCache();authored={name:np.asarray(xcache.GetLocalToWorldTransform(p)).T.copy() for name,p in body_prims.items()}
     invbase=np.linalg.inv(authored[spec['base_link']]);live_model=dict(a.model)
+    live_model['T_ee_camera_optical']=(np.linalg.inv(np.asarray(live_model['T_base_ee_at_authored_pose']))
+        @invbase@authored[rig.camera_spec['parent']]@rig.camera_local).tolist()
     live_model.update(body_kinematics=[dict(name=name,prefix=prefix(name),T_base_body=(invbase@T).tolist()) for name,T in authored.items()],collision_shapes=geometry.shapes,collision_pairs=collision.pairs)
     live_model_path=a.output/'sources/live_model.json';live_model_path.write_text(json.dumps(live_model,indent=2)+'\n')
     provenance_path=a.output/'provenance.json';provenance=json.loads(provenance_path.read_text());provenance['frozen_sha256']={str(p.relative_to(a.output)):hashlib.sha256(p.read_bytes()).hexdigest() for p in (a.output/'sources').rglob('*') if p.is_file()};provenance_path.write_text(json.dumps(provenance,indent=2)+'\n')
     measured_collision=a.safety.NativeCollisionGuard(a.guard_library,live_model_path)
+    avoidance=None
+    if a.avoidance_case:
+        from jev_agent_wbc.multi_robot_runtime import AvoidanceRuntime
+        avoidance=AvoidanceRuntime(a,PACKAGE,stage,rig,geometry,spec['base_link'],spec['robot'])
     world.reset()
     (a.output/'ground_audit.json').write_text(json.dumps(a.scene.audit_single_ground(stage,'/World/Ground',material.material,floor),indent=2)+'\n')
     names=robot.dof_names;linear_names={p.GetName() for p in joint_prims if p.IsA(UsdPhysics.PrismaticJoint)};joint_units=['m' if n in linear_names else 'rad' for n in names];view=robot._articulation_view;arm_ids=np.array([names.index(n) for n in spec['arm_joints']])
@@ -189,10 +202,13 @@ def run(a):
     skid_servo=None if omni else a.safety.SkidSteerVelocityServo(profile['wheel_radius_m'],profile['wheel_separation_m'])
     (a.output/'configuration.json').write_text(json.dumps(dict(robot=spec,physical_joint_limits=actuator['physical_limits'],arm_model_limits=limits.tolist(),joint_names=names,joint_units=joint_units,kp=kp.tolist(),kd=kd.tolist(),max_effort=effort.tolist(),floor_height_m=floor,stop_budget_s=5.,measurement_scope='one shared fresh acquisition per 100Hz physics step',skid_mapping=None if omni else dict(type='measured-body-yaw PI to bounded physical wheel velocities',native_reference_yaw_cap_radps=.35,native_reference_yaw_slew_radps2=.65,actual_body_yaw_cap_radps=.45,wheel_cap_radps=8.,wheel_slew_radps2=skid_servo.wheel_slew,virtual_actuator_yaw_cap=4.,virtual_yaw_is_body_reference=False,manual_turn_operating_wheel_cap_radps=1.,manual_turn_brake_enter_radps=.22,manual_turn_brake_release_radps=.12),camera_manipulator_bodies=sorted(manipulator),physical_body_sources={name:dict(host=host,T_host_body=offset.tolist()) for name,(host,offset) in body_sources.items()},collision_geometry=geometry.manifest(),collision_pairs=collision.pairs,collision_scope='conservative actual convex hulls; SAT broad phase; fixed-component and adjacent-joint exclusions',asset_sha256=hashlib.sha256(model.read_bytes()).hexdigest()),indent=2)+'\n')
     worker=a.safety.NativeWorker(a.worker_binary,a.output/'sources'/next(p.name for p in (a.output/'sources').glob('*_backend.json')),live_model_path,a.output/'native_mpc.jsonl')
+    lateral_model=a.safety.MeasuredLateralYawModel() if avoidance is not None and not omni else None
+    lateral_model_audit=None
     rows=[];phases=[];safety_violations=[];timings=[];stop_hold_s=5.;steps=0;measurement_cache=[-1,None];wall=time.monotonic();session=None;active_policy=None;serial=0;last_submit=-1.;recovery_since=None;failed_solutions=0;native_failure=None;native_infeasible=False
     state_stream=(a.output/'samples.jsonl').open('w',buffering=1);feedback_stream=(a.output/'feedback.jsonl').open('w',buffering=1)
 
     def measured():
+        nonlocal lateral_model_audit
         # The solver, guard and logger share the same acquisition for this
         # physics tick. A new world.step always invalidates it through `steps`.
         # No measurement is carried across a physics step.
@@ -206,6 +222,8 @@ def run(a):
         angular=velocity_tensor[3:].copy();com_world=hosts[host][:3,:3]@link_com[index]+hosts[host][:3,3]
         linear=velocity_tensor[:3]+np.cross(angular,base[:3,3]-com_world)
         yaw=np.arctan2(base[1,0],base[0,0]);c,s=np.cos(yaw),np.sin(yaw);vbody=np.array([c*linear[0]+s*linear[1],-s*linear[0]+c*linear[1]])
+        if lateral_model is not None:
+            lateral_model_audit=lateral_model.update(steps*.01,vbody[1],angular[2])
         velocity=np.r_[vbody,angular[2],qd[arm_ids]] if omni else np.r_[vbody[0],angular[2],qd[arm_ids]]
         x=np.r_[base[:2,3],yaw,q[arm_ids],velocity]
         result=(q,qd,poses,camera,x,linear,angular);measurement_cache[:]=[steps,result]
@@ -214,7 +232,14 @@ def run(a):
     def step(desired,phase,*,brake=False):
         nonlocal steps
         tick=time.perf_counter()
+        policy_audit=None if active_policy is None else dict(
+            request_id=active_policy['request_id'],state_stamp_s=active_policy['state_stamp_s'],
+            acquisition_age_s=steps*.01-active_policy['state_stamp_s'],
+            wall_age_s=time.monotonic()-active_policy.get('request_wall_s',time.monotonic()),
+            transport_wall_s=active_policy.get('transport_wall_s'))
         q,qd,poses,camera,x,linear,angular=measured()
+        if avoidance is not None:
+            brake=bool(brake or avoidance.should_brake(steps*.01,poses))
         before_guard=time.perf_counter()
         if not np.isfinite(x).all() or np.arccos(np.clip(poses[spec['base_link']][2,2],-1,1))>.35:raise RuntimeError('nonfinite/tilted physical robot')
         distance,pair=measured_collision.check(poses)
@@ -237,8 +262,15 @@ def run(a):
             velocities[left]=left_target;velocities[right]=right_target
             for i in wheels:velocities[i]*=profile.get('wheel_signs',{}).get(names[i],1.)
             hold=np.array([i for i in range(len(names)) if i not in wheels]);control.apply_action(ArticulationAction(joint_positions=target[hold],joint_velocities=velocities[hold],joint_indices=hold));control.apply_action(ArticulationAction(joint_velocities=velocities[wheels],joint_indices=wheels))
+        if avoidance is not None:avoidance.update_scene((steps+1)*.01)
         before_physics=time.perf_counter();world.step(render=False);steps+=1;after_physics=time.perf_counter()
         q,qd,poses,camera,x,linear,angular=measured();stamp=steps*.01
+        if avoidance is not None:
+            platform_state=None if lateral_model is None else dict(
+                lateral_yaw_gain_m=lateral_model.gain_m,stamp_s=stamp,
+                fit_rmse_mps=lateral_model.fit_rmse_mps)
+            avoidance.update(stamp,poses,camera,native_joint_positions=dict(zip(names,q)),
+                             native_platform_state=platform_state)
         after_measurement=time.perf_counter()
         yaw=x[2];measured_body=[np.cos(yaw)*linear[0]+np.sin(yaw)*linear[1],-np.sin(yaw)*linear[0]+np.cos(yaw)*linear[1],angular[2]]
         requested_body=list(np.asarray(desired)[:3]) if omni else [float(desired[0]),0.,float(desired[1])]
@@ -251,6 +283,11 @@ def run(a):
         record=dict(measured_configuration_ok=config_ok,maximum_actual_velocity_ratio=actual_speed_ratio,measured_arm_guard=guard.last_audit,joint_projected_efforts=projected_effort.tolist(),applied_user_efforts=np.asarray(view.get_applied_joint_efforts())[0].tolist(),t_s=stamp,stamp_s=stamp,case=phase,phase='stop' if phase in ['settle','stop','pre_wbc'] or phase.endswith('_stop') else 'move',phase_label=phase,q=q.tolist(),qd=qd.tolist(),joint_positions=q.tolist(),joint_names=names,joint_units=joint_units,
                     requested_body_velocity=requested_body,commanded_body_velocity=commanded_body,measured_body_velocity=list(map(float,measured_body)),base_linear_velocity_world=linear.tolist(),base_angular_velocity_world=angular.tolist(),T_world_camera_optical=camera.tolist(),T_world_base=poses[spec['base_link']].tolist(),T_world_camera=camera.tolist(),base_linear_velocity=linear.tolist(),base_angular_velocity=angular.tolist(),command=command.tolist(),self_separation_lower_bound_m=distance,self_pair=pair)
         if skid_servo is not None:record['skid_actuator_mapping']=skid_servo.last_audit
+        record['native_policy']=policy_audit
+        record['execution_brake']=execution_brake
+        record['native_failure']=native_failure
+        if lateral_model_audit is not None:
+            record['native_lateral_yaw_model']=dict(lateral_model_audit)
         if session is not None:
             observation=geometry.observe(stamp,poses[spec['base_link']],camera,poses)
             current_distance,current_pair=measured_collision.check(poses)
@@ -258,7 +295,7 @@ def run(a):
                 'configuration':dict(status='pass' if config_ok else 'fail',stamp_s=stamp,scope='measured_native_limits'),
                 'actuation':dict(status='fail' if actual_speed_ratio>1.00001 else 'unknown',stamp_s=stamp,scope='measured_native_limits' if actual_speed_ratio>1.00001 else 'not_available'),
                 'self_collision':dict(status='pass' if current_distance>=.005 else 'fail',stamp_s=stamp,scope='measured_collision_model',clearance_m=current_distance),
-                'environment':dict(status='unknown',stamp_s=stamp,scope='not_available'),
+                'environment':(avoidance.environment(stamp,poses) if avoidance is not None else dict(status='unknown',stamp_s=stamp,scope='not_available')),
                 'policy_domain':dict(status='not_applicable',stamp_s=None,scope='not_applicable')}
             result=session.feedback(observation,feasible=False if native_infeasible else None,reason=native_failure or 'not_evaluated',hold_terminal=stamp>session.end_s,constraints=constraints,now_s=stamp)
             feedback_stream.write(json.dumps(result,allow_nan=False)+'\n');record['task_feedback']=result;record['T_world_reference_optical']=session.reference(min(stamp,session.end_s))[0].tolist();record.update(position_error_m=result['position_error_m'],orientation_error_rad=result['orientation_error_rad'],camera_within_tolerance=result['camera_within_tolerance'])
@@ -280,6 +317,7 @@ def run(a):
         phases.append(dict(phase=label,**report))
         return report
 
+    native_heading_prepared=False
     try:
         q,qd,poses,camera,x,linear,angular=hold(3.,'settle')
         initial_observation=geometry.observe(steps*.01,poses[spec['base_link']],camera,poses)
@@ -292,6 +330,53 @@ def run(a):
         predicted=poses[spec['base_link']]@predicted@np.asarray(live_model['T_base_ee_at_authored_pose'])@np.asarray(live_model['T_ee_camera_optical'])
         fk_error=float(np.linalg.norm(predicted[:3,3]-camera[:3,3]));fk_angle=float(Rotation.from_matrix(predicted[:3,:3]@camera[:3,:3].T).magnitude())
         if fk_error>.003 or fk_angle>.01:raise RuntimeError(f'USD/native optical FK differs from physical camera {fk_error}m/{fk_angle}rad')
+        if avoidance is not None:
+            from jev_agent_wbc.multi_robot_geometry import NativeKinematicModel
+            native_model=NativeKinematicModel.from_stage(stage,root,poses,spec['base_link'],
+                list(spec['arm_joints']),q[arm_ids],lower,upper,np.full(6,.65),geometry,rig,omnidirectional=omni)
+            zero=native_model.camera(np.zeros(9))
+            if np.linalg.norm(zero-camera)>1e-6:raise RuntimeError('measured native model initial camera mismatch')
+            avoidance.bind(steps*.01,poses,camera,native_model)
+            displacement=avoidance.original.sample(8.)[0]-avoidance.original.sample(0.)[0]
+            direction=np.arctan2(displacement[1],displacement[0])-x[2]
+            native_heading_prepared=bool(not omni and np.linalg.norm(displacement[:2])>.05
+                                         and abs(np.sin(direction))>.8)
+            if native_heading_prepared:
+                anchor=camera.copy();end=steps*.01+a.avoidance_lead_s
+                preparation_id='native_fixed_camera_preparation'
+                avoidance.emit('native_nonholonomic_preparation',
+                    heading_rad=avoidance.tangent_heading(avoidance.scene_start,x[2]),
+                    camera_world_target=anchor,public_camera_path_changed=False)
+                while steps*.01<end-1e-8:
+                    stamp=steps*.01;q,qd,poses,camera,x,linear,angular=measured()
+                    answer=worker.poll()
+                    if answer is not None:
+                        active_policy=answer if (answer.get('ok') is True
+                            and answer.get('camera_path_id')==preparation_id
+                            and stamp-answer['state_stamp_s']<=.2
+                            and answer.get('transport_wall_s',1e9)<=.2) else None
+                    environment=avoidance.native_environment(stamp)
+                    if environment is not None and not worker.busy and stamp-last_submit>=.05-1e-8:
+                        serial+=1
+                        worker.submit(dict(environment=environment,request_id=serial,
+                            state_stamp_s=stamp,horizon_s=1.,state=np.r_[x[:9],guard.previous].tolist(),
+                            rate_state_semantics='last_applied_velocity_command',
+                            measured_velocity=x[9:].tolist(),T_world_base=poses[spec['base_link']].tolist(),
+                            frame='world_optical',camera_path_id=preparation_id,
+                            measured_nonholonomic_lateral_yaw_gain_m=lateral_model.gain_m,
+                            native_allocation_preparation=stamp<end-1.,
+                            absolute_times_s=[stamp,stamp+1.],camera_poses=[anchor.tolist(),anchor.tolist()],
+                            native_base_heading_target_rad=avoidance.tangent_heading(avoidance.scene_start,x[2])))
+                        last_submit=stamp
+                    try:
+                        if active_policy is None:raise ValueError('no fresh preparation policy')
+                        u=a.safety.policy_velocity(active_policy,stamp,nu,ttl_s=.2)
+                    except ValueError:
+                        active_policy=None;u=np.zeros(nu)
+                    q,qd,poses,camera,x,linear,angular=step(u,'avoidance_pre_roll',brake=active_policy is None)
+                active_policy=None;last_submit=-1.
+            else:
+                q,qd,poses,camera,x,linear,angular=hold(a.avoidance_lead_s,'avoidance_pre_roll')
         if a.probe:
             start=poses[spec['base_link']][:3,3].copy()
             for i in range(200):
@@ -319,7 +404,9 @@ def run(a):
                 for i in range(800):u=np.r_[np.zeros(nu-6),amplitude*(2*np.pi/8)*np.cos(2*np.pi*i*.01/8)];state=step(u,'independent_arm');arm_samples.append(state[0][arm_ids].copy())
                 drift=float(np.linalg.norm(state[2][spec['base_link']][:2,3]-before[2][spec['base_link']][:2,3]));span=np.ptp(arm_samples,axis=0);phases.append(dict(phase='independent_arm',base_drift_m=drift,arm_span_rad=span.tolist(),passed=bool(drift<.03 and np.all(span>amplitude*.5))));strict_hold('arm_stop')
             q,qd,poses,camera,x,linear,angular=measured();stamp=steps*.01;observation=geometry.observe(stamp,poses[spec['base_link']],camera,poses)
-            if a.task_file:
+            if avoidance is not None:
+                task=avoidance.task(stamp,poses,camera)
+            elif a.task_file:
                 task=TimedTask.from_dict(json.loads(a.task_file.read_text()))
             else:
                 times=np.arange(0,21.0001,.05);references=[]
@@ -335,8 +422,17 @@ def run(a):
             if omni:
                 while steps*.01<task.trajectory.end_s-1e-8:
                     stamp=steps*.01;q,qd,poses,camera,x,linear,angular=measured();answer=worker.poll()
+                    if avoidance is not None:
+                        revision=avoidance.revision(session,stamp,poses,camera)
+                        if revision is not None:
+                            task=revision
+                            optical_serialized=[rigid(optical_camera(p)).tolist() for p in task.trajectory.poses]
+                            absolute=np.array([task.trajectory.start_s+t for t in task.trajectory.times_s])
+                            active_policy=None;last_submit=-1.
+                    environment=avoidance.native_environment(stamp) if avoidance is not None else None
+                    environment_args={} if environment is None else dict(environment=environment)
                     if answer is not None:
-                        if answer.get('ok') is True and stamp-answer['state_stamp_s']<=.2 and answer.get('transport_wall_s',1e9)<=.2:
+                        if answer.get('ok') is True and answer.get('camera_path_id')==session.camera_path_id and stamp-answer['state_stamp_s']<=.2 and answer.get('transport_wall_s',1e9)<=.2:
                             active_policy=answer;failed_solutions=0;native_failure=None
                         else:
                             failed_solutions+=1;active_policy=None;text=str(answer).lower()
@@ -345,11 +441,12 @@ def run(a):
                     if not worker.busy and stamp-last_submit>=.05-1e-8 and horizon>=.2-1e-8:
                         model_state=np.r_[x[:9],guard.previous]
                         reference_times,reference_poses,indices=a.safety.reference_window(absolute,optical_serialized,stamp,horizon)
-                        serial+=1;worker.submit(dict(request_id=serial,state_stamp_s=stamp,horizon_s=horizon,state=model_state.tolist(),rate_state_semantics='last_applied_velocity_command',measured_velocity=x[9:].tolist(),T_world_base=poses[spec['base_link']].tolist(),frame='world_optical',camera_path_id=session.camera_path_id,original_reference_slice=list(indices),absolute_times_s=reference_times,camera_poses=reference_poses));last_submit=stamp
+                        serial+=1;worker.submit(dict(**environment_args,request_id=serial,state_stamp_s=stamp,horizon_s=horizon,state=model_state.tolist(),rate_state_semantics='last_applied_velocity_command',measured_velocity=x[9:].tolist(),T_world_base=poses[spec['base_link']].tolist(),frame='world_optical',camera_path_id=session.camera_path_id,original_reference_slice=list(indices),absolute_times_s=reference_times,camera_poses=reference_poses));last_submit=stamp
                     try:
                         if active_policy is None:raise ValueError('no fresh native policy')
                         u=a.safety.policy_velocity(active_policy,stamp,nu,ttl_s=.2);recovery_since=None
                     except ValueError:
+                        active_policy=None
                         u=np.zeros(nu)
                         if recovery_since is None:recovery_since=stamp
                         if stamp-recovery_since>2. or failed_solutions>=5:
@@ -360,8 +457,17 @@ def run(a):
             else:
                 while steps*.01<task.trajectory.end_s+stop_hold_s-1e-8:
                     stamp=steps*.01;q,qd,poses,camera,x,linear,angular=measured();answer=worker.poll()
+                    if avoidance is not None:
+                        revision=avoidance.revision(session,stamp,poses,camera)
+                        if revision is not None:
+                            task=revision
+                            optical_serialized=[rigid(optical_camera(p)).tolist() for p in task.trajectory.poses]
+                            absolute=np.array([task.trajectory.start_s+t for t in task.trajectory.times_s])
+                            active_policy=None;last_submit=-1.
+                    environment=avoidance.native_environment(stamp) if avoidance is not None else None
+                    environment_args={} if environment is None else dict(environment=environment)
                     if answer is not None:
-                        if answer.get('ok') is True and stamp-answer['state_stamp_s']<=.2 and answer.get('transport_wall_s',1e9)<=.2:
+                        if answer.get('ok') is True and answer.get('camera_path_id')==session.camera_path_id and stamp-answer['state_stamp_s']<=.2 and answer.get('transport_wall_s',1e9)<=.2:
                             active_policy=answer;failed_solutions=0;native_failure=None
                         else:
                             failed_solutions+=1;active_policy=None;text=str(answer).lower()
@@ -373,11 +479,16 @@ def run(a):
                         terminal_hold['chassis_brake_applied']=bool(stamp>=task.trajectory.end_s-1e-8)
                         terminal_hold['all_actuators_brake_applied']=bool(stamp>=task.trajectory.end_s+4.-1e-8)
                         terminal_hold['all_actuator_brake_offset_s']=4.
-                        serial+=1;worker.submit(dict(request_id=serial,state_stamp_s=stamp,horizon_s=horizon,state=model_state.tolist(),rate_state_semantics='last_applied_velocity_command',measured_velocity=x[9:].tolist(),T_world_base=poses[spec['base_link']].tolist(),frame='world_optical',camera_path_id=session.camera_path_id,original_reference_slice=list(indices),absolute_times_s=reference_times,camera_poses=reference_poses,terminal_hold=terminal_hold));last_submit=stamp
+                        allocation={} if not native_heading_prepared or stamp>=task.trajectory.end_s else dict(
+                            native_base_heading_target_rad=avoidance.tangent_heading(stamp,x[2]))
+                        if lateral_model is not None:
+                            allocation['measured_nonholonomic_lateral_yaw_gain_m']=lateral_model.gain_m
+                        serial+=1;worker.submit(dict(**environment_args,**allocation,request_id=serial,state_stamp_s=stamp,horizon_s=horizon,state=model_state.tolist(),rate_state_semantics='last_applied_velocity_command',measured_velocity=x[9:].tolist(),T_world_base=poses[spec['base_link']].tolist(),frame='world_optical',camera_path_id=session.camera_path_id,original_reference_slice=list(indices),absolute_times_s=reference_times,camera_poses=reference_poses,terminal_hold=terminal_hold));last_submit=stamp
                     try:
                         if active_policy is None:raise ValueError('no fresh native policy')
                         u=a.safety.policy_velocity(active_policy,stamp,nu,ttl_s=.2);recovery_since=None
                     except ValueError:
+                        active_policy=None
                         u=np.zeros(nu)
                         if recovery_since is None:recovery_since=stamp
                         if stamp-recovery_since>2. or failed_solutions>=5:
@@ -385,6 +496,7 @@ def run(a):
                             report=strict_hold('solver_recovery_failure_stop');(a.output/'failure_stop.json').write_text(json.dumps(report,indent=2)+'\n')
                             raise RuntimeError('bounded native-solver recovery exhausted while physics kept advancing')
                     state=step(u,'ocs2_camera' if stamp<task.trajectory.end_s-1e-8 else 'final_stop',brake=active_policy is None)
+            if avoidance is not None:avoidance.execution_complete=True
             wrows=rows[wbc_start:]
             if not omni:wrows=[r for r in wrows if r['case']=='ocs2_camera']
             position=np.array([r['position_error_m'] for r in wrows]);orientation=np.array([r['orientation_error_rad'] for r in wrows]);base_span=float(np.linalg.norm(np.ptp(np.array([r['T_world_base'] for r in wrows])[:,:2,3],axis=0)));arm_span=float(np.linalg.norm(np.ptp(np.array([r['q'] for r in wrows])[:,arm_ids],axis=0)))
@@ -407,6 +519,7 @@ def run(a):
         result=dict(schema='ocs2_wheeled_physical_acceptance/v1',framework='actual native OCS2 SLQ',robot=spec['robot'],complete=True,diagnostic_only=bool(a.probe or a.wbc_only),passed=bool(all(p['passed'] for p in phases) and not safety_violations and elapsed<=steps*.01*1.05),stop_hold_s=stop_hold_s,measured_safety_pass=not safety_violations,measured_safety_violations=len(safety_violations),phases=phases,simulation_s=steps*.01,wall_s=elapsed,timing_pass=bool(elapsed<=steps*.01*1.05),optical_fk_position_error_m=fk_error,optical_fk_orientation_error_rad=fk_angle,representation_ingress_verified=bool(session),sensors=sensors,avoidance_verified=False)
         (a.output/'acceptance.json').write_text(json.dumps(result,indent=2)+'\n');print('ACCEPTANCE',json.dumps(result),flush=True);return 0 if result['passed'] else 2
     finally:
+        if avoidance is not None:avoidance.finish()
         # A failed run cannot leave a velocity command latched during shutdown.
         (a.output/'safety_violations.json').write_text(json.dumps(safety_violations,indent=2)+'\n')
         (a.output/'timing_breakdown.json').write_text(json.dumps(dict(scope='physical loop wall-clock measurements; solver transport remains in native_mpc.jsonl',stop_hold_s=stop_hold_s,rows=timings),indent=2)+'\n')

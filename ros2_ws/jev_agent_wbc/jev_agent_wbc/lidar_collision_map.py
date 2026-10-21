@@ -55,7 +55,8 @@ def voxel_keys(points, size):
 
 class LidarCollisionMap:
     def __init__(self, voxel_size=.08, map_radius=3., minimum_height=.03,
-                 maximum_height=1.60, minimum_clearance=.025, retention_s=30., confirmations=2):
+                 maximum_height=1.60, minimum_clearance=.025, retention_s=30., confirmations=2,
+                 geometry=None):
         settings = np.array([voxel_size, map_radius, minimum_height, maximum_height,
                              minimum_clearance, retention_s])
         if (not np.isfinite(settings).all() or min(voxel_size, map_radius,
@@ -69,7 +70,8 @@ class LidarCollisionMap:
         self.confirmations = int(confirmations)
         if self.confirmations < 1:
             raise ValueError('confirmations must be positive')
-        self.geometry = CollisionGeometry()
+        self.geometry = CollisionGeometry() if geometry is None else geometry
+        self.sensor_housings = (([-.085, 0., .235], .065), ([.190, 0., .274], .065)) if geometry is None else ()
         self.revision = 0
         self.scans = {}
         self.bad_scan = None
@@ -97,7 +99,7 @@ class LidarCollisionMap:
             keep = np.min(distances, axis=1) > self_filter_margin_m
             # Sensor housings are visuals absent from CollisionGeometry.
             local = (world - np.r_[state[:2], base_z]) @ base_rotation
-            for center, radius in (([-.085, 0., .235], .065), ([.190, 0., .274], .065)):
+            for center, radius in self.sensor_housings:
                 keep &= np.linalg.norm(local - center, axis=1) > radius
             world = world[keep]
         # Preserve filtered measured coordinates for dynamic shape/velocity

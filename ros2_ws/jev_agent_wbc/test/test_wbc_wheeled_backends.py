@@ -24,6 +24,29 @@ def adapter(request):
     return module.WheeledBackendAdapter()
 
 
+def current_camera_collision_fixture(adapter, tmp_path):
+    """Reuse fixed physical hulls with the current calibrated optical mount.
+
+    Historical evidence remains immutable. Mixing today's camera target with
+    the old optical frame would instead test an unintended 180-degree move.
+    """
+    source=adapter.folder/'evidence/live_model_static.json'
+    if not source.is_file():
+        pytest.skip('export the actual native collision geometry first')
+    document=json.loads(source.read_text())
+    for key in ('joints','T_base_ee_at_authored_pose'):
+        assert document[key]==adapter.model[key], 'physical kinematics require a new collision export'
+    for key in ('T_ee_camera_optical','T_world_camera_at_authored_pose','sensor_config_sha256'):
+        document[key]=adapter.model[key]
+    destination=tmp_path/'current_camera_collision_model.json'
+    destination.write_text(json.dumps(document))
+    return destination
+
+
+def native_worker(folder):
+    return folder/'.cache'/os.environ.get('JEV_OCS2_WORKER_CACHE','backend')/'camera_mpc_worker'
+
+
 def test_authored_camera_closure(adapter):
     actual = adapter.measured_camera_pose(
         adapter.model["T_world_base_at_authored_pose"], adapter.q_rest
@@ -292,9 +315,9 @@ def test_actual_collision_hull_native_abi_preserves_world_se3(adapter):
     finally:guard.close()
 
 
-def test_persistent_native_slq_recovers_then_preserves_absolute_time_and_hard_caps(adapter):
-    binary=adapter.folder/'.cache/backend/camera_mpc_worker'
-    model=adapter.folder/'evidence/live_model_static.json'
+def test_persistent_native_slq_recovers_then_preserves_absolute_time_and_hard_caps(adapter,tmp_path):
+    binary=native_worker(adapter.folder)
+    model=current_camera_collision_fixture(adapter,tmp_path)
     if not binary.is_file() or not model.is_file():
         pytest.skip('build the genuine native SLQ worker and actual collision model')
     nu=adapter.spec['input_dim'];q=np.array(adapter.spec['initial_arm']);state=np.r_[np.zeros(3),q,np.zeros(nu)]
@@ -443,11 +466,11 @@ def test_rms_pass_cannot_hide_original_task_final_tolerance_failure():
     with pytest.raises(ValueError):safety.camera_task_metrics([.001],[.001],float('nan'),.002,.005,.01)
 
 
-def test_husky_native_terminal_hold_stops_chassis_and_rejects_changed_endpoint():
+def test_husky_native_terminal_hold_stops_chassis_and_rejects_changed_endpoint(tmp_path):
     folder=ROOT/'Robot_Husky_UR5/ocs2'
     sp=importlib.util.spec_from_file_location('terminal_husky_adapter',folder/'adapter.py')
     module=importlib.util.module_from_spec(sp);sp.loader.exec_module(module);adapter=module.WheeledBackendAdapter()
-    binary=folder/'.cache/backend/camera_mpc_worker';model=folder/'evidence/live_model_static.json'
+    binary=native_worker(folder);model=current_camera_collision_fixture(adapter,tmp_path)
     if not binary.is_file() or not model.is_file():pytest.skip('build genuine native terminal-hold SLQ')
     q=np.array(adapter.spec['initial_arm']);state=np.r_[np.zeros(3),q,np.zeros(8)]
     base=np.eye(4);base[2,3]=adapter.nominal_height
@@ -474,12 +497,12 @@ def test_husky_native_terminal_hold_stops_chassis_and_rejects_changed_endpoint()
     finally:process.terminate();process.communicate(timeout=3.)
 
 
-def test_husky_native_declared_last_second_all_actuator_brake_has_original_rate_bounds():
-    folder=ROOT/'Robot_Husky_UR5/ocs2';binary=folder/'.cache/backend/camera_mpc_worker'
-    model=folder/'evidence/live_model_static.json'
+def test_husky_native_declared_last_second_all_actuator_brake_has_original_rate_bounds(tmp_path):
+    folder=ROOT/'Robot_Husky_UR5/ocs2';binary=native_worker(folder)
     if not binary.is_file():pytest.skip('build genuine native terminal-hold SLQ')
     sp=importlib.util.spec_from_file_location('all_brake_husky_adapter',folder/'adapter.py')
     module=importlib.util.module_from_spec(sp);sp.loader.exec_module(module);adapter=module.WheeledBackendAdapter()
+    model=current_camera_collision_fixture(adapter,tmp_path)
     q=np.array(adapter.spec['initial_arm']);state=np.r_[np.zeros(3),q,[.03,-.06],np.full(6,.02)]
     base=np.eye(4);base[2,3]=adapter.nominal_height;camera=adapter.measured_camera_pose(base,q)
     request=dict(request_id=1,state_stamp_s=14.2,horizon_s=1.,state=state.tolist(),rate_state_semantics='last_applied_velocity_command',

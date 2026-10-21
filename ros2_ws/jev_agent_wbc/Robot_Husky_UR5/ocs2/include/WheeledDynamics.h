@@ -12,8 +12,11 @@ namespace jev {
  */
 class WheeledDynamics final : public ocs2::SystemDynamicsBase {
  public:
-  explicit WheeledDynamics(bool omni, int armDim = 6) : omni_(omni), armDim_(armDim) {
+  explicit WheeledDynamics(bool omni, int armDim = 6, double lateralYawGain = 0.)
+      : omni_(omni), armDim_(armDim), lateralYawGain_(lateralYawGain) {
     if (armDim < 1) throw std::invalid_argument("armDim must be positive");
+    if(!std::isfinite(lateralYawGain) || std::abs(lateralYawGain)>.35)
+      throw std::invalid_argument("invalid measured lateral yaw gain");
   }
   WheeledDynamics* clone() const override { return new WheeledDynamics(*this); }
   using SystemDynamicsBase::computeFlowMap;
@@ -25,7 +28,7 @@ class WheeledDynamics final : public ocs2::SystemDynamicsBase {
                               const ocs2::vector_t& u, const ocs2::PreComputation&) override {
     check(x, u);
     const double c = std::cos(x(2)), s = std::sin(x(2));
-    const double vx = u(0), vy = omni_ ? u(1) : 0.;
+    const double vx = u(0), vy = omni_ ? u(1) : lateralYawGain_*u(1);
     ocs2::vector_t f(stateDim());
     f << c*vx-s*vy, s*vx+c*vy, u(omni_ ? 2 : 1), u.tail(armDim_);
     return f;
@@ -40,7 +43,7 @@ class WheeledDynamics final : public ocs2::SystemDynamicsBase {
     a.dfdx = ocs2::matrix_t::Zero(stateDim(), stateDim());
     a.dfdu = ocs2::matrix_t::Zero(stateDim(), inputDim());
     const double c = std::cos(x(2)), s = std::sin(x(2));
-    const double vx = u(0), vy = omni_ ? u(1) : 0.;
+    const double vx = u(0), vy = omni_ ? u(1) : lateralYawGain_*u(1);
     a.dfdx(0,2) = -s*vx-c*vy;
     a.dfdx(1,2) = c*vx-s*vy;
     a.dfdu(0,0) = c;
@@ -48,6 +51,9 @@ class WheeledDynamics final : public ocs2::SystemDynamicsBase {
     if (omni_) {
       a.dfdu(0,1) = -s;
       a.dfdu(1,1) = c;
+    } else {
+      a.dfdu(0,1)=-s*lateralYawGain_;
+      a.dfdu(1,1)=c*lateralYawGain_;
     }
     a.dfdu(2,omni_ ? 2 : 1) = 1.;
     a.dfdu.bottomRightCorner(armDim_,armDim_).setIdentity();
@@ -61,5 +67,6 @@ class WheeledDynamics final : public ocs2::SystemDynamicsBase {
   }
   bool omni_;
   int armDim_;
+  double lateralYawGain_;
 };
 }  // namespace jev

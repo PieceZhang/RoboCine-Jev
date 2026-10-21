@@ -8,6 +8,7 @@
 #include <pybind11/numpy.h>
 #include <carb/Types.h>
 #include <array>
+#include <cmath>
 #include <condition_variable>
 #include <functional>
 #include <mutex>
@@ -66,10 +67,13 @@ public:
 
     py::tuple scan(omni::physx::IPhysxSceneQuery& q,
             py::array_t<float, py::array::c_style | py::array::forcecast> origins,
-            py::array_t<float, py::array::c_style | py::array::forcecast> directions) {
+            py::array_t<float, py::array::c_style | py::array::forcecast> directions,
+            float maximumRange = 4.5f) {
         auto o = origins.unchecked<2>(); auto d = directions.unchecked<2>();
         if (o.shape(1) != 3 || d.shape(1) != 3 || o.shape(0) == 0 || d.shape(0) == 0)
             throw std::invalid_argument("expected nonempty Nx3 arrays");
+        if (!std::isfinite(maximumRange) || maximumRange <= 0.f)
+            throw std::invalid_argument("expected positive finite maximum range");
         auto n = o.shape(0) * d.shape(0);
         py::array_t<float> positions({n, py::ssize_t(3)});
         py::array_t<uint64_t> identities({n, py::ssize_t(2)});
@@ -83,13 +87,13 @@ public:
             // Prime deferred query-tree updates before concurrent read calls.
             // No simulate/fetchResults or pose write occurs until all jobs finish.
             omni::physx::RaycastHit warm{};
-            q.raycastClosest({o(0,0),o(0,1),o(0,2)}, {d(0,0),d(0,1),d(0,2)}, 4.5f, warm, false);
+            q.raycastClosest({o(0,0),o(0,1),o(0,2)}, {d(0,0),d(0,1),d(0,2)}, maximumRange, warm, false);
             auto run = [&](int id) {
                 for (auto k = n*id/count_; k < n*(id+1)/count_; ++k) {
                     auto s = k/d.shape(0), r = k%d.shape(0);
                     omni::physx::RaycastHit v{};
                     h(k) = q.raycastClosest({o(s,0),o(s,1),o(s,2)},
-                        {d(r,0),d(r,1),d(r,2)}, 4.5f, v, false);
+                        {d(r,0),d(r,1),d(r,2)}, maximumRange, v, false);
                     i(k,0) = h(k) ? v.collision : 0; i(k,1) = h(k) ? v.rigidBody : 0;
                     p(k,0) = v.position.x; p(k,1) = v.position.y; p(k,2) = v.position.z;
                 }
@@ -129,5 +133,6 @@ public:
 };
 PYBIND11_MODULE(physx_ray_batch, m) {
     py::class_<RayBatch>(m,"RayBatch")
-        .def(py::init<int>()).def("scan",&RayBatch::scan).def("close",&RayBatch::close);
+        .def(py::init<int>()).def("scan",&RayBatch::scan,py::arg("query"),py::arg("origins"),
+            py::arg("directions"),py::arg("maximum_range")=4.5f).def("close",&RayBatch::close);
 }

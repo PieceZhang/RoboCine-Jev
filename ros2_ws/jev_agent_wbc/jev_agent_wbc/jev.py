@@ -157,6 +157,7 @@ class SystemOneClient:
         self.journal = None if journal is None else Path(journal)
         self.calls = 0
         self.closed = False
+        self.open_request = None  # Optional transport; typed decisions/validation remain here.
         self.policy = POLICY if policy is None else policy
         self._api_key = None
         # Official credentials must never be sent to the local adapter or a gateway.
@@ -205,8 +206,8 @@ class SystemOneClient:
                 headers['Authorization'] = 'Bearer '+self._api_key
             request = urllib.request.Request(self.url, data=json.dumps(payload, allow_nan=False).encode(),
                                              headers=headers, method='POST')
-            open_request = (urllib.request.build_opener(_NoAuthRedirect()).open
-                            if self._api_key else urllib.request.urlopen)
+            open_request = self.open_request or (urllib.request.build_opener(_NoAuthRedirect()).open
+                                                if self._api_key else urllib.request.urlopen)
             with open_request(request, timeout=self.timeout) as response:
                 data = json.load(response)
             # Preserve rejected replies too, so protocol failures can be audited.

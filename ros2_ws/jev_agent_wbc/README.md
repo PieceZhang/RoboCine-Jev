@@ -1,5 +1,7 @@
 # Jev 相机意图规划与独立执行层
 
+五机器人 Husky、Ridgeback、TIAGo、G1、Go2 的统一 Representation 接入、官方 Jev + Isaac Sim 测试及当前限制见 [五机器人避障说明](README_five_robot_avoidance.md)。官方闭环结果与无 Jev 的历史诊断分别记录。
+
 ## CineGym 随机场景与 PhysX 调试（2026-10-20）
 
 [CineGym 使用说明](CineGym/README.md) 包含受限速度/加速度的随机动态球体、不同高度和宽度的落地箱体，以及独立 CPU 可行路径见证。随机测试只使用单运镜或两个运镜的组合，难度为 easy / medium；生成标签和几何可行见证不能替代在线成功率。

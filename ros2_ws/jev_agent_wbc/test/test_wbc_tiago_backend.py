@@ -34,7 +34,11 @@ def test_optical_frame_is_exact_canonical_sensor_transform():
     xyz = np.fromstring(joint.find('origin').get('xyz'),sep=' ')
     rpy = np.fromstring(joint.find('origin').get('rpy'),sep=' ')
     np.testing.assert_allclose(transform(xyz,rpy),mount,atol=1e-14)
-    np.testing.assert_allclose(mount[:3,2],[0,0,-1],atol=1e-14)
+    sensor=json.loads((ROBOT/'sensors.json').read_text())['robots']['tiago']['camera']
+    np.testing.assert_allclose(mount[:3,2],sensor['forward_parent'],atol=1e-14)
+    np.testing.assert_allclose(-mount[:3,1],sensor['up_parent'],atol=1e-14)
+    np.testing.assert_allclose(mount[:3,:3].T@mount[:3,:3],np.eye(3),atol=1e-14)
+    assert np.linalg.det(mount[:3,:3])==pytest.approx(1.,abs=1e-14)
 
 
 @pytest.mark.parametrize('seed',range(5))

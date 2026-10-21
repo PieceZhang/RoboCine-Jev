@@ -16,6 +16,8 @@ import sys
 import time
 
 PACKAGE = Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(PACKAGE))
+sys.path.insert(0,str(PACKAGE/'scripts'))
 
 
 def load(name, path):
@@ -187,7 +189,11 @@ def main():
     p.add_argument('--velocity-audit', action='store_true',help='Go2-only read-only 200 Hz root/link consistency diagnostic')
     p.add_argument('--velocity-audit-tail-seconds',type=float,default=0.,help='Record only a predeclared final stop tail; zero records every substep')
     p.add_argument('--worker', action='store_true', help=argparse.SUPPRESS)
+    from jev_agent_wbc.multi_robot_runtime import add_arguments
+    add_arguments(p)
     a = p.parse_args(); a.output = a.output.resolve()
+    if a.avoidance_case:
+        a.cases=a.avoidance_case;a.move_seconds=8.;a.rgb=False
     if a.velocity_audit and a.robot!='go2':
         raise ValueError('velocity-audit is a Go2-only diagnostic')
     if a.parking_profile!='legacy' and a.robot!='g1':
@@ -300,6 +306,7 @@ def main():
         import traceback
         (a.output/'error.txt').write_text(traceback.format_exc()); raise
     finally:
+        if getattr(a,'avoidance_runtime',None) is not None:a.avoidance_runtime.finish()
         if a.pink:
             a.pink.close()
         if a.collision:
@@ -332,7 +339,7 @@ def run(a):
         if physx_cfg.solver_type!=1:raise ValueError('TGS precision candidate requires native TGS solver')
         physx_cfg.enable_external_forces_every_iteration=True
         if a.physics_accuracy=='tgs_forces_velocity1':physx_cfg.min_velocity_iteration_count=1
-    sim = SimulationContext(sim_utils.SimulationCfg(dt=physics_dt, device='cpu', render_interval=4,physx=physx_cfg))
+    sim = SimulationContext(sim_utils.SimulationCfg(dt=physics_dt, device='cpu', render_interval=4,physx=physx_cfg,enable_scene_query_support=bool(a.avoidance_case)))
     ground_combine='multiply' if a.ground_material=='source_multiply' else 'average'
     ground = sim_utils.CuboidCfg(size=(40.,40.,.1), collision_props=sim_utils.CollisionPropertiesCfg(),
         physics_material=sim_utils.RigidBodyMaterialCfg(static_friction=1.,dynamic_friction=1.,restitution=0.,
@@ -397,6 +404,12 @@ def run(a):
     (a.output/'source_usd_drive_caps.json').write_text(json.dumps(source_drives,indent=2)+'\n')
     robot = Articulation(cfg); stage = omni.usd.get_context().get_stage()
     rig = a.rig_module.RobotSensorRig(stage,'/World/Robot',a.robot,a.frozen/'robot_sensor_mounts.json')
+    avoidance=None
+    if a.avoidance_case:
+        from jev_agent_wbc.multi_robot_runtime import AvoidanceRuntime
+        avoidance=AvoidanceRuntime(a,PACKAGE,stage,rig,None,'pelvis' if a.robot=='g1' else 'base',a.robot,
+                                   native_platform_limits=command_limits)
+        a.avoidance_runtime=avoidance
     sim.reset()
     import inspect
     precision_source=dict(profile=a.physics_accuracy,physics_dt_s=physics_dt,control_dt_s=dt,
@@ -447,6 +460,7 @@ def run(a):
     if a.robot == 'go2':
         manipulator_bodies = {n for n in robot.body_names if re.fullmatch(r'link[0-9]+',n) or 'effector' in n or 'gripper' in n}
     geometry = MeasuredColliderGeometry.from_stage(stage,'/World/Robot',manipulator_bodies,robot.body_names)
+    if avoidance is not None:avoidance.attach_geometry(geometry)
     (a.output/'collider_geometry.json').write_text(json.dumps(geometry.manifest(),indent=2)+'\n')
     (a.output/'sensor_mounts.json').write_text(json.dumps(rig.manifest(),indent=2)+'\n')
     if a.fine_collision:
@@ -512,6 +526,7 @@ def run(a):
         yaw_left=[0.,0.,a.yaw_speed],yaw_right=[0.,0.,-a.yaw_speed],camera_shot=[a.speed,0.,0.],
         camera_6d=[0.,0.,0.],
         static_camera_conflict=[a.speed,0.,0.])
+    if avoidance is not None:cases.update(orbit=[0.,0.,0.],movein=[0.,0.,0.])
     selected = a.cases.split(',')
     if not selected or any(n not in cases for n in selected):
         raise ValueError('unknown or empty case list')
@@ -523,7 +538,8 @@ def run(a):
     optical_sampler=None;optical_sampling_manifests=[]
     terminal_native_hold=None;terminal_hold_manifests=[]
     fk_max_position=fk_max_angle=0.;body_fk_max_position=body_fk_max_angle=0.
-    steps = round((2.+len(selected)*(a.move_seconds+a.stop_seconds))/dt)
+    preparation_s=2.+(a.avoidance_lead_s if avoidance is not None else 0.)
+    steps = round((preparation_s+len(selected)*(a.move_seconds+a.stop_seconds))/dt)
     if a.robot=='go2':save_native_plant_readback(robot,stage,a.output,cfg.spawn.usd_path)
     start_wall=time.monotonic(); case_index=-1; stop_anchor=None; parking_mode=False;previous_policy_command=np.zeros(3)
     parking_posture=None;parking_posture_stamp=None
@@ -538,7 +554,15 @@ def run(a):
             tick_start=time.monotonic()
             stamp=step*dt; bodies,camera,observation=current_measurement
             measured=np.r_[robot.data.root_lin_vel_b[0,:2].numpy(),robot.data.root_ang_vel_b[0,2].item()]
-            in_case=stamp>=2.; new_index=min(len(selected)-1,int((stamp-2.+1e-8)/(a.move_seconds+a.stop_seconds))) if in_case else -1
+            if avoidance is not None and avoidance.scene_start is None and stamp>=2.-1e-8:
+                from jev_agent_wbc.multi_robot_geometry import NativeKinematicModel
+                active_names=list(a.pink.owners['pink']) if a.robot=='g1' else ['joint1','joint2','joint3','joint4','joint5','joint6']
+                active_ids=[robot.joint_names.index(n) for n in active_names]
+                model=NativeKinematicModel.from_stage(stage,'/World/Robot',bodies,base_name,active_names,
+                    robot.data.joint_pos[0,active_ids].numpy(),limits[active_ids,0],limits[active_ids,1],
+                    np.minimum(.65,robot.data.joint_vel_limits[0,active_ids].numpy()),geometry,rig,omnidirectional=True)
+                avoidance.bind(stamp,bodies,camera,model)
+            in_case=stamp>=preparation_s; new_index=min(len(selected)-1,int((stamp-preparation_s+1e-8)/(a.move_seconds+a.stop_seconds))) if in_case else -1
             if new_index!=case_index:
                 if case_rows:
                     results.append(summarize(selected[case_index],case_rows,a,audit_stop));case_rows=[]
@@ -573,6 +597,7 @@ def run(a):
                     poses.append(semantic_camera(matrix_pose(T)))
                 task=TimedTask(f'{a.robot}_{name}_{step}',stamp,observation.id,
                     CameraTrajectory(stamp,tuple(knots),tuple(poses)),.05,.15)
+                if avoidance is not None:task=avoidance.task(stamp,bodies,camera)
                 task_end=task.trajectory.end_s
                 session=LiveTaskSession(Capabilities(f'{a.robot}_native_adaptive',True,frozenset(['timed_camera_se3'])))
                 admission=session.accept(task,observation,stamp)
@@ -598,8 +623,25 @@ def run(a):
                         scope='Go2 coordinator pose-only lookahead; original public admission and feedback retained',
                         task_manifests=optical_sampling_manifests),indent=2)+'\n')
                 all_tasks.append(task.to_dict());(a.output/'timed_tasks.json').write_text(json.dumps(all_tasks,indent=2)+'\n')
+            if avoidance is not None and session is not None:
+                revision=avoidance.revision(session,stamp,bodies,camera)
+                if revision is not None:
+                    task=revision
+                    if a.robot=='g1':current_task_context=solver_context.task_context(task.to_dict())
+                    if a.robot=='go2':optical_sampler=optical_module.OpticalSampler(task)
+                    all_tasks.append(task.to_dict())
+                    (a.output/'timed_tasks.json').write_text(json.dumps(all_tasks,indent=2)+'\n')
             moving=in_case and stamp-case_start<a.move_seconds-1e-8
+            if avoidance is not None and in_case and stamp>=task_end-1e-8:
+                avoidance.execution_complete=True
             desired_velocity=np.asarray(cases[selected[case_index]]) if moving else np.zeros(3)
+            if avoidance is not None and moving:
+                # Piper carries most of the shot yaw; rotating the short-legged
+                # base spends scarce lateral velocity on the camera lever arm.
+                # The native coordinator may still allocate yaw to retain its
+                # original workspace bounds.
+                desired_velocity=avoidance.platform_velocity(stamp,bodies,camera,
+                    yaw_share=0. if a.robot=='go2' else 1.,yaw_feedback_gain=1.6 if a.robot=='go2' else 0.)
             if in_case and not moving and stop_anchor is None:
                 stop_anchor=bodies[base_name].copy();servo.reset()
                 if parking_module and a.park_posture_mode=='measured':
@@ -648,6 +690,9 @@ def run(a):
             if session:
                 if a.robot=='go2':desired_camera=optical_sampler.sample(min(stamp,task_end))
                 else:desired_camera,_=session.reference(min(stamp,task_end))
+            if avoidance is not None and avoidance.should_brake(stamp,bodies):
+                desired_camera=camera.copy()
+                support=dict(reason='environment_evidence_hold',feasible=False)
             collision_evidence=None
             if a.collision:
                 collision_evidence=a.collision.poll(stamp)
@@ -684,6 +729,9 @@ def run(a):
                     policy_velocity_guard=dict(reason='pink_missing_fresh_command_slew_brake',
                         upper_reference_held=True,upper_velocity_target_zero=True,
                         integral_frozen=not collision_veto,collision_veto=collision_veto)
+                if avoidance is not None:
+                    policy_command=avoidance.constrain_platform(stamp,bodies,policy_command,previous_policy_command,dt)
+                    servo.applied(policy_command)
                 command=torch.tensor([[*policy_command,.72]],dtype=torch.float32)
                 features=[command,robot.data.root_ang_vel_b,robot.data.projected_gravity_b,
                     robot.data.joint_pos[:,observation_ids]-defaults,robot.data.joint_vel[:,observation_ids]*.1,action.reshape(1,12)]
@@ -848,6 +896,9 @@ def run(a):
                     z=float(bodies['link0'][2,3]);pitch=-math.atan2(.5-z,.5)
                     ee=torch.tensor([[.5,0.,.5,math.cos(pitch/2),0.,math.sin(pitch/2),0.]])
                     domain_recovery.seed(ee[0].numpy())
+                if avoidance is not None:
+                    policy_command=avoidance.constrain_platform(stamp,bodies,policy_command,previous_policy_command,dt)
+                    servo.applied(policy_command)
                 features=[robot.data.root_ang_vel_b*.2,robot.data.projected_gravity_b,
                     robot.data.joint_pos[:,ids]-robot.data.default_joint_pos[:,ids],
                     (robot.data.joint_vel[:,ids]-robot.data.default_joint_vel[:,ids])*.05,
@@ -874,6 +925,7 @@ def run(a):
                     robot.set_joint_effort_target(target_effort)
                 robot.write_data_to_sim()
                 effort_peak=np.maximum(effort_peak,np.abs(robot.data.applied_torque[0].numpy()))
+                if avoidance is not None:avoidance.update_scene(stamp+(substep+1)*physics_dt)
                 sim.step(render=False);robot.update(physics_dt)
                 if velocity_audit and (not a.velocity_audit_tail_seconds or (in_case and not moving and
                         stamp+(substep+1)*physics_dt>task_end+a.stop_seconds-a.velocity_audit_tail_seconds+1e-9)):
@@ -883,6 +935,9 @@ def run(a):
                 substep_joint_margin=min(substep_joint_margin,float(np.min(np.minimum(sampled_q-limits[:,0],limits[:,1]-sampled_q))))
             measurement_begin=time.monotonic()
             current_measurement=measure((step+1)*dt)
+            if avoidance is not None:
+                avoidance.update((step+1)*dt,*current_measurement,
+                    native_joint_positions=dict(zip(robot.joint_names,robot.data.joint_pos[0].tolist())))
             bodies,camera,observation=current_measurement;base=bodies[base_name]
             feedback_begin=time.monotonic()
             if session:
@@ -939,7 +994,7 @@ def run(a):
                     # are not certified measurements of all actuation/contacts.
                     'actuation':dict(status='unknown',stamp_s=observation.stamp_s,scope='not_available'),
                     'self_collision':dict(status='unknown',stamp_s=observation.stamp_s,scope='not_available'),
-                    'environment':dict(status='unknown',stamp_s=observation.stamp_s,scope='not_available'),
+                    'environment':(avoidance.environment(observation.stamp_s,bodies) if avoidance is not None else dict(status='unknown',stamp_s=observation.stamp_s,scope='not_available')),
                     'policy_domain':dict(status='pass' if native_domain_pass else 'fail',stamp_s=observation.stamp_s,
                         scope='policy_config_outer_domain')}
                 effort_fraction=float(np.max(effort_peak/effort))
@@ -985,6 +1040,7 @@ def run(a):
     if velocity_audit:
         velocity_audit.close()
     if case_rows:results.append(summarize(selected[case_index],case_rows,a,audit_stop))
+    if avoidance is not None and failures:avoidance.execution_failure='; '.join(failures)
     physical_pass=bool(len(rows)==steps and not failures and all(r['passed'] for r in results))
     timing_pass=elapsed<=len(rows)*dt*1.05
     result=dict(schema='legged_adaptive_physical/v1',robot=a.robot,run_complete=len(rows)==steps,

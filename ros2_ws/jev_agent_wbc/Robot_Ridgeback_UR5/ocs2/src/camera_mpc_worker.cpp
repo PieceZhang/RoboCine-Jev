@@ -3,6 +3,7 @@
 #include "CameraMpcModel.h"
 #include "AccelerationDynamics.h"
 #include "CollisionCost.h"
+#include "ObservedEnvironmentCost.h"
 #include <sstream>
 #include <iomanip>
 
@@ -28,7 +29,35 @@ struct BrakingCost final : StateCost {
   }
 };
 
+class MeasuredStateInitializer final:public Initializer {
+  jev::AccelerationDynamics dynamics_;
+  scalar_array_t times_;vector_array_t inputs_;vector_t limits_;
+ public:
+  MeasuredStateInitializer(bool omni,scalar_array_t times,vector_array_t inputs,vector_t limits)
+      :dynamics_(omni),times_(std::move(times)),inputs_(std::move(inputs)),limits_(std::move(limits)){}
+  MeasuredStateInitializer* clone()const override{return new MeasuredStateInitializer(*this);}
+  void compute(scalar_t time,const vector_t& state,scalar_t nextTime,vector_t& input,vector_t& nextState)override {
+    input=vector_t::Zero(limits_.size());
+    if(times_.size()>=2 && time>=times_.front() && time<=times_.back()) {
+      auto upper=std::upper_bound(times_.begin(),times_.end(),time);
+      std::size_t i=std::min<std::size_t>(std::max<std::ptrdiff_t>(1,upper-times_.begin())-1,times_.size()-2);
+      double fraction=(time-times_[i])/(times_[i+1]-times_[i]);
+      input=((1.-fraction)*inputs_[i]+fraction*inputs_[i+1]).cwiseMax(-limits_).cwiseMin(limits_);
+    }
+    PreComputation pre;double dt=nextTime-time;
+    auto a=dynamics_.computeFlowMap(time,state,input,pre);
+    auto b=dynamics_.computeFlowMap(time+dt/2,state+dt*a/2,input,pre);
+    auto c=dynamics_.computeFlowMap(time+dt/2,state+dt*b/2,input,pre);
+    auto d=dynamics_.computeFlowMap(nextTime,state+dt*c,input,pre);
+    nextState=state+dt*(a+2*b+2*c+d)/6;
+  }
+};
+
 std::string solve(const Tree& spec,const Tree& model,const Tree& request) {
+  static scalar_array_t acceptedTimes;
+  static vector_array_t acceptedInputs;
+  static std::string acceptedPath;
+  static double acceptedStamp=-1e9;
   const bool omni=spec.get<std::string>("base_model")=="omnidirectional";
   const int nu=omni?9:8,nx=9+nu;
   double stamp=request.get<double>("state_stamp_s"),horizon=request.get<double>("horizon_s",1.);
@@ -52,6 +81,11 @@ std::string solve(const Tree& spec,const Tree& model,const Tree& request) {
   problem.stateCostPtr->add("world_optical_camera",std::make_unique<CameraCost>(camera,10.));
   problem.finalCostPtr->add("terminal_world_optical_camera",std::make_unique<CameraCost>(camera,50.));
   if(model.get_child_optional("collision_shapes"))problem.stateCostPtr->add("actual_collider_box_separation",std::make_unique<LocalCollisionCost>(CollisionCost(camera,model),state));
+  std::unique_ptr<ObservedEnvironment> environment;
+  if(request.get_child_optional("environment")) {
+    environment=std::make_unique<ObservedEnvironment>(camera,model,request.get_child("environment"),stamp);
+    problem.stateCostPtr->add("observed_environment_occupancy",std::make_unique<LocalEnvironmentCost>(*environment,stamp,state));
+  }
   problem.stateCostPtr->add("anticipatory_joint_braking",std::make_unique<BrakingCost>(camera,acceleration));
   problem.costPtr->add("acceleration_effort",std::make_unique<InputCost>(nu));
   vector_t h(12+4*nu);matrix_t C=matrix_t::Zero(h.size(),nx),D=matrix_t::Zero(h.size(),nu);
@@ -59,15 +93,23 @@ std::string solve(const Tree& spec,const Tree& model,const Tree& request) {
   C.block(0,3,6,6).setIdentity();C.block(6,3,6,6)=-matrix_t::Identity(6,6);
   h.segment(12,nu)=.95*speed;h.segment(12+nu,nu)=.95*speed;
   C.block(12,9,nu,nu).setIdentity();C.block(12+nu,9,nu,nu)=-matrix_t::Identity(nu,nu);
-  h.segment(12+2*nu,nu)=.95*acceleration;h.tail(nu)=.95*acceleration;
+  h.segment(12+2*nu,nu)=(environment ? .85 : .95)*acceleration;h.tail(nu)=(environment ? .85 : .95)*acceleration;
   D.block(12+2*nu,0,nu,nu).setIdentity();D.bottomRows(nu)=-matrix_t::Identity(nu,nu);
   problem.softConstraintPtr->add("physical_model_bounds",std::make_unique<StateInputSoftConstraint>(
-      std::make_unique<LinearStateInputConstraint>(h,C,D),std::make_unique<RelaxedBarrierPenalty>(RelaxedBarrierPenalty::Config(.2,.005))));
+      std::make_unique<LinearStateInputConstraint>(h,C,D),std::make_unique<RelaxedBarrierPenalty>(RelaxedBarrierPenalty::Config(environment ? 2. : .2,environment ? .001 : .005))));
   rollout::Settings rs;rs.timeStep=.01;rs.absTolODE=1e-7;rs.relTolODE=1e-5;
-  TimeTriggeredRollout rollout(*problem.dynamicsPtr,rs);DefaultInitializer initializer(nu);
+  TimeTriggeredRollout rollout(*problem.dynamicsPtr,rs);
+  // Only previously fully validated policies from this exact camera task may
+  // initialize a fresh solve. Integrate from this request's measured state.
+  bool warm=environment && acceptedPath==request.get<std::string>("camera_path_id","")
+      && stamp>=acceptedStamp && stamp-acceptedStamp<=.25;
+  std::unique_ptr<Initializer> initializer;
+  if(environment)initializer=std::make_unique<MeasuredStateInitializer>(omni,
+      warm?acceptedTimes:scalar_array_t{},warm?acceptedInputs:vector_array_t{},.85*acceleration);
+  else initializer=std::make_unique<DefaultInitializer>(nu);
   mpc::Settings ms;ms.timeHorizon_=horizon;ms.coldStart_=true;
   ddp::Settings ds;ds.algorithm_=ddp::Algorithm::SLQ;ds.nThreads_=1;ds.maxNumIterations_=5;ds.displayInfo_=false;
-  GaussNewtonDDP_MPC mpc(ms,ds,rollout,problem,initializer);
+  GaussNewtonDDP_MPC mpc(ms,ds,rollout,problem,*initializer);
   mpc.getSolverPtr()->setReferenceManager(std::make_shared<ReferenceManager>(target));
   const auto start=std::chrono::steady_clock::now();bool solved=mpc.run(stamp,state);
   PrimalSolution policy;mpc.getSolverPtr()->getPrimalSolution(stamp+horizon,&policy);
@@ -81,8 +123,19 @@ std::string solve(const Tree& spec,const Tree& model,const Tree& request) {
     for(const auto& x:policy.stateTrajectory_)collisionMargin=std::min(collisionMargin,.025-check.residual(x,false).first.maxCoeff());
   }
   if(collisionMargin<.005)throw std::runtime_error("predicted conservative convex-hull self-collision margin rejected");
+  if(environment) {
+    double minimum=1e9;
+    for(std::size_t k=0;k<policy.stateTrajectory_.size();++k) {
+      auto distances=environment->evaluate(policy.timeTrajectory_[k],policy.stateTrajectory_[k],false).distance;
+      if(distances.size())minimum=std::min(minimum,distances.minCoeff());
+    }
+    if(minimum<.025-1e-6)throw std::runtime_error("predicted measured environment collision margin rejected: "+std::to_string(minimum));
+  }
+
   if(maxVelocity>1.00001 || maxAcceleration>1.00001){std::ostringstream reason;reason<<std::setprecision(12)<<"predicted velocity/acceleration exceeds original execution bound: velocity_ratio="<<maxVelocity<<", acceleration_ratio="<<maxAcceleration;throw std::runtime_error(reason.str());}
   if(jointMargin<0.)throw std::runtime_error("predicted physical joint limit violation");
+  acceptedTimes=policy.timeTrajectory_;acceptedInputs=policy.inputTrajectory_;
+  acceptedPath=request.get<std::string>("camera_path_id","");acceptedStamp=stamp;
   std::ostringstream out;out<<std::setprecision(17)<<"{\"ok\":true,\"framework\":\"OCS2_SLQ_input_rate\",\"rate_state_semantics\":\"last_applied_velocity_command\",\"request_id\":"<<request.get<unsigned long>("request_id")<<",\"state_stamp_s\":"<<stamp<<",\"solver_wall_s\":"<<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<",\"iterations\":"<<mpc.getSolverPtr()->getNumIterations()<<",\"maximum_velocity_ratio\":"<<maxVelocity<<",\"maximum_acceleration_ratio\":"<<maxAcceleration<<",\"minimum_self_clearance_lower_bound_m\":"<<collisionMargin<<",\"minimum_joint_margin_rad\":"<<jointMargin<<",\"times_s\":[";
   for(std::size_t i=0;i<policy.timeTrajectory_.size();++i){if(i)out<<',';out<<policy.timeTrajectory_[i];}
   auto rows=[&](const char* key,const vector_array_t& values){out<<"],\""<<key<<"\":[";for(std::size_t i=0;i<values.size();++i){if(i)out<<',';out<<'[';for(int j=0;j<values[i].size();++j){if(j)out<<',';out<<values[i](j);}out<<']';}};

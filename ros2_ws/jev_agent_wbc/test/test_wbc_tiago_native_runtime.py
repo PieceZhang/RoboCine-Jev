@@ -115,6 +115,25 @@ def test_genuine_stationary_projection_does_not_create_crawl_inside_safe_barrier
     assert answer['hard_constraint_violation']<1e-6
 
 
+def test_native_projection_reallocates_camera_twist_under_original_slew_limits():
+    pytest.importorskip('piqp');pytest.importorskip('fcl')
+    from native_solver import NativeGiskardSolver
+    metadata,poses,js=box_fixture(distance=.4)
+    spec=json.loads((ROBOT/'robot.json').read_text())
+    solver=NativeGiskardSolver(spec,metadata)
+    previous=np.zeros(10);previous[3]=.09
+    desired=np.zeros(10);desired[0]=.02;desired[3]=.07
+    J=np.zeros((6,10));J[0,0]=J[0,3]=1.
+    request=dict(q=np.array([j['home'] for j in spec['joints']]),previous=previous,
+        poses=poses,body_jacobians=js,mode='actuator',desired_rates=desired,jacobian=J)
+    ordinary=solver.solve(request)
+    reallocated=solver.solve(dict(request,preserve_proposed_camera_twist=True))
+    assert np.linalg.norm(J@(reallocated['command']-desired))<.1*np.linalg.norm(J@(ordinary['command']-desired))
+    assert np.all(np.abs(reallocated['command']-previous)<=solver.accel*.01+1e-9)
+    assert reallocated['hard_constraint_violation']<1e-6
+    assert not reallocated['big_ball_mode']
+
+
 def test_official_allowed_pair_is_explicitly_filtered():
     pytest.importorskip('fcl')
     metadata,poses,js=box_fixture(distance=-.01)
