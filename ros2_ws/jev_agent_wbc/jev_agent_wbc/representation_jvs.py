@@ -249,7 +249,8 @@ def request_for_profile(observation, path, profile):
 def candidate_geometry(candidate, backend, observation, base_z, base_rotation=None, preferences=True):
     request = request_for_profile(observation,candidate.path,candidate.consequences.get('search_config') if preferences else None)
     guide = backend.compile(request,observation,candidate.path)
-    trace = (candidate.kinematics or {}).get('trace',[])
+    kinematics=candidate.kinematics or {}
+    trace = (kinematics.get('execution_prediction') or kinematics).get('trace',[])
     samples = []
     if trace:
         # Do not collapse the path into an atemporal swept union.
@@ -259,6 +260,14 @@ def candidate_geometry(candidate, backend, observation, base_z, base_rotation=No
             row = trace[index]
             rotation = None if base_rotation is None else Rotation.from_euler('z',row['state'][2]-yaw0).as_matrix()@base_rotation
             snapshot = backend.observe(row['state'],row['t'],base_z=base_z,base_rotation=rotation,source='predicted_fk')
-            samples.append(guide.feedback(snapshot,kind='predicted',backend_status='unknown'))
+            sample=guide.feedback(snapshot,kind='predicted',backend_status='unknown')
+            if row.get('tube_radius_m') is not None:
+                radius=float(row['tube_radius_m'])
+                for part in sample['geometry']['parts'].values():
+                    for bounds in [part['bounds'],*part.get('regions',[])]:
+                        bounds['half_extents_m']=(np.asarray(bounds['half_extents_m'])+radius).tolist()
+                sample['execution_uncertainty_m']=radius
+                sample['safety_supported']=row['safety_supported']
+            samples.append(sample)
     return dict(request=request.to_dict(),observation=observation.to_dict(),samples=samples,
         scope='sampled_geometric_prediction_not_continuous_collision_certificate')

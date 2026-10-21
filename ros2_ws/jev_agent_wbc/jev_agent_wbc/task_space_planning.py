@@ -132,7 +132,7 @@ def prediction(path,scene,state,base_z,t,end,lead,visual=False,base_rotation=Non
 
 
 def diagnose(original,scene,state,previous,t,base_z,limits,commanded_q=None,active=None,budget=None,history=(),
-             measured_control=None,base_rotation=None,accepted_intent=None,encode_journal=False):
+             measured_control=None,base_rotation=None,accepted_intent=None,encode_journal=False,execution_model=None):
     budget=budget or SearchBudget()
     active=original if active is None else active
     observed=camera_scene(scene,t,active.duration)
@@ -142,6 +142,7 @@ def diagnose(original,scene,state,previous,t,base_z,limits,commanded_q=None,acti
     search=KinematicSearch(state,previous,t,base_z,limits,measured_control=measured_control,
         commanded_q=commanded_q,base_rotation=base_rotation)
     if budget.single_candidate:search.policy=replace(search.policy,step_s=.1)
+    search.execution_model=execution_model
     configure_combo_samples(search,original)
     from .search_configuration import capability
     robot_capability=capability(search,original.subject)
@@ -155,7 +156,19 @@ def diagnose(original,scene,state,previous,t,base_z,limits,commanded_q=None,acti
     end=min(active.duration+POLICY.terminal_hold_s,t+max(2.,budget.activation_lead_s+.8)) if local else active.duration+POLICY.terminal_hold_s
     kinematics=search.lift(virtual,end)
     metrics=intent_prediction(spec,virtual,observed,t,history,step=.1)
+    execution=None
+    if execution_model is not None and t<active.duration:
+        from .execution_prediction import forecast,public_prediction
+        execution=forecast(active,kinematics if kinematics['feasible'] else None,scene,state,
+            search.velocity,previous,t,base_z,limits,execution_model,base_rotation=base_rotation,
+            # Keep the rolling execution check inside the live planning
+            # deadline. Full remaining FK/intent checks above are retained;
+            # full execution forecasts belong to candidate screening.
+            end_s=min(active.duration+POLICY.terminal_hold_s,t+.3),wall_budget_s=.35)
     issues=[]
+    if execution is not None and execution['failures']:
+        if execution['failures'][0]['symptom']!='forecast_wall_budget_exhausted':
+            issues.append('execution_prediction_requires_repair')
     # The 105 mm warning starts proactive search on the original shot. A
     # verified repair is allowed to use that reserve; otherwise every accepted
     # 25+ mm clearance detour immediately requests yet another detour.
@@ -187,6 +200,10 @@ def diagnose(original,scene,state,previous,t,base_z,limits,commanded_q=None,acti
         accepted_intent_degradation_unchanged=accepted_degradation,
         low_clearance_warning_s=risk,actual_tracking_error_m=actual_tracking_error,
         local_repair_evidence='camera intent programs; numerical FK/actuator screening; no WBC rollout'))
+    if execution is not None:
+        result['execution_prediction']=public_prediction(execution)
+        result['report']['execution_prediction']=public_prediction(execution)
+        result['report']['local_repair_evidence']='measured-state WBC/drive forecast with bounded computation and empirical uncertainty'
     if encode_journal:
         import json
         from .contracts import native
@@ -205,24 +222,51 @@ def screen(path,search,spec,observed,budget,history):
     if not kinematics['feasible']:
         result['error']='kinematic_gate:'+kinematics['reason']
         return result
-    realized=WitnessCameraPrediction(path,kinematics)
+    execution_model=getattr(search,'execution_model',None)
+    execution=None
+    if execution_model is not None:
+        from .execution_prediction import forecast, public_prediction
+        execution=forecast(path,kinematics,search.scene,search.state,search.velocity,search.command,
+            search.t,search.base_z,search.limits,execution_model,
+            base_rotation=None if search.tilt is None else Rotation.from_euler('z',search.state[2]).as_matrix()@search.tilt,
+            wall_budget_s=budget.candidate_wall_budget_s)
+        result['execution_prediction']=public_prediction(execution)
+        result['summary']['execution_prediction']=public_prediction(execution)
+        kinematics['execution_prediction']=execution
+        if not execution['feasible']:
+            failure=execution['failures'][0]
+            result['error']='execution_gate:'+failure['symptom']
+            result['summary']['execution_failure']=failure
+            return result
+    realized=WitnessCameraPrediction(path,execution or kinematics)
     value,_=evaluate_path(realized,observed,search.t,path.duration+POLICY.terminal_hold_s,RADIUS,visual=True)
     metrics=intent_prediction(spec,realized,observed,search.t,history)
+    if execution is not None:
+        from .cinematic_geometry import curve_quality
+        result['execution_prediction']['terminal_frame']=metrics['terminal_frame']
+        result['summary']['execution_prediction']['terminal_frame']=metrics['terminal_frame']
+        result['executed_curve_quality']=curve_quality(realized,start=search.t)
+        result['execution_prediction']['curve_quality']=result['executed_curve_quality']
     value.reason='camera_sweep_and_sampled_kinematic_witness'
     value.joint_margin_rad=kinematics['min_joint_margin_rad']
     value.max_velocity_ratio=kinematics['max_velocity_ratio']
     value.max_acceleration_ratio=kinematics['max_acceleration_ratio']
-    value.max_tracking_error_m=kinematics['max_position_error_m']
-    value.max_orientation_error_rad=kinematics['max_orientation_error_rad']
+    value.max_tracking_error_m=kinematics['max_position_error_m'] if execution is None else execution['max_tracking_error_m']
+    value.max_orientation_error_rad=kinematics['max_orientation_error_rad'] if execution is None else execution['max_orientation_error_rad']
     if kinematics.get('whole_body_collision_checked'):
         value.min_clearance_m=min(value.min_clearance_m,kinematics['min_body_clearance_m'])
         value.reason='camera_and_whole_body_swept_kinematic_witness'
+    if execution is not None:
+        value.reason='delayed_wbc_motor_response_prediction'
     if not value.feasible:
         result['error']='measured_camera_seed_collision'
     elif not metrics['camera_limits_pass']:
         result['error']='measured_camera_seed_exceeds_motion_limits'
     elif not metrics['terminal_frame']['pass_check']:
         result['error']='realized_terminal_frame_outside_band'
+    elif execution is not None and (not result['executed_curve_quality']['direction_pass'] or
+                                   not result['executed_curve_quality']['strict_full_curve_pass']):
+        result['error']='predicted_executed_curve_intent_mismatch'
     result.update(value=value,metrics=metrics)
     return result
 
@@ -230,7 +274,7 @@ def screen(path,search,spec,observed,budget,history):
 def build(original,active,strategy,scene,state,previous,t,base_z,limits,
           evidence=None,intrinsics=None,budget=None,commanded_q=None,history=(),
           measured_control=None,base_rotation=None,search_config=None,representation_boxes=3,geometry_preferences=True,
-          construction_plan=None,initial_boundary=False):
+          construction_plan=None,initial_boundary=False,execution_model=None):
     budget=budget or SearchBudget();start=time.monotonic()
     if budget.single_candidate and construction_plan is None:
         return dict(error='missing_jev_construction_contract',evaluations=[],generated_proposals=0,
@@ -244,6 +288,7 @@ def build(original,active,strategy,scene,state,previous,t,base_z,limits,
     if construction_plan is not None:
         search.config=dict(search.config or {}, allocations=(construction_plan['allocation'],))
         search.policy=replace(search.policy,step_s=.15)
+    search.execution_model=execution_model
     configure_combo_samples(search,original)
     spec=IntentSpec(original,observed.get('subject_model'),observed.get('intrinsics'))
     def project(path):
@@ -300,6 +345,8 @@ def build(original,active,strategy,scene,state,previous,t,base_z,limits,
         geometry = candidate_geometry(candidate,backend,observation,base_z,base_rotation,geometry_preferences)
         geometry['box_budget'] = representation_boxes
         candidate.consequences['geometry'] = geometry
+        if execution_model is not None:
+            candidate.consequences['execution_model']=execution_model
         if initial_boundary:
             candidate.consequences['initial_verification_snapshot']=verification_snapshot(
                 scene,state,previous,t,base_z,limits,measured_control,commanded_q,base_rotation)
@@ -310,7 +357,7 @@ def build(original,active,strategy,scene,state,previous,t,base_z,limits,
 
 def verify(candidate,approval,original,scene,state,previous,t,base_z,limits,
            evidence=None,intrinsics=None,budget=None,commanded_q=None,history=(),
-           measured_control=None,base_rotation=None):
+           measured_control=None,base_rotation=None,execution_model=None):
     budget=budget or SearchBudget();start=time.monotonic()
     checks=dict(physical_valid='unknown',target_authorized='fail',predicted_visual_valid='unknown',
         state_fresh='fail',observed_visual_valid='unknown',whole_body_prediction='not_performed',
@@ -342,8 +389,9 @@ def verify(candidate,approval,original,scene,state,previous,t,base_z,limits,
     search=KinematicSearch(state,previous,t,base_z,limits,measured_control=measured_control,
         commanded_q=commanded_q,base_rotation=base_rotation,scene=scene,
         search_config=candidate.consequences.get('search_config'))
+    search.execution_model=execution_model
     configure_combo_samples(search,original)
-    identical_startup=(startup and candidate.kinematics is not None and candidate.kinematics.get('feasible') and
+    identical_startup=(startup and candidate.consequences.get('execution_model')==execution_model and candidate.kinematics is not None and candidate.kinematics.get('feasible') and
         candidate.consequences.get('initial_verification_snapshot')==verification_snapshot(
             scene,state,previous,t,base_z,limits,measured_control,commanded_q,base_rotation))
     if identical_startup:
@@ -362,7 +410,8 @@ def verify(candidate,approval,original,scene,state,previous,t,base_z,limits,
     full,metrics=screened['value'],screened['metrics']
     checks['physical_valid']='pass' if full.feasible else 'fail'
     checks['predicted_visual_valid']='pass' if metrics['intent_complete'] and metrics['camera_limits_pass'] else 'fail'
-    checks['whole_body_prediction']='observed_geometry_swept_kinematic_lift'
+    checks['whole_body_prediction']=('delayed_wbc_motor_response_with_empirical_envelope'
+        if execution_model is not None else 'observed_geometry_swept_kinematic_lift')
     return dict(error='' if full.feasible else 'latest_camera_collision_rejected',
         candidate=candidate,approval=approval,checks=checks,visual_checks=dict(intent=checks['predicted_visual_valid']),
         validation=full,snapshot_time_s=t,scene=scene,wall_s=time.monotonic()-start,

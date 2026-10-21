@@ -66,6 +66,8 @@ def controller_process(inbox, outbox, stop, original, scene, output, options, ph
             engine.perception = snapshot.pop('perception')
             sequence = snapshot.pop('sequence')
             wall = snapshot.pop('observation_wall')
+            snapshot.pop('execution_transport',None)
+            snapshot.pop('physical_transition',None)
             engine.set_camera_output(**camera)
             # Anchor rate constraints to actual measured velocity, including
             # commands held/braked by the independent actuator supervisor.
@@ -152,7 +154,8 @@ class RealtimeEngine:
             self._write('emergency_stop_required', t, evidence=self.watchdog.emergency_stop_required,
                         automatic_rearm=False, physical_world_continues=True)
 
-    def step(self, state, scene, t, dt, *, observation_wall=None, **kwargs):
+    def step(self, state, scene, t, dt, *, observation_wall=None, applied_command=None,
+             physical_transition=None, **kwargs):
         started = time.monotonic()
         if self.watchdog is None:
             self.arm(started)
@@ -172,6 +175,7 @@ class RealtimeEngine:
                 if packet['info'].get('runtime_fault'):
                     self.trip(packet['info']['runtime_fault']['reason'], t)
                 if self.watchdog.accept(packet, t, time.monotonic()):
+                    self.watchdog.packet['received_sim_time_s']=float(t)
                     self.last_result = packet
                     if packet.get('active') is not None:
                         self.active = restore_path(self.original, packet['active'])
@@ -203,6 +207,15 @@ class RealtimeEngine:
             snapshot = dict(state=state, scene=scene, t=t, dt=dt, **kwargs,
                 camera=self.camera, perception=self.perception, sequence=self.sequence,
                 observation_wall=started if observation_wall is None else observation_wall)
+            packet_source=self.watchdog.packet
+            snapshot['execution_transport']=dict(
+                command_age_s=None if packet_source is None else max(0.,t-packet_source['t']),
+                command_delay_s=(None if packet_source is None else
+                    max(0.,packet_source.get('received_sim_time_s',t)-packet_source['t'])),
+                command_sequence=None if packet_source is None else packet_source['sequence'],
+                applied_command=(command.copy() if applied_command is None else np.asarray(applied_command).copy()),
+                waiting=bool(self.watchdog.waiting or self.watchdog.fault or self.watchdog.sensor_waiting))
+            snapshot['physical_transition']=physical_transition
             if self.stream_on_fault:
                 # Continue measured telemetry after a latched brake. The watchdog
                 # still rejects every new command; this cannot rearm the robot.
@@ -245,6 +258,9 @@ class RealtimeEngine:
             command_source_time_s=None if self.last_result is None else self.last_result['t'],
             command_source_wall_s=None if self.last_result is None else self.last_result['observation_wall'],
             command_source_sequence=None if self.last_result is None else self.last_result['sequence'],
+            command_received_time_s=None if packet is None else packet.get('received_sim_time_s'),
+            command_delivery_delay_s=(None if packet is None or 'received_sim_time_s' not in packet else
+                max(0.,packet['received_sim_time_s']-packet['t'])),
             observation_enqueued=submitted, agent_camera_input_role='offered_to_async_transport',
             controller_feedback=None if self.last_result is None else self.last_result['feedback'],
             command_certificate_scope='worker snapshot only; current-state sweep required by actuator',

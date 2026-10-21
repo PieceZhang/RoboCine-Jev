@@ -303,6 +303,9 @@ def camera_candidates(original, active, strategy, scene, t, budget, radius, hist
                     curve_quality=quality)
                 if gate is not None:
                     consequences['source'] = 'measured_seed_camera_with_sampled_kinematic_gate_no_wbc'
+                    if gate.get('execution_prediction') is not None:
+                        consequences['source']='delayed_wbc_motor_response_prediction'
+                        consequences['execution_prediction']=gate['execution_prediction']
                 candidate = Candidate(path,value,consequences,t,strategy)
                 if gate is not None:
                     candidate.kinematics = gate['kinematics']

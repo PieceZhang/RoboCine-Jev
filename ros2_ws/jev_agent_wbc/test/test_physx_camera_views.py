@@ -37,8 +37,15 @@ def test_physx_default_is_100hz_raw_camera(tmp_path,monkeypatch):
 
 @pytest.mark.parametrize('frequency',[50,100,150,200])
 def test_physics_rate_keeps_integer_control_substeps(tmp_path,monkeypatch,frequency):
-    monkeypatch.setattr(sys,'argv',['run_isaac.py','--output',str(tmp_path),'--physics-hz',str(frequency)])
+    monkeypatch.setattr(sys,'argv',['run_isaac.py','--output',str(tmp_path),'--physics-hz',str(frequency),
+                                  '--no-execution-aware'])
     assert arguments().physics_hz==frequency
+
+
+@pytest.mark.parametrize('frequency',[50,150,200])
+def test_calibrated_execution_model_rejects_other_physics_rates(tmp_path,monkeypatch,frequency):
+    monkeypatch.setattr(sys,'argv',['run_isaac.py','--output',str(tmp_path),'--physics-hz',str(frequency)])
+    with pytest.raises(SystemExit):arguments()
 
 
 @pytest.mark.parametrize('frequency',[25,75,125])

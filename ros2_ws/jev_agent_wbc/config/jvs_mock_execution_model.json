@@ -1,0 +1,105 @@
+{
+  "model": {
+    "robot": "jvs_mock",
+    "controller": "TPR-WBC/physical_slew/v1",
+    "command_mode": "adaptive",
+    "delay_s": 0.020000000000000018,
+    "delay_jitter_s": 0.01,
+    "preview_delay_s": 0.4,
+    "response_s": [
+      0.0025,
+      0.0025,
+      0.0,
+      0.0,
+      0.0,
+      0.005,
+      0.0,
+      0.0
+    ],
+    "residual_velocity": [
+      0.0005,
+      0.003495225341718533,
+      0.001645614624023528,
+      0.002725794125466119,
+      0.0011002842009102175,
+      0.0033024863309675787,
+      0.0007041639485892536,
+      0.0033329041040703303
+    ],
+    "bias_velocity": [
+      -2.0796853588668924e-05,
+      -0.00010876869519166044,
+      -2.142225900329161e-06,
+      6.106465253540744e-06,
+      1.612030569962637e-06,
+      -2.8515556828848766e-06,
+      -6.980093461326036e-06,
+      4.659395350886523e-06
+    ],
+    "calibrated_velocity_abs_max": [
+      0.33612969517707825,
+      0.7066981196403503,
+      0.6385113596916199,
+      1.0000271797180176,
+      0.6251707673072815,
+      0.05892549082636833,
+      0.4896974265575409,
+      0.9269304871559143
+    ],
+    "position_floor_m": 0.003,
+    "trusted_horizon_s": 1.5,
+    "snapshot_time_s": 0.0,
+    "samples": 848,
+    "breaches": 0,
+    "revision": 0,
+    "delay_aware": true,
+    "body_aware": false,
+    "evidence": "disjoint_run_one_step_physical_calibration; trajectory_coverage_unverified"
+  },
+  "training_runs": [
+    "results/execution_prediction_20261021/baseline_single/orbit_jev/execution.jsonl",
+    "results/execution_prediction_20261021/baseline_single/movein_jev/execution.jsonl"
+  ],
+  "heldout_runs": [
+    "results/execution_prediction_20261021/baseline_single/truck_left_jev/execution.jsonl"
+  ],
+  "source_sha256": {
+    "results/execution_prediction_20261021/baseline_single/orbit_jev/execution.jsonl": "cb4f3814e18465dfd39b9215b2d2e43ff8977ad1651a67497d1a9ee03ec74e5e",
+    "results/execution_prediction_20261021/baseline_single/movein_jev/execution.jsonl": "368d4a5606da2d338afc35b323d5589f1e8d17b144a4ca1a947f4c7fa5559d95",
+    "results/execution_prediction_20261021/baseline_single/truck_left_jev/execution.jsonl": "8498fc2c8b76952a521d19917efb36852d4a3e26bf2abbed3c0791dcc6f79090"
+  },
+  "delay_measurement": "First observed application of each fresh command sequence; held-command age is not transport latency.",
+  "training_samples": 848,
+  "heldout_samples": 424,
+  "heldout_velocity_rms": [
+    7.683234995634962e-05,
+    0.0011393319153022929,
+    0.00019907506021168628,
+    0.0002593670048608163,
+    6.764901753251106e-05,
+    0.0009751105390185397,
+    0.0001234092397272535,
+    0.00033219913210972494
+  ],
+  "heldout_component_coverage": [
+    1.0,
+    0.9905660377358491,
+    0.9976415094339622,
+    1.0,
+    1.0,
+    0.9740566037735849,
+    1.0,
+    0.9976415094339622
+  ],
+  "heldout_joint_step_coverage": 0.9599056603773585,
+  "scope": "No fitted collision/shot acceptance thresholds. One-step calibration is not a whole-trajectory guarantee.",
+  "runtime_contract": {
+    "robot": "jvs_mock",
+    "physics_hz": 100,
+    "control_hz": 50,
+    "motor_targets": "physical_slew",
+    "base_support": "upright",
+    "camera_feedback": "raw_physical",
+    "optional_preview_delay": "engineering prior; not fitted by the actuator calibration"
+  }
+}

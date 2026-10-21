@@ -122,7 +122,8 @@ class Candidate:
         card = dict(id=self.id, strategy=self.strategy, trajectory=path_spec(self.path),
             physical_valid=self.validation.feasible, prediction=numeric,
             visual=consequences, valid_before_s=self.path.activation_s,
-            approval_scope=('exact camera motion program, directed intent intervals and physical timing; no WBC prediction'
+            approval_scope=('exact camera program with conditional WBC/drive forecast; original intent and runtime safety gates retained'
+                if consequences.get('execution_prediction') is not None else 'exact camera motion program, directed intent intervals and physical timing; no WBC prediction'
                 if intent_path else 'this exact camera target path and full activation/hold/recovery process only; robot execution is predicted, not prescribed'))
         if self.kinematics is not None:
             from .kinematic_feasibility import summary

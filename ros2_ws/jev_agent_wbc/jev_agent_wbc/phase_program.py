@@ -224,6 +224,8 @@ def prepare(engine, scene, state, base_z,initial_boundary=None):
         phases=[dict(p,start_position=original.sample(p['start_s'])[0].tolist(),
             end_position=original.sample(p['end_s'])[0].tolist()) for p in phases],
         contract='Preserve every directed action, endpoint, phase order and deadline. Advance within a phase and then hold. Low obstacles require platform clearance, middle obstacles whole-arm clearance, high obstacles camera clearance. No future obstacle motion is known. Select early passage when the slow start would spend chassis escape or arm compensation reserve. A straight transverse camera move can exhaust arm folding when the chassis moves forward to escape: a single broad bow permits chassis travel while returning to the original endpoint. Physical checks remain mandatory.')
+    if getattr(engine,'execution_capability',None) is not None:
+        evidence['robot_geometry']['execution_capability']=engine.execution_capability
     questions={p['name']:choice('Choose the within-action timing using the observed whole-body geometry and action direction.',{
         'original':'Retain authored slow start and timing.',
         'moderate_early':'Complete the same spatial action in 62.5% of its interval, then hold.',
@@ -323,6 +325,8 @@ def prepare(engine, scene, state, base_z,initial_boundary=None):
                     kinematics=dict(min_joint_margin_rad=round(report['min_joint_margin_rad'],2),
                         full_shot_fk_actuators_verified=True,safety_lease_s=safety['end_s'],
                         observed_clearance_lower_m=round(safety['min_body_clearance_m'],3)),curve_quality=quality)
+        if getattr(engine,'execution_model',None) is not None:
+            verified,cards=execution_profiles(engine,verified,cards,scene,state,base_z)
         if not verified:raise RuntimeError('no_verified_phase_program')
         if 'pedestal' in phase['motion'].lower() or phase['motion'].lower()=='orbit':
             cards,robustness=robust_camera_profiles(cards)
@@ -338,7 +342,7 @@ def prepare(engine, scene, state, base_z,initial_boundary=None):
         prompt+=' For camera-height objects in every action, prefer positive transverse crossing space: retreating along an approach line leaves the camera in its corridor. Unconfirmed approach probes are robustness hypotheses, not measured motion.'
         questions={'profile':choice(prompt,{key:str(dict(timing=v['timing'],shape=v['shape'],
             joint_margin_rad=v['kinematics']['min_joint_margin_rad'],camera_crossing_space=v['camera_crossing_space'],
-            platform_yielding_space=v['platform_yielding_space'])) for key,v in cards.items()})}
+            platform_yielding_space=v['platform_yielding_space'],execution_prediction=v.get('execution_prediction'))) for key,v in cards.items()})}
     import threading
     client=engine.jev.decider.client
     numerical_wall=time.monotonic()-started
@@ -366,6 +370,9 @@ def prepare(engine, scene, state, base_z,initial_boundary=None):
         raise RuntimeError('phase_program_camera_geometry_rejected')
     engine.active=path;engine.wbc.set_trajectory(path)
     if verified:engine.wbc.kinematic_reference=proof
+    if verified and proof.get('execution_prediction') is not None:
+        from .evaluation import save_json
+        save_json(engine.output/'startup_execution_prediction.json',proof['execution_prediction'])
     engine.wbc.body_aware=True
     record=dict(selections=selections,shapes=shapes,selection_sha256=digest(dict(timing=selections,shapes=shapes)),geometry=path.geometry,
         startup_wall_s=time.monotonic()-started,numerical_screen_wall_s=numerical_wall,api_wall_s=api_wall,
@@ -374,3 +381,67 @@ def prepare(engine, scene, state, base_z,initial_boundary=None):
         scope='Jev-selected phase program; observed-geometry FK screening when available; every executed command requires fresh physical checks')
     engine._write('phase_program_selected',0.,**record)
     return record
+
+
+def execution_profiles(engine,verified,cards,scene,state,base_z):
+    """Spend the existing proposal budget on executed-result screening.
+
+    The authored spatial path gets first consideration, then candidates with
+    greater observed body clearance. Untested profiles remain explicitly unknown;
+    they are not silently assigned a passing dynamics score. Identical startup
+    retries reuse deterministic forecasts and investigate the next profiles.
+    """
+    from .execution_prediction import forecast,public_prediction,failure_evidence
+    from .task_space_planning import WitnessCameraPrediction,camera_scene
+    from .camera_intent import IntentSpec
+    from .floating_camera import intent_prediction
+    from .cinematic_geometry import curve_quality
+    cache=getattr(engine,'phase_execution_cache',{})
+    engine.phase_execution_cache=cache
+    model=dict(engine.execution_model,body_aware=True)
+    ordered=sorted(verified,key=lambda k:(verified[k][3]!='original',
+        -cards[k]['frozen_observed_occupancy']['min_clearance_m'],
+        -cards[k]['kinematics']['min_joint_margin_rad'],k))
+    accepted={}; offered={}; tested=0; unknown=[]; equivalent={}; aliases={}
+    for key in ordered:
+        path,proof,rate,shape=verified[key]
+        # Several shape names can describe the identical continuous spline and
+        # body allocation. Do not spend the bounded dynamics budget on aliases.
+        signature=digest(dict(geometry=path.geometry,
+            witness=[dict(t=r['t'],state=np.round(r['state'],8),control=np.round(r['control'],8))
+                     for r in proof['trace']]))
+        if signature in equivalent:
+            aliases[key]=equivalent[signature]
+            continue
+        equivalent[signature]=key
+        binding=digest(dict(path=path.geometry,program=path.program,witness=signature,state=np.asarray(state),
+            scene=scene,model=model,base_z=base_z))
+        if binding not in cache:
+            if tested>=engine.budget.max_proposals:
+                unknown.append(key)
+                continue
+            tested+=1
+            result=forecast(path,proof,scene,state,np.zeros(8),np.zeros(8),0.,base_z,
+                engine.wbc.limits,model,wall_budget_s=18.,end_s=path.duration+.4)
+            if result['feasible']:
+                realized=WitnessCameraPrediction(path,result)
+                quality=curve_quality(realized)
+                intent=intent_prediction(IntentSpec(engine.original,engine.subject_model,engine.intrinsics),
+                    realized,camera_scene(scene,0.,path.duration),0.,())
+                result.update(curve_quality=quality,intent=intent)
+                if not quality['direction_pass'] or not quality['strict_full_curve_pass']:
+                    result['feasible']=False
+                    result['failures'].append(failure_evidence('predicted_executed_curve_intent',path.duration))
+                elif not intent['intent_complete'] or not intent['camera_limits_pass'] or not intent['terminal_frame']['pass_check']:
+                    result['feasible']=False
+                    result['failures'].append(failure_evidence('predicted_executed_intent_terminal_or_camera_limits',path.duration))
+            cache[binding]=result
+            engine._write('phase_execution_prediction',0.,profile=key,prediction=public_prediction(result))
+        result=cache[binding]
+        if result['feasible']:
+            proof['execution_prediction']=result
+            accepted[key]=verified[key]
+            offered[key]=dict(cards[key],execution_prediction=public_prediction(result))
+    engine._write('phase_execution_budget',0.,new_forecasts=tested,offered=list(offered),
+        equivalent_profile_aliases=aliases,untested_profiles=unknown,untested_status='unknown',budget=engine.budget.max_proposals)
+    return accepted,offered

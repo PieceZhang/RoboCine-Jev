@@ -500,7 +500,11 @@ class KinematicSearch:
 
 
 def summary(report):
-    return {k: v for k, v in report.items() if k != 'trace'}
+    value={k: v for k, v in report.items() if k not in ('trace','execution_prediction')}
+    if report.get('execution_prediction') is not None:
+        from .execution_prediction import public_prediction
+        value['execution_prediction']=public_prediction(report['execution_prediction'])
+    return value
 
 
 def installation_error(report, state, velocity, t, limits):

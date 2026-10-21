@@ -2,6 +2,46 @@
 
 五机器人 Husky、Ridgeback、TIAGo、G1、Go2 的统一 Representation 接入、官方 Jev + Isaac Sim 测试及当前限制见 [五机器人避障说明](README_five_robot_avoidance.md)。官方闭环结果与无 Jev 的历史诊断分别记录。
 
+## jvs_mock 执行结果预测（2026-10-21）
+
+`run_isaac.py` 默认启用 `--execution-aware`，读取
+`config/jvs_mock_execution_model.json`。候选在原有几何、意图和安全门槛外，
+增加相同 WBC、命令传输、异步姿态预览、100 Hz 电机限幅及响应模型的闭环预测。
+评估使用预测执行相机，并分别记录目标改形与执行跟踪误差。
+`--no-execution-aware` 可用于消融；当前预测模型仅支持 100 Hz、upright、
+physical_slew 的 jvs_mock，不能直接当作其他机器人的执行模型。
+
+Representation 增加能力时间戳、命令到达时间、制动恢复时间、相机方向速度余量、
+经验残差及其可信时域。预测的底盘和相机机械臂占用按误差与延迟膨胀，逐段检查
+环境和自身碰撞。远期外推、未知障碍运动与标定不足都明确标记；经验包络不代表
+整段概率保证，也不能替代执行时的独立安全检查。
+
+每次实测更新使用**实际施加的电机目标**，避免把被安全层拒绝的提案误学为动力学误差。
+延迟由接收端记录新命令首次到达时间；控制进程跳过快照后也不会把保持时长误学成传输延迟。
+命令保持时长另由原有有效期监控。
+超包络反馈进入后续诊断与重规划，失败按时序、执行能力、模型失配、安全覆盖、
+数值未验证和镜头意图分类，症状不自动等同于已确认根因。
+在线规划预算和原始验收不变；预算内未完成的预测属于未验证。
+
+标定与审计可独立复现，训练和留出运行必须分开：
+
+```bash
+python3 scripts/calibrate_execution_prediction.py \
+  --train <orbit执行日志> <movein执行日志> \
+  --holdout <truck_left执行日志> --output <新的标定JSON>
+python3 scripts/audit_execution_prediction.py \
+  --run <PhysX结果目录> --output <预测与执行对比JSON>
+```
+
+本轮六场景、冻结源码、失败反例和最终审计保存在
+`results/execution_prediction_20261021/`。运行结束、安全、运镜验收和实时性分别报告，
+不把安全停止或单步残差覆盖率当作整段任务成功。
+本轮仍未将三个组合运镜全部调通，不能把机制接入称为严格运镜成功率已经提高。
+基线、关闭执行模型的消融与最终结果见
+[调试报告](results/execution_prediction_20261021/REPORT.txt)；
+[预测与执行误差图](results/execution_prediction_20261021/prediction_vs_execution.png)
+使用同一物理时钟下的 50 Hz 原始相机采样，不对参考轨迹重定时。
+
 ## CineGym 随机场景与 PhysX 调试（2026-10-20）
 
 [CineGym 使用说明](CineGym/README.md) 包含受限速度/加速度的随机动态球体、不同高度和宽度的落地箱体，以及独立 CPU 可行路径见证。随机测试只使用单运镜或两个运镜的组合，难度为 easy / medium；生成标签和几何可行见证不能替代在线成功率。

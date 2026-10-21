@@ -659,7 +659,9 @@ def semantic_card(alias, card):
             physical_valid=card['physical_valid'],clearance_m=prediction.get('min_clearance_m'),
             intent=visual.get('intent'),smoothness=visual.get('smoothness'),geometry=geometry,
             curve_quality=visual.get('curve_quality'),
-            prediction_kind='backend_screened_geometric_candidate_not_execution')
+            execution_prediction=visual.get('execution_prediction'),
+            prediction_kind=('delayed_wbc_motor_response_prediction' if visual.get('execution_prediction') else
+                             'backend_screened_geometric_candidate_not_execution'))
     if path.get('kind') in ('intent_program/v1','fk_camera_program/v1'):
         return dict(id=alias, program=path['program'], process=dict(
             activation_s=path['activation_s'], end_s=path['duration_s'],

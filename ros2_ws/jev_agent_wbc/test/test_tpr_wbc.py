@@ -71,6 +71,19 @@ def test_unreachable_camera_acceleration_is_explicit_degradation():
     assert np.linalg.norm(info['camera_acceleration_residual']) > 1.
 
 
+def test_takeover_delay_reserves_closing_distance_without_relaxing_limits():
+    c=controller(scene((-.13,0.,.48),(.012,0.,0.)))
+    c.execution_safety_delay_s=.06
+    c.reconfiguration.update=lambda *args:np.zeros(8)
+    command,info=c.solve(STATE,*c.trajectory.sample(0.),.02,commanded_q=STATE[3:])
+    assert info['takeover_clearance_reserve_m']>0.
+    assert info['command_sweep_lower_m']>=.025
+    assert np.max(abs(command)-c.limits.acceleration*.02)<=1e-6
+    c.execution_safety_delay_s=float('nan')
+    with pytest.raises(ValueError,match='execution safety delay'):
+        c.solve(STATE,*c.trajectory.sample(0.),.02,commanded_q=STATE[3:])
+
+
 def test_received_moving_position_and_orientation_are_tracked_together():
     from scipy.spatial.transform import Rotation
     class MovingReference(Reference):
@@ -144,6 +157,30 @@ def test_hierarchy_keeps_exact_equalities_at_active_limits():
     u,residual=qp(np.eye(8),np.arange(8)*-1e4,A,lo,hi)
     np.testing.assert_allclose(J@u,J@feasible,atol=1e-10)
     assert residual < 1e-6
+
+
+def test_actuator_box_reduction_preserves_active_collision_faces_and_optimum():
+    from jev_agent_wbc.tpr_wbc import remove_box_redundant_rows
+    rng=np.random.default_rng(73)
+    redundant=rng.normal(size=(400,4))
+    radius=np.sum(abs(redundant),axis=1)+.01
+    # x+y<=.5 cuts the box. The other dense rows cannot cut it.
+    A=np.vstack([np.eye(4),[1.,1.,0.,0.],redundant])
+    lo=np.r_[np.full(4,-1.),-np.inf,-radius]
+    hi=np.r_[np.ones(4),.5,radius]
+    reduced,_,_=remove_box_redundant_rows(A,lo,hi)
+    assert len(reduced)==5
+    answer,residual=qp(np.eye(4),np.array([-1.,-1.,0.,0.]),A,lo,hi)
+    np.testing.assert_allclose(answer,[.25,.25,0.,0.],atol=1e-7)
+    assert residual<=1e-6 and np.all(A@answer<=hi+1e-6)
+
+
+def test_box_reduction_does_not_drop_rows_with_unbounded_slack_variables():
+    from jev_agent_wbc.tpr_wbc import remove_box_redundant_rows
+    A=np.array([[1.,0.],[0.,1.],[1.,1.]])
+    lo=np.array([-1.,0.,-np.inf]);hi=np.array([1.,np.inf,.5])
+    reduced,_,_=remove_box_redundant_rows(A,lo,hi)
+    np.testing.assert_array_equal(reduced,A)
 
 
 def test_identified_response_matches_endpoint_and_integrated_velocity():

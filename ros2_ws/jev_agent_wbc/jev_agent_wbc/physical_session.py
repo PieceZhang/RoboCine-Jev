@@ -94,6 +94,8 @@ class MeasuredExecution:
         self.delay_aware_servo=False
         self.control_latency_history=[]
         self.profile=None
+        self.execution_observer=None
+        self.last_model_feedback_s=-float('inf')
         self.numeric_runtime=dict(environment={key:os.environ.get(key) for key in
             ('OPENBLAS_NUM_THREADS','OMP_NUM_THREADS','MKL_NUM_THREADS')})
         try:
@@ -143,7 +145,34 @@ class MeasuredExecution:
         if self.profile is not None:self.profile.enable()
         self.receive(-1.)
 
+    def bind_execution(self,engine,state=None,local_t=0.):
+        if self.execution_observer is None:return
+        from dataclasses import replace
+        s=self.snapshot
+        model=replace(self.execution_observer.model,snapshot_time_s=float(local_t),
+            body_aware=bool(getattr(engine.wbc,'body_aware',False)))
+        engine.execution_model=model.to_dict()
+        engine.execution_capability=model.public(s['state'] if state is None else state,
+            s['measured_control'],self.limits,s['base_z'],s.get('base_rotation'))
+        engine.wbc.feedback_latency_s=model.delay_s+model.delay_jitter_s
+        engine.wbc.expected_command_delay_s=model.delay_s
+        engine.wbc.execution_safety_delay_s=min(self.policy.command_timeout_s,model.delay_s+model.delay_jitter_s)
+
     def prepare(self,function,engine,*args,**kwargs):
+        self.bind_execution(engine)
+        if self.execution_observer is not None:
+            # Later combo actions are prepared at a planned stopped arrival,
+            # not at the current measured configuration of the first action.
+            # Expose that condition rather than attaching a current-state lease
+            # to a capability computed for the wrong phase.
+            import inspect
+            bound=inspect.signature(function).bind(engine,*args,**kwargs).arguments
+            capability=self.execution_observer.model.public(bound['state'],np.zeros(8),
+                self.limits,bound['base_z'])
+            capability.update(state_scope='planned_stopped_phase_start; revalidate_at_measured_arrival',
+                state_stamp_s=None,valid_until_s=None,expected_command_effect_s=None)
+            engine.execution_capability=capability
+
         # Bounded task preparation happens before arming, exactly as the CPU
         # success baseline. Live replanning never uses this blocking helper.
         errors=[]
@@ -156,8 +185,27 @@ class MeasuredExecution:
                 engine._write('preparation_retry',0.,attempt=attempt+1,reason=str(error))
                 if attempt==self.policy.max_retries:raise
 
+    def report_execution_feedback(self,engine,evidence,local_t):
+        stamp=self.snapshot['t']
+        if evidence is None or stamp-self.last_model_feedback_s<.5:return
+        # Rate-limit on the continuous physical clock. A new combo phase resets
+        # its local clock; it must not suppress model feedback until that clock
+        # catches up with the end of the preceding phase.
+        evidence=dict(evidence,first_anomaly_s=local_t,physical_time_s=stamp,
+            time_frame='phase_local_with_physical_time')
+        engine.pending_feedback.append(dict(error=evidence['symptom'],time_s=local_t,failure=evidence))
+        engine.pending_feedback=engine.pending_feedback[-4:]
+        engine._write('execution_model_feedback',local_t,failure=evidence,
+            capability=engine.execution_capability)
+        self.last_model_feedback_s=stamp
+
     def transfer_step(self,free,state,scene,t,previous):
         free.wbc.previous=np.asarray(previous).copy()
+        if self.execution_observer is not None:
+            free.wbc.feedback_latency_s=self.execution_observer.model.delay_s+self.execution_observer.model.delay_jitter_s
+            free.wbc.expected_command_delay_s=self.execution_observer.model.delay_s
+            free.wbc.execution_safety_delay_s=min(self.policy.command_timeout_s,
+                self.execution_observer.model.delay_s+self.execution_observer.model.delay_jitter_s)
         if self.connector_pool is not None and not isinstance(free.motion_preview,AsyncConnectorPreview):
             free.motion_preview=AsyncConnectorPreview(free.motion_preview,self.connector_pool)
         try:
@@ -187,6 +235,7 @@ class MeasuredExecution:
             except Empty:continue
             if s['t']>after+1e-9:
                 self.snapshot=s
+                self.snapshot_received_wall=time.monotonic()
                 if s.get('control_status',{}).get('emergency_stop_required'):
                     raise RuntimeError('physical_safety_controller_latched')
                 return s
@@ -209,6 +258,15 @@ class MeasuredExecution:
                 joint_margin_rad=joint_margin(state),loop_wall_s=0.,
                 measured_control_interval_s=.02)
         engine.wbc.measured_limits=self.limits
+        if self.execution_observer is not None:
+            transport=s.get('execution_transport',{})
+            evidence=self.execution_observer.observe(s['t'],state,s['measured_control'],
+                transport.get('applied_command',s['measured_control']),self.limits,
+                command_delay_s=None if transport.get('waiting') else transport.get('command_delay_s',transport.get('command_age_s')),
+                command_sequence=transport.get('command_sequence'),transition=s.get('physical_transition'))
+            self.bind_execution(engine,state,t)
+            self.report_execution_feedback(engine,evidence,t)
+
         engine.perception=phase_evidence(s['perception'],s['t']-t)
         engine.set_camera_output(t,s['camera']['position'],s['camera']['rotation'],source='execution')
         engine.runtime_policy=self.policy
@@ -234,6 +292,8 @@ class MeasuredExecution:
                 measured_control=s['measured_control'],measured_base_twist=s.get('measured_base_twist'))
             self.control_retries=0
             self.control_latency_history=(self.control_latency_history+[time.monotonic()-started])[-20:]
+            if self.execution_observer is not None:
+                info['execution_capability']=engine.execution_capability
             info['measured_observation_interval_s']=elapsed
             info['measured_control_interval_s']=dt
             return command,info
@@ -269,7 +329,10 @@ class MeasuredExecution:
             # Keep the physical clock moving; a later snapshot may resolve an
             # empty local numerical solve. Never suppress contact/sensor faults.
             self.control_retries+=1
-            engine._write('controller_retry',t,reason=str(error),attempt=self.control_retries)
+            from .execution_prediction import failure_evidence
+            engine._write('controller_retry',t,reason=str(error),attempt=self.control_retries,
+                failure=failure_evidence(str(error),t,source='measured_state_control_check',measured=True),
+                diagnostics=diagnostics)
             if self.control_retries>self.policy.max_retries:raise
             from .planning import joint_margin
             from .whole_body_qp import whole_body_kinematics
@@ -284,6 +347,14 @@ class MeasuredExecution:
         info=dict(info,session_stage=stage,phase_index=index,phase_time_s=float(local_t),phase_start_s=s['t']-local_t,
             session_reference_position=np.asarray(reference_p).tolist(),
             session_reference_rotation=np.asarray(reference_r).tolist())
+        info['worker_snapshot_compute_wall_s']=time.monotonic()-getattr(self,'snapshot_received_wall',time.monotonic())
+        info['worker_command_age_wall_s']=time.monotonic()-s['observation_wall']
+        if self.engines:
+            self.engines[min(index,len(self.engines)-1)]._write('physical_command_ready',local_t,
+                source_time_s=s['t'],stage=stage,sequence=s['sequence'],
+                worker_compute_wall_s=info['worker_snapshot_compute_wall_s'],
+                command_age_wall_s=info['worker_command_age_wall_s'],
+                control_compute_wall_s=info.get('loop_wall_s'))
         info.setdefault('loop_wall_s',info.get('iteration_compute_wall_s',0.))
         info.setdefault('target_position',np.asarray(reference_p).tolist())
         self.last_info=info
@@ -325,6 +396,14 @@ def controller_process(inbox,outbox,stop,original,scene,output,options,physical_
     from .runtime_fault_injection import FaultSchedule
     execution.fault_schedule=FaultSchedule(options.get('fault_events',()))
     execution.delay_aware_servo=options.get('delay_aware_servo',False)
+    if options.get('execution_aware',False):
+        from .execution_prediction import ExecutionModel, ExecutionObserver
+        profile={}
+        if options.get('execution_calibration'):
+            data=json.loads(Path(options['execution_calibration']).read_text())
+            profile=data.get('model',data)
+        profile.update(command_mode=options['session_command_mode'],delay_aware=True)
+        execution.execution_observer=ExecutionObserver(ExecutionModel(**profile))
     if options.get('profile_controller'):
         import cProfile
         execution.profile=cProfile.Profile()

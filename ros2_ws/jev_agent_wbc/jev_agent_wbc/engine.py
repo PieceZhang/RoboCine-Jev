@@ -172,7 +172,8 @@ class CinematicEngine:
         self.events.flush()
 
     def _feedback(self, error, t, finish_pipeline=True):
-        self.pending_feedback.append(dict(error=error, time_s=t))
+        from .execution_prediction import failure_evidence
+        self.pending_feedback.append(dict(error=error, time_s=t, failure=failure_evidence(error,t)))
         self.pending_feedback = self.pending_feedback[-4:]
         self._write('proposal_rejected', t, error=error)
         if finish_pipeline:
@@ -193,6 +194,7 @@ class CinematicEngine:
             if kind == 'candidates':
                 kwargs.update(representation_boxes=self.geometry_backend.box_budget,
                               geometry_preferences=self.geometry_preferences)
+            kwargs['execution_model'] = getattr(self,'execution_model',None)
             kwargs['history'] = self.camera_history.copy()
             velocity = getattr(self.wbc, 'measured_control', None)
             kwargs['measured_control'] = None if velocity is None else np.asarray(velocity).copy()
@@ -360,6 +362,8 @@ class CinematicEngine:
                 base_z=self.geometry_base_z,base_rotation=getattr(self,'planning_base_rotation',None))
             geometry = observation.summary(self.geometry_backend.obstacle_relations(observation,self.geometry_scene))
             self._write('geometry_observation',t,observation=observation.to_dict(),observation_id=observation.id)
+            if getattr(self,'execution_capability',None) is not None:
+                geometry['execution_capability']=self.execution_capability
             guide = getattr(self.wbc,'geometry_guidance',None)
             if guide is not None:
                 geometry['execution_feedback'] = guide.feedback(observation,'measured')
@@ -377,7 +381,8 @@ class CinematicEngine:
                 bool(self.active is not self.original and
                     not self.report['report'].get('intent',{}).get('intent_complete',False))).to_dict(),
             objective='visible_intent_completion' if self.planner_model == 'floating_camera' else 'legacy_reference_tracking',
-            prediction_scope=("state-seeded FK with observed whole-body/self-collision swept checks; no dynamics or future truth"
+            prediction_scope=('delayed WBC/drive prediction, empirical error envelope, bounded observed-safety horizon'
+                if getattr(self,'execution_model',None) is not None else "state-seeded FK with observed whole-body/self-collision swept checks; no dynamics or future truth"
                 if self.planner_model == "floating_camera" else "whole-body WBC rollout"),
             time_s=t, duration_s=self.original.duration, phase=phase, shot_phase=self.original.task['shot_phase'],
             next_phase=following[0] if following else None,
@@ -632,6 +637,9 @@ class CinematicEngine:
                     self.active_candidate = candidate
                     self.wbc.set_trajectory(self.active)
                     self.wbc.kinematic_reference=result.get('kinematics')
+                    execution_forecast=(result.get('kinematics') or {}).get('execution_prediction')
+                    if execution_forecast is not None:
+                        self._write('execution_prediction_installed',t,candidate_id=candidate.id,prediction=execution_forecast)
                     self.wbc.geometry_guidance=result.get('geometry_guidance')
                     self.configuration_monitor.reset(candidate.id,result.get('kinematics'))
                     self.wbc.input_generation = getattr(self.wbc, 'input_generation', 0)+1
@@ -753,8 +761,11 @@ class CinematicEngine:
                 base_z=base_z, base_rotation=base_rotation, commanded_q=commanded_q,
                 trajectory_time=t, brake=brake)
         except RuntimeError as error:
+            from .execution_prediction import failure_evidence
             self._write('wbc_feasibility',t,status='failed',camera_task_feasible=False,
                         trajectory_id=path_hash(self.active),reason=str(error),
+                        failure=failure_evidence(str(error),t,source='controller_constraint_check'),
+                        diagnostics=getattr(error,'diagnostics',None),
                         safety_guaranteed=False,command_published=False)
             raise
         solved_wall=time.monotonic()
@@ -796,8 +807,10 @@ class CinematicEngine:
         if info.get('tpr_status') in ('warning', 'degraded'):
             if not self.pending_feedback or t-self.pending_feedback[-1].get('time_s', -1.) >= .5:
                 report = info['tpr_report']
+                from .execution_prediction import failure_evidence
                 self.pending_feedback.append(dict(error='trajectory_preserving_configuration_'+info['tpr_status'],
-                                                  time_s=t, wbc_feasibility=report))
+                    time_s=t,wbc_feasibility=report,failure=failure_evidence(
+                        'trajectory_preserving_configuration_'+info['tpr_status'],t,source='controller_constraint_check')))
                 self._write('wbc_feasibility', t, **report)
         if 'primary_qp_failure' in info:
             self._write('certified_safety_fallback', t, reason=info['primary_qp_failure'],

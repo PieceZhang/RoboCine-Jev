@@ -80,6 +80,28 @@ def qp(H, g, A, lo, hi, warm=None):
         raise
 
 
+def remove_box_redundant_rows(A, lo, hi):
+    """Remove only inequalities implied by retained scalar actuator bounds.
+
+    This is exact interval arithmetic over the command box, not nearest-point
+    obstacle selection. All original rows are checked again after the solve.
+    """
+    nonzero=A!=0.
+    single=nonzero.sum(axis=1)==1
+    rows=np.flatnonzero(single)
+    if not len(rows):return A,lo,hi
+    columns=np.argmax(nonzero[single],axis=1);values=A[rows,columns]
+    low=np.full(A.shape[1],-np.inf);high=np.full(A.shape[1],np.inf)
+    np.maximum.at(low,columns,np.where(values>0,lo[rows]/values,hi[rows]/values))
+    np.minimum.at(high,columns,np.where(values>0,hi[rows]/values,lo[rows]/values))
+    if np.any(low>high):return A,lo,hi
+    with np.errstate(invalid='ignore'):
+        minimum=np.where(A==0.,0.,np.where(A>0.,A*low,A*high)).sum(axis=1)
+        maximum=np.where(A==0.,0.,np.where(A>0.,A*high,A*low)).sum(axis=1)
+    keep=single|(lo==hi)|(minimum<lo+1e-12)|(maximum>hi-1e-12)
+    return A[keep],lo[keep],hi[keep]
+
+
 def _solve_qp(H, g, A, lo, hi, warm=None):
     if np.any(lo > hi):
         raise RuntimeError('TPR hard constraint intersection is empty')
@@ -87,6 +109,8 @@ def _solve_qp(H, g, A, lo, hi, warm=None):
     # hierarchy exact, this avoids ADMM fighting six task rows against nearly
     # parallel active actuator faces. The original rows are checked afterward.
     original = A, lo, hi
+    if len(g)<=32:
+        A,lo,hi=remove_box_redundant_rows(A,lo,hi)
     equal = np.isfinite(lo) & np.isfinite(hi) & (lo == hi)
     offset, Z = np.zeros(len(g)), np.eye(len(g))
     if np.any(equal):
@@ -119,9 +143,14 @@ def _solve_qp(H, g, A, lo, hi, warm=None):
             raise RuntimeError('TPR reduced QP residual')
         return answer, residual
     solver = osqp.OSQP()
+    # Small live-control problems have an independent LP + dense refinement
+    # below. Switch to that solver promptly when ADMM stalls on nearly parallel
+    # faces, rather than spending the entire command lease on 20,000 iterations.
+    # The convex problem, convergence test and final hard residual are identical.
+    iteration_limit = 200 if len(g) <= 32 else 20000
     solver.setup(P=sparse.csc_matrix(np.triu(H)), q=g, A=sparse.csc_matrix(A),
                  l=lo, u=hi, verbose=False, eps_abs=1e-10, eps_rel=1e-10,
-                 eps_prim_inf=1e-9, max_iter=20000, polish=True)
+                 eps_prim_inf=1e-9, max_iter=iteration_limit, polish=True)
     if warm is not None:
         solver.warm_start(x=Z.T@(warm-offset))
     result = solver.solve()
@@ -728,7 +757,16 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
     if yield_info['active']:ff_acc=np.zeros(6)
     feedback_latency=float(getattr(c,'feedback_latency_s',0.))
     frequency = feedback_frequency(float(getattr(c, 'tpr_servo_frequency', 12.)),dt,feedback_latency)
-    desired_acc = ff_acc+2*frequency*(ff-camera_velocity)+frequency**2*error
+    takeover_delay=float(getattr(c,'expected_command_delay_s',0.))
+    if not np.isfinite(takeover_delay) or not 0<=takeover_delay<=.1:
+        raise ValueError('expected command delay outside the command lease')
+    # Predict task error at command takeover under the current twist. The
+    # predictable delay changes the target/error; delay jitter only bounds the
+    # feedback gain above. Actuator and collision constraints still use the
+    # measured state and are rechecked by the physical command guard.
+    takeover_error=error+takeover_delay*(ff-camera_velocity)+.5*takeover_delay**2*ff_acc
+    takeover_twist=ff+takeover_delay*ff_acc
+    desired_acc = ff_acc+2*frequency*(takeover_twist-camera_velocity)+frequency**2*takeover_error
     desired = J@measured+dt*(desired_acc-Jdot@measured)
     if semantic_axis is not None:
         desired[:3]-=semantic_axis*min(0.,float(semantic_axis@desired[:3]))
@@ -785,6 +823,14 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
         rate = (dp-dm)/(2*eps)-c.collision.radius_rates[indices,None]
     curvature = (dp-2*distances+dm)/eps**2
     h = distances-c.collision.margin-.006
+    safety_delay=float(getattr(c,'execution_safety_delay_s',0.))
+    if not np.isfinite(safety_delay) or not 0<=safety_delay<=.1+1e-9:
+        raise ValueError('execution safety delay outside the command lease')
+    # Reserve the observed closing distance before a command can take effect.
+    # Current-state actuator rows and the independent physical sweep remain
+    # unchanged. This is a local motion envelope, not a future-obstacle oracle.
+    takeover_reserve=safety_delay*np.maximum(-rate,0.)+.5*safety_delay**2*np.maximum(-curvature,0.)
+    h-=takeover_reserve
     # Acceleration HOCBF: hddot+2*k*hdot+k^2*h >= 0. All pairs
     # can activate; near-feature switches retain individual primitive rows.
     k = 2.
@@ -805,8 +851,9 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
     sd_plus,sd_minus=c.self_collision.distances_sequence([plus,minus])
     scurvature = (sd_plus-2*sd+sd_minus)/eps**2
     smask = sd < .08
-    self_velocity_low = -k*(sd[smask]-c.self_collision.margin-.002)
-    slow = np.maximum(sR[smask]@measured+dt*(-scurvature[smask]-2*k*srate[smask]-k*k*(sd[smask]-c.self_collision.margin-.002)), self_velocity_low)
+    self_h=sd-c.self_collision.margin-.002-safety_delay*np.maximum(-srate,0.)-.5*safety_delay**2*np.maximum(-scurvature,0.)
+    self_velocity_low = -k*self_h[smask]
+    slow = np.maximum(sR[smask]@measured+dt*(-scurvature[smask]-2*k*srate[smask]-k*k*self_h[smask]), self_velocity_low)
     direct_low = np.r_[velocity_low,self_velocity_low]
     R, low = np.vstack([R, sR[smask]]), np.r_[low, slow]
     A, lo, hi = np.vstack([A, R]), np.r_[lo, low], np.r_[hi, np.full(len(R), np.inf)]
@@ -921,7 +968,9 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
                 _,_,basis=np.linalg.svd(tangent[None,:])
                 normals=basis[1:]
                 manifold_rows=normals@J[:3]
-                transverse_acceleration=-8.*camera_velocity[:3]+16.*(first-p)
+                transverse_velocity=transverse@camera_velocity[:3]
+                future_error=first-p-takeover_delay*transverse_velocity
+                transverse_acceleration=-8.*transverse_velocity+16.*future_error
                 manifold_target=normals@(J[:3]@measured+dt*(transverse_acceleration-Jdot[:3]@measured))
                 forward_limit=np.sqrt(2*.5*max(0.,float((last-p)@tangent)))
             else:
@@ -944,8 +993,16 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
                             tb=(points[right+1]-points[right])/lengths[right]
                             separation=.5*(lengths[left]+lengths[right])+lengths[left+1:right].sum()
                             curvature=(tb-ta)/max(separation,1e-6)
-                    transverse_acceleration=(curvature*(camera_velocity[:3]@tangent)**2
-                        -8.*camera_velocity[:3]+16.*(received.sample(at)[0]-p))
+                    curvature_acceleration=curvature*(camera_velocity[:3]@tangent)**2
+                    transverse_velocity=camera_velocity[:3]-tangent*(camera_velocity[:3]@tangent)
+                    transverse_error=received.sample(at)[0]-p
+                    # This equality has priority over the task cost, so its
+                    # feedback must use the same command takeover time. The
+                    # old current-state equality bypassed delay compensation.
+                    future_error=(transverse_error-takeover_delay*transverse_velocity+
+                        .5*takeover_delay**2*curvature_acceleration)
+                    transverse_acceleration=(curvature_acceleration
+                        -8.*(transverse_velocity-takeover_delay*curvature_acceleration)+16.*future_error)
                     manifold_target=normals@(J[:3]@measured+dt*(transverse_acceleration-Jdot[:3]@measured))
                     remaining=np.vstack([received.sample(at)[0],points[knots>at]])
                     arc=float(np.linalg.norm(np.diff(remaining,axis=0),axis=1).sum())
@@ -1202,6 +1259,8 @@ def solve_tpr(c, state, target_p, target_r, feedforward, dt, *, base_z=0., base_
     mark('continuous_certificates')
     info = dict(position_error=float(np.linalg.norm(error[:3])), orientation_error=float(np.linalg.norm(error[3:])),
                 feedback_latency_s=feedback_latency,servo_frequency_rad_s=frequency,
+                execution_safety_delay_s=safety_delay,
+                takeover_clearance_reserve_m=float(np.max(takeover_reserve,initial=0.)),
                 free_camera_transfer=free_transfer_control is not None,
                 body_anticipation=body_info,
                 feedback_progress_s=feedback_progress,

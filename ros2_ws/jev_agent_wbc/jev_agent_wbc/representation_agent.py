@@ -29,7 +29,9 @@ def geometric_card(card):
             mount_in_initial_mount=displacement.to_dict(),
             mount_from_camera=snapshot['mount_from_camera'],
             part_bounds_mount={part:value['bounds'] for part,value in snapshot['parts'].items()},
-            preference_residual_norm=sample['preference_residual_norm']))
+            preference_residual_norm=sample['preference_residual_norm'],
+            execution_uncertainty_m=sample.get('execution_uncertainty_m'),
+            safety_supported=sample.get('safety_supported')))
     return dict(request=request,predicted_geometry=samples,evidence_kind='predicted',
                 backend_status='screened' if card['physical_valid'] else 'unverified',
                 scope=geometry['scope'])
@@ -87,7 +89,7 @@ def public_evidence(state):
     out.pop('robot_capability',None)
     difficulty = out.get('difficulty',{})
     out['difficulty'] = {k:v for k,v in difficulty.items() if k in (
-        'first_risk_s','min_clearance_m','intent','accepted_intent_degradation_unchanged')}
+        'first_risk_s','min_clearance_m','intent','accepted_intent_degradation_unchanged','execution_prediction')}
     out['difficulty']['issues'] = [
         'backend_motion_unverified' if ('kinematic' in str(x) or 'joint' in str(x)) else x
         for x in difficulty.get('issues',[])]
@@ -95,7 +97,8 @@ def public_evidence(state):
         'time_s','original_position_error_m','original_orientation_error_rad','target_tracking_residual_m',
         'view_angle_proxy_rad','area_scale_proxy_ratio','visual_proxy_source','clearance_m',
         'actual_parameters','remaining_budget_s')} for row in out.get('execution_history',[])]
-    out['validation_feedback'] = [dict(time_s=row.get('time_s'),status=failure_category(row.get('error','')))
+    out['validation_feedback'] = [dict(time_s=row.get('time_s'),status=failure_category(row.get('error','')),
+                                      failure=row.get('failure'))
                                   for row in out.get('validation_feedback',[])]
     if 'search_options' in out:
         options = out['search_options']

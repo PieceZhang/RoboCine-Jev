@@ -36,13 +36,15 @@ def prepare(engine, state, scene, base_z):
         return checkpoint[name]
     observation=engine.geometry_backend.observe(state,0.,base_z=base_z)
     diagnostic=task_space_planning.diagnose(original,scene,state,np.zeros(8),0.,base_z,engine.planning_limits,
-        budget=engine.budget,measured_control=np.zeros(8))
+        budget=engine.budget,measured_control=np.zeros(8),execution_model=getattr(engine,"execution_model",None))
     context=dict(objective='visible_intent_completion',time_s=0.,duration_s=original.duration,
         phase=original.phase(0.),shot_phase=original.task['shot_phase'],intent=original.task['intent'],subject=original.task['subject'],
         reference_subject_position=original.subject.tolist(),difficulty=diagnostic['report'],
         robot_geometry=observation.summary(engine.geometry_backend.obstacle_relations(observation,scene)),
         construction=dict(construction_evidence(original,original,scene,0.,0.,
             mount_height_m=observation.to_dict()['world_from_mount']['translation_m'][2]),measured_initial_boundary=True))
+    if getattr(engine,'execution_capability',None) is not None:
+        context['robot_geometry']['execution_capability']=engine.execution_capability
     evidence=dict(context,stage='strategy')
     if getattr(engine,'preparation_feedback',None):
         context['previous_preparation_failures']=engine.preparation_feedback
@@ -58,7 +60,7 @@ def prepare(engine, state, scene, base_z):
         budget=engine.budget,measured_control=np.zeros(8),commanded_q=state[3:],
         intrinsics=engine.intrinsics,search_config=second['search_config'],construction_plan=second['construction_plan'],
         initial_boundary=True,representation_boxes=engine.geometry_backend.box_budget,
-        geometry_preferences=engine.geometry_preferences))
+        geometry_preferences=engine.geometry_preferences,execution_model=getattr(engine,"execution_model",None)))
     candidates=result.get('candidates',[])
     engine._write('candidate_set',0.,cards=[c.card() for c in candidates],evaluations=result.get('evaluations',[]),
         planner_wall_s=result['wall_s'],seed_wall_s=result.get('seed_wall_s'),generated_proposals=result.get('generated_proposals'),
@@ -83,12 +85,15 @@ def prepare(engine, state, scene, base_z):
     engine._write('candidate_approved',0.,approval=asdict(approval),decision=selected,startup=True)
     verified=task_space_planning.verify(candidate,approval,original,scene,state,np.zeros(8),0.,base_z,
         engine.planning_limits,budget=engine.budget,commanded_q=state[3:],measured_control=np.zeros(8),
-        intrinsics=engine.intrinsics)
+        intrinsics=engine.intrinsics,execution_model=getattr(engine,"execution_model",None))
     error=verified.get('error') or installation_guard(verified,original,scene,state,0.,engine.budget,
         measured_control=np.zeros(8),previous=np.zeros(8),commanded_q=state[3:],base_z=base_z)
     if error:
         checkpoint.clear()
         raise RuntimeError('initial_installation_rejected:'+error)
+    if candidate.kinematics and candidate.kinematics.get('execution_prediction') is not None:
+        from .evaluation import save_json
+        save_json(engine.output/'startup_execution_prediction.json',candidate.kinematics['execution_prediction'])
     engine.active=candidate.path;engine.active_candidate=candidate
     engine.wbc.set_trajectory(engine.active)
     engine.wbc.kinematic_reference=verified['kinematics']

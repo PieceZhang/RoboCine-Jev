@@ -62,6 +62,10 @@ def arguments():
     parser.add_argument('--fault-script',type=Path,
                         help='explicit diagnostic controller delays/errors and LiDAR gaps; physics continues')
     parser.add_argument('--session-command-mode',choices=['velocity','acceleration','adaptive'],default='adaptive')
+    parser.add_argument('--execution-aware',action=argparse.BooleanOptionalAction,default=True,
+                        help='predict delayed WBC/drive execution and update empirical capability online')
+    parser.add_argument('--execution-calibration',type=Path,default=ROOT/'config/jvs_mock_execution_model.json',
+                        help='jvs_mock execution-model JSON with calibration provenance')
     parser.add_argument('--delay-aware-servo',action=argparse.BooleanOptionalAction,default=False,
                         help='diagnostic measured-delay gain adaptation; physical safety gates unchanged')
     parser.add_argument('--scenarios', type=Path, default=ROOT/'scenarios')
@@ -144,8 +148,13 @@ def arguments():
         parser.error('episode and startup planning limits must be finite and positive')
     if args.virtual_stabilizer_ros:
         parser.error('blocking ROS stabilizer batches are incompatible with this realtime runner')
+    if args.session_controller and args.startup_preplan and not args.single_candidate:
+        args.single_candidate=True
+        args.candidate_proposals=args.candidate_budget=1
     if args.motor_targets != 'physical_slew':
         parser.error('realtime watchdog requires the acceleration-limited physical_slew drive')
+    if args.execution_aware and (args.physics_hz!=100. or args.base_support!='upright'):
+        parser.error('execution prediction is calibrated for 100 Hz upright jvs_mock; other backends require --no-execution-aware')
     if (not math.isfinite(args.physics_hz) or args.physics_hz < 50
             or abs(args.physics_hz/50-round(args.physics_hz/50)) > 1e-8):
         parser.error('physics-hz must be a multiple of 50 and at least 50')
@@ -392,6 +401,7 @@ def run_case(args, app, name, mode, output):
         gravity_max = np.zeros(8)
         previous_drive_velocity = np.zeros(8)
         previous_motor_control = np.zeros(8)
+        physical_transition = None
         effort_caps=np.asarray(robot.dof_properties['maxEffort'][indices],float)
 
         physics_robot = robot._articulation_view._physics_view
@@ -621,7 +631,8 @@ def run_case(args, app, name, mode, output):
             session_options=dict(worker_target=session_process,stream_on_fault=True,
                 startup_wait_s=args.startup_planning_timeout,worker_options=dict(
                     session_case=str(args.scenarios/name),session_combo=session_combo,session_command_mode=args.session_command_mode,
-                    startup_preplan=args.startup_preplan,
+                    startup_preplan=args.startup_preplan,execution_aware=args.execution_aware,
+                    execution_calibration=None if args.execution_calibration is None else str(args.execution_calibration.resolve()),
                     fault_events=fault_schedule.events,
                     delay_aware_servo=args.delay_aware_servo,profile_controller=args.profile_controller,
                     initial_snapshot=dict(state=state.copy(),base_z=float(bp[2]),base_rotation=br.copy(),
@@ -803,6 +814,7 @@ def run_case(args, app, name, mode, output):
             try:
                 command, info = engine.step(state, observed, t, dt, base_z=bp[2], base_rotation=br, commanded_q=q_command, measured_control=measured,
                                            observation_wall=observation_wall,
+                                           applied_command=previous_command,physical_transition=physical_transition,
                                            measured_base_twist=np.r_[robot.get_linear_velocity(),robot.get_angular_velocity()])
             except Exception:
                 from dataclasses import asdict
@@ -942,6 +954,7 @@ def run_case(args, app, name, mode, output):
             measured_scene = camera_scene(dict(observed, subject_model=subject_data,
                                                intrinsics=engine.intrinsics), t, reference.duration)
             rows.append(dict(t=t, state=state.tolist(), command=command.tolist(), measured=measured.tolist(),
+                actuation_transition=physical_transition,
                 base_z=float(bp[2]), base_rotation=br.tolist(),
                 commanded_q=q_command.tolist(),
                 measured_wheels=wheels.tolist(), measured_lateral_velocity=float(lateral),
@@ -1010,6 +1023,9 @@ def run_case(args, app, name, mode, output):
                 sim.step(render=False)
                 audit_movers(physical_t)
                 measured_state = observe()
+                physical_transition=dict(stamp_s=physical_t,dt_s=1/args.physics_hz,
+                    previous_velocity=motor_feedback.copy(),drive_target=motors.control.copy(),
+                    measured_velocity=measured_state[3].copy())
                 motor_feedback=measured_state[3].copy()
                 motor_wheel_feedback=measured_state[4].copy()
                 physics_camera_batch.append(camera_sample(physical_t, measured_state[6], measured_state[7]))
@@ -1087,6 +1103,7 @@ def run_case(args, app, name, mode, output):
         contact_count = sum(c['points'] > 0 for c in contacts)
         summary.update(backend='isaac_physx', physics_hz=args.physics_hz, wall_s=time.monotonic()-begin,
             compiled_geometry=bool(args.compiled_geometry),certificate_recovery=bool(args.certificate_recovery),
+            execution_aware=bool(args.execution_aware),
             pace=args.pace, physics_waits_for_agent=False,
             fabric_enabled=args.fabric,
             lidar_backend=args.lidar_backend,lidar_processing=args.lidar_processing,

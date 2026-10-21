@@ -112,6 +112,13 @@ def refine(path,search,seconds=5.,max_iterations=12,knots=33,step_tolerance=1e-4
     for a in range(3):
         selected=offsets[np.sum(abs(offsets)>1e-8,axis=1)==1]
         vals=abs(selected[:,a]);axis_radius.append(max(1e-5,min(vals[vals>1e-8])))
+    if getattr(search,'execution_model',None) is not None:
+        # Reserve predicted execution error INSIDE the unchanged terminal band.
+        # Spending the full geometric tolerance leaves no tracking reserve.
+        model=search.execution_model
+        reserve=(float(model['position_floor_m']) +
+            abs(search.j[:3])@np.asarray(model['residual_velocity'])*float(model['trusted_horizon_s']))
+        axis_radius=np.maximum(1e-5,np.asarray(axis_radius)-reserve)
     endpoint_rows=np.array(list(itertools.product((-1.,1.),repeat=3)))/np.array(axis_radius)
     reference_end=original.sample(original.duration)[0]
     for iteration in range(max_iterations):

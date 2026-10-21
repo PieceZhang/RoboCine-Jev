@@ -112,6 +112,35 @@ def hung_controller(inbox, outbox, stop, original, scene, output, options, physi
         time.sleep(.1)
 
 
+def test_receiver_delay_is_preserved_when_worker_skips_the_first_snapshot():
+    import pickle
+    import time
+    from queue import Queue
+    from types import SimpleNamespace as NS
+    from jev_agent_wbc.realtime_engine import RealtimeEngine
+    from jev_agent_wbc.whole_body_qp import Limits
+    engine=object.__new__(RealtimeEngine)
+    engine.watchdog=CommandWatchdog(RuntimePolicy(recover_decisions=True),time.monotonic())
+    engine.inbox=Queue();engine.outbox=Queue();engine.process=NS(is_alive=lambda:True)
+    engine.wbc=NS(limits=Limits());engine.jev=NS(decider=NS(client=NS(calls=0)))
+    engine.original=engine.active=NS(sample=lambda t:(np.zeros(3),np.eye(3),np.zeros(6)))
+    engine.camera=dict(source='execution',position=np.zeros(3),rotation=np.eye(3))
+    engine.perception={};engine.sequence=0;engine.stream_on_fault=False
+    engine.last_result=engine.session_result=None;engine.fault_logged=False
+    engine.outbox.put(pickle.dumps(dict(t=0.,observation_wall=time.monotonic(),sequence=1,
+        command=np.zeros(8),info=dict(loop_wall_s=.001),feedback={},active=None,
+        summary=dict(installed_plans=0,jev_calls=0))))
+    state=np.array([0.,0.,0.,0.,-.9,2.1,0.,-1.2,0.])
+    engine.step(state,dict(observation_stamp=.02),.02,.02,measured_control=np.zeros(8))
+    engine.inbox.get()  # This observation is overwritten before the worker sees it.
+    _,info=engine.step(state,dict(observation_stamp=.06),.06,.02,measured_control=np.zeros(8))
+    transport=pickle.loads(engine.inbox.get())['execution_transport']
+    assert transport['command_age_s']==pytest.approx(.06)
+    assert transport['command_delay_s']==pytest.approx(.02)
+    assert info['command_received_time_s']==pytest.approx(.02)
+    assert info['command_delivery_delay_s']==pytest.approx(.02)
+
+
 def test_hung_real_process_does_not_block_physics_or_shutdown(tmp_path, monkeypatch):
     import json
     import time

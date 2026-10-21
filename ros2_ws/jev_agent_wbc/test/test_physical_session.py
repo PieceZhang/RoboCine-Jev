@@ -68,6 +68,43 @@ def test_measured_exchange_preserves_source_stamp_and_uses_real_physical_time():
     np.testing.assert_array_equal(state,actual['state'])
 
 
+def test_preparation_capability_binds_planned_phase_start_without_a_measurement_lease():
+    from types import SimpleNamespace
+    from jev_agent_wbc.execution_prediction import ExecutionModel,ExecutionObserver
+    state=np.array([0.,0.,0.,0.,-.9,2.1,0.,-1.2,0.])
+    initial=dict(t=0.,state=state,base_z=0.,measured_control=np.ones(8)*.01)
+    runtime=MeasuredExecution(Queue(),Queue(),Event(),initial,Limits(),RuntimePolicy())
+    runtime.execution_observer=ExecutionObserver(ExecutionModel())
+    engine=SimpleNamespace(wbc=SimpleNamespace())
+    goal=state.copy();goal[4]+=.3
+    def prepare(engine,scene,state,base_z):return engine.execution_capability
+    result=runtime.prepare(prepare,engine,{},goal,0.)
+    expected=runtime.execution_observer.model.public(goal,np.zeros(8),Limits())
+    np.testing.assert_allclose(result['directional_velocity_support'],expected['directional_velocity_support'])
+    assert result['state_stamp_s'] is None and result['valid_until_s'] is None
+    assert 'planned_stopped' in result['state_scope']
+    np.testing.assert_array_equal(result['camera_twist'],np.zeros(6))
+
+
+def test_model_feedback_continues_when_the_next_phase_resets_its_clock():
+    from types import SimpleNamespace
+    from jev_agent_wbc.execution_prediction import failure_evidence
+    initial=dict(t=10.,state=np.zeros(9),base_z=0.,measured_control=np.zeros(8))
+    runtime=MeasuredExecution(Queue(),Queue(),Event(),initial,Limits(),RuntimePolicy())
+    runtime.last_model_feedback_s=7.
+    engine=SimpleNamespace(pending_feedback=[],execution_capability={},_write=lambda *a,**k:None)
+    evidence=failure_evidence('model_residual_envelope_exceeded',10.,measured=True)
+    runtime.report_execution_feedback(engine,evidence,.1)
+    assert engine.pending_feedback[-1]['failure']['first_anomaly_s']==.1
+    assert engine.pending_feedback[-1]['failure']['physical_time_s']==10.
+    runtime.snapshot['t']=10.2
+    runtime.report_execution_feedback(engine,evidence,.3)
+    assert len(engine.pending_feedback)==1
+    runtime.snapshot['t']=10.6
+    runtime.report_execution_feedback(engine,evidence,.7)
+    assert len(engine.pending_feedback)==2
+
+
 def test_exact_sensor_deadline_does_not_trip_from_float_subtraction():
     w=CommandWatchdog(RuntimePolicy(),10.)
     assert w.accept(packet(1.5,10.),1.5,10.)
